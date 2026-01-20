@@ -2727,6 +2727,48 @@ button {
   border: 1px solid rgba(239, 68, 68, 0.3);
 }
 
+.sync-all-card {
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.1), rgba(59, 130, 246, 0.1));
+  border: 2px solid var(--accent);
+}
+
+.sync-all-card h4 {
+  color: #a78bfa;
+}
+
+.btn-sync-all {
+  background: linear-gradient(135deg, var(--accent), #3b82f6);
+  font-weight: 600;
+}
+
+.btn-sync-all:hover:not(:disabled) {
+  background: linear-gradient(135deg, var(--accent-hover), #2563eb);
+  transform: translateY(-1px);
+}
+
+.cron-info {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  margin-bottom: var(--spacing-md);
+}
+
+.cron-info a {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.cron-info a:hover {
+  color: var(--accent-hover);
+}
+
+.sync-schedule code {
+  background: var(--bg-input);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  font-family: 'JetBrains Mono', monospace;
+}
+
 .sync-schedule {
   background: var(--bg-card);
   border: 1px solid var(--border-color);

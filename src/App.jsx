@@ -1160,6 +1160,46 @@ const AdminPanel = ({ user, tournament, onUpdateTournament, onLogout, onBackToTo
     }
   };
   
+  // Sync All - Players + Live Scores in one click
+  const handleSyncAll = async () => {
+    setIsSyncing(prev => ({ ...prev, all: true }));
+    setSyncStatus(prev => ({ ...prev, all: 'syncing players...' }));
+    
+    try {
+      // Step 1: Sync Players
+      const playersResponse = await fetch(`${getApiBaseUrl()}/api/sync/players?tournament=${tournament.id}`);
+      const playersData = await playersResponse.json();
+      
+      if (!playersData.success) {
+        throw new Error(`Players: ${playersData.error}`);
+      }
+      
+      setSyncStatus(prev => ({ ...prev, all: 'syncing live scores...' }));
+      
+      // Step 2: Sync Live Scores
+      const scoresResponse = await fetch(`${getApiBaseUrl()}/api/sync/live-scores`);
+      const scoresData = await scoresResponse.json();
+      
+      if (!scoresData.success) {
+        throw new Error(`Scores: ${scoresData.error}`);
+      }
+      
+      const playerCount = playersData.results[0]?.saved || 0;
+      const matchCount = scoresData.results?.length || 0;
+      
+      setSyncStatus(prev => ({ 
+        ...prev, 
+        all: `✅ Complete! ${playerCount} players + ${matchCount} matches synced`,
+        players: `✅ ${playerCount} players`,
+        scores: `✅ ${matchCount} matches`
+      }));
+    } catch (error) {
+      setSyncStatus(prev => ({ ...prev, all: `❌ Error: ${error.message}` }));
+    } finally {
+      setIsSyncing(prev => ({ ...prev, all: false }));
+    }
+  };
+  
   const handleAddPlayer = () => {
     if (!newPlayerForm.name || !newPlayerForm.team) return;
     const newPlayer = {
@@ -1392,28 +1432,48 @@ const AdminPanel = ({ user, tournament, onUpdateTournament, onLogout, onBackToTo
                   </div>
                 )}
               </div>
+              
+              <div className="sync-card sync-all-card">
+                <h4>⚡ Sync Everything</h4>
+                <p>Run both player roster and live scores sync in one click</p>
+                <button 
+                  className="btn-primary btn-large btn-sync-all"
+                  onClick={handleSyncAll}
+                  disabled={isSyncing.all || isSyncing.players || isSyncing.scores}
+                >
+                  {isSyncing.all ? '⏳ ' + (syncStatus.all || 'Syncing...') : '🚀 Sync All Now'}
+                </button>
+                {syncStatus.all && !isSyncing.all && (
+                  <div className={`sync-result ${syncStatus.all.startsWith('✅') ? 'success' : 'error'}`}>
+                    {syncStatus.all}
+                  </div>
+                )}
+              </div>
             </div>
             
             <div className="sync-schedule">
-              <h4>⏰ Automatic Sync Schedule</h4>
+              <h4>⏰ Automatic Sync Setup</h4>
+              <p className="cron-info">
+                For automatic syncing, use <a href="https://cron-job.org" target="_blank" rel="noopener noreferrer">cron-job.org</a> (free) to schedule API calls.
+              </p>
               <table className="schedule-table">
                 <thead>
                   <tr>
                     <th>Sync Type</th>
-                    <th>Schedule</th>
-                    <th>Time (MST)</th>
+                    <th>Recommended Schedule</th>
+                    <th>API Endpoint</th>
                   </tr>
                 </thead>
                 <tbody>
                   <tr>
                     <td>Player Roster</td>
-                    <td>Daily</td>
-                    <td>7:00 PM</td>
+                    <td>Daily at 7 PM MST</td>
+                    <td><code>/api/sync/players</code></td>
                   </tr>
                   <tr>
                     <td>Live Scores</td>
-                    <td>Every 15 min</td>
-                    <td>4:00 AM - 12:00 PM</td>
+                    <td>Every 15 min during matches</td>
+                    <td><code>/api/sync/live-scores</code></td>
                   </tr>
                 </tbody>
               </table>
