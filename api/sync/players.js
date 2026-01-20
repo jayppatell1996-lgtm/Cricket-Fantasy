@@ -43,7 +43,8 @@ const TOURNAMENTS = {
     startDate: '2026-01-15',
     endDate: '2026-01-25',
     teamCodes: ['IND', 'NZ'],
-    searchTerms: ['india', 'new zealand', 't20', 'ind vs nz', 'nz vs ind'],
+    // More comprehensive search terms for CricketData.org
+    searchTerms: ['india vs new zealand', 'new zealand vs india', 'ind vs nz', 'nz vs ind', 'india tour of new zealand', 'new zealand tour of india', 'india t20', 'nz t20'],
     isTest: true,
   },
   t20_wc_2026: {
@@ -54,7 +55,7 @@ const TOURNAMENTS = {
     startDate: '2026-02-09',
     endDate: '2026-03-07',
     teamCodes: ['IND', 'AUS', 'ENG', 'PAK', 'SA', 'NZ', 'WI', 'SL', 'BAN', 'AFG', 'IRE', 'ZIM', 'NED', 'SCO', 'NAM', 'USA', 'NEP', 'UGA', 'PNG', 'OMA'],
-    searchTerms: ['t20 world cup', 'icc t20', 'world cup t20', 't20 wc'],
+    searchTerms: ['t20 world cup', 'icc t20 world cup', 'world cup t20', 't20 wc', 'icc world twenty20', 'world twenty20'],
     isTest: false,
   },
   ipl_2026: {
@@ -65,7 +66,7 @@ const TOURNAMENTS = {
     startDate: '2026-03-22',
     endDate: '2026-05-26',
     teamCodes: ['CSK', 'MI', 'RCB', 'KKR', 'DC', 'PBKS', 'RR', 'SRH', 'GT', 'LSG'],
-    searchTerms: ['indian premier league', 'ipl 2026', 'ipl 2025', 'ipl'],
+    searchTerms: ['indian premier league', 'ipl 2026', 'ipl 2025', 'ipl 2024', 'ipl'],
     isTest: false,
   },
 };
@@ -145,19 +146,25 @@ async function fetchPlayers(config) {
   
   console.log(`\n${'='.repeat(50)}`);
   console.log(`🏆 ${config.name}`);
+  console.log(`   Search terms: ${config.searchTerms.join(', ')}`);
   console.log(`${'='.repeat(50)}`);
   
   // Step 1: GET /series - find matching tournament
   console.log(`\n📡 Step 1: GET /series`);
   const allSeries = await apiRequest('series');
   
+  // Log first 10 series to help debug
+  console.log(`\n   📋 Available series (first 10):`);
+  allSeries.slice(0, 10).forEach(s => console.log(`      - ${s.name}`));
+  
   const matchingSeries = allSeries.filter(s => {
     const name = (s.name || '').toLowerCase();
+    // Check if ANY search term matches
     return config.searchTerms.some(term => name.includes(term.toLowerCase()));
   });
   
-  console.log(`   Found ${matchingSeries.length} matching series`);
-  matchingSeries.slice(0, 3).forEach(s => console.log(`   - ${s.name} (${s.id})`));
+  console.log(`\n   ✅ Found ${matchingSeries.length} matching series`);
+  matchingSeries.slice(0, 5).forEach(s => console.log(`      - ${s.name} (${s.id})`));
   
   // Step 2: GET /series_info - get match list
   for (const series of matchingSeries.slice(0, 3)) {

@@ -498,14 +498,20 @@ const TournamentSelectPage = ({ onSelectTournament, user, onLogout }) => {
   // Check which tournaments user already has teams for
   const getUserTeamStatus = (tournamentId) => {
     // Check all possible storage locations
-    const userSpecificTeam = localStorage.getItem(`t20fantasy_team_${tournamentId}_${user?.id}`);
-    if (userSpecificTeam) return true;
+    const userSpecificKey = `t20fantasy_team_${tournamentId}_${user?.id}`;
+    const userSpecificTeam = localStorage.getItem(userSpecificKey);
+    if (userSpecificTeam) {
+      console.log(`✅ Team found in user-specific key: ${userSpecificKey}`);
+      return true;
+    }
     
     const oldFormatTeam = localStorage.getItem(`t20fantasy_team_${tournamentId}`);
     if (oldFormatTeam) {
       const parsed = JSON.parse(oldFormatTeam);
       if (!parsed.userId || parsed.userId === user?.id || 
-          parsed.owner?.toLowerCase() === user?.name?.toLowerCase()) {
+          parsed.owner?.toLowerCase() === user?.name?.toLowerCase() ||
+          parsed.userEmail?.toLowerCase() === user?.email?.toLowerCase()) {
+        console.log(`✅ Team found in old format key for tournament: ${tournamentId}`);
         return true;
       }
     }
@@ -519,9 +525,13 @@ const TournamentSelectPage = ({ onSelectTournament, user, onLogout }) => {
          t.userEmail?.toLowerCase() === user?.email?.toLowerCase() ||
          t.owner?.toLowerCase() === user?.name?.toLowerCase())
       );
-      if (hasTeam) return true;
+      if (hasTeam) {
+        console.log(`✅ Team found in allTeams for tournament: ${tournamentId}`);
+        return true;
+      }
     }
     
+    console.log(`❌ No team found for tournament: ${tournamentId}, user: ${user?.email} (id: ${user?.id})`);
     return false;
   };
 
@@ -1166,7 +1176,41 @@ const AdminPanel = ({ user, tournament, onUpdateTournament, onLogout, onBackToTo
   const [newPlayerForm, setNewPlayerForm] = useState({
     name: '', team: '', position: 'batter', price: 8.0, avgPoints: 30
   });
-  const [players, setPlayers] = useState(tournament.isTest ? TEST_PLAYERS_IND_NZ : FULL_PLAYER_POOL);
+  const [players, setPlayers] = useState([]);
+  const [playersLoading, setPlayersLoading] = useState(false);
+  
+  // Fetch players from API when tournament changes or on mount
+  useEffect(() => {
+    const fetchPlayersForAdmin = async () => {
+      setPlayersLoading(true);
+      try {
+        const response = await fetch(`/api/players?tournament=${tournament.id}`);
+        if (response.ok) {
+          const data = await response.json();
+          setPlayers(data.players || []);
+        }
+      } catch (error) {
+        console.error('Failed to fetch players:', error);
+      } finally {
+        setPlayersLoading(false);
+      }
+    };
+    
+    fetchPlayersForAdmin();
+  }, [tournament.id]);
+  
+  // Refetch players after sync
+  const refetchPlayers = async () => {
+    try {
+      const response = await fetch(`/api/players?tournament=${tournament.id}`);
+      if (response.ok) {
+        const data = await response.json();
+        setPlayers(data.players || []);
+      }
+    } catch (error) {
+      console.error('Failed to refetch players:', error);
+    }
+  };
   
   // Load draft status from localStorage
   const savedDraftStatus = typeof window !== 'undefined' 
@@ -1208,10 +1252,13 @@ const AdminPanel = ({ user, tournament, onUpdateTournament, onLogout, onBackToTo
       const data = await response.json();
       
       if (data.success) {
+        const savedCount = data.results[0]?.saved || 0;
         setSyncStatus(prev => ({ 
           ...prev, 
-          players: `✅ Synced! ${data.results[0]?.saved || 0} players saved` 
+          players: `✅ Synced! ${savedCount} players saved` 
         }));
+        // Refetch players to update the list
+        await refetchPlayers();
       } else {
         setSyncStatus(prev => ({ ...prev, players: `❌ Error: ${data.error}` }));
       }
@@ -1614,29 +1661,44 @@ const AdminPanel = ({ user, tournament, onUpdateTournament, onLogout, onBackToTo
             </div>
             
             <div className="player-list-admin">
-              <h3>📋 Player Pool ({players.length} players)</h3>
-              <div className="player-table">
-                <div className="table-header">
-                  <span>Name</span>
-                  <span>Team</span>
-                  <span>Position</span>
-                  <span>Price</span>
-                  <span>Avg Pts</span>
-                  <span>Actions</span>
-                </div>
-                {players.map(player => (
-                  <div key={player.id} className="table-row">
-                    <span>{player.name}</span>
-                    <span>{player.team}</span>
-                    <span className={`position-badge ${player.position}`}>{player.position.toUpperCase()}</span>
-                    <span>${player.price}M</span>
-                    <span>{player.avgPoints}</span>
-                    <button className="btn-small btn-danger" onClick={() => handleRemovePlayer(player.id)}>
-                      🗑️
-                    </button>
-                  </div>
-                ))}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h3>📋 Player Pool ({players.length} players)</h3>
+                <button className="btn-small btn-secondary" onClick={refetchPlayers} disabled={playersLoading}>
+                  {playersLoading ? '⏳ Loading...' : '🔄 Refresh'}
+                </button>
               </div>
+              {playersLoading ? (
+                <div className="loading-message" style={{ padding: '20px', textAlign: 'center' }}>
+                  ⏳ Loading players from database...
+                </div>
+              ) : players.length === 0 ? (
+                <div className="empty-message" style={{ padding: '20px', textAlign: 'center', color: '#888' }}>
+                  No players found. Go to Sync tab and click "Sync Players Now" to fetch from API.
+                </div>
+              ) : (
+                <div className="player-table">
+                  <div className="table-header">
+                    <span>Name</span>
+                    <span>Team</span>
+                    <span>Position</span>
+                    <span>Price</span>
+                    <span>Avg Pts</span>
+                    <span>Actions</span>
+                  </div>
+                  {players.map(player => (
+                    <div key={player.id} className="table-row">
+                      <span>{player.name}</span>
+                      <span>{player.team}</span>
+                      <span className={`position-badge ${player.position}`}>{player.position.toUpperCase()}</span>
+                      <span>${player.price}M</span>
+                      <span>{player.avgPoints}</span>
+                      <button className="btn-small btn-danger" onClick={() => handleRemovePlayer(player.id)}>
+                        🗑️
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -3958,12 +4020,24 @@ export default function App() {
       ...teamData,
       userId: user?.id,
       userEmail: user?.email,
+      tournamentId: tournamentKey, // Ensure this is set correctly
     };
+    
+    console.log('🏏 Creating team:', {
+      teamName: teamWithUser.name,
+      owner: teamWithUser.owner,
+      userId: teamWithUser.userId,
+      userEmail: teamWithUser.userEmail,
+      tournamentId: teamWithUser.tournamentId,
+      tournamentKey,
+    });
     
     setTeam(teamWithUser);
     
     // Save to user-specific key
-    localStorage.setItem(`t20fantasy_team_${tournamentKey}_${user?.id}`, JSON.stringify(teamWithUser));
+    const userSpecificKey = `t20fantasy_team_${tournamentKey}_${user?.id}`;
+    localStorage.setItem(userSpecificKey, JSON.stringify(teamWithUser));
+    console.log(`💾 Saved to: ${userSpecificKey}`);
     
     // Add to allTeams and persist
     setAllTeams(prev => {
@@ -3973,6 +4047,7 @@ export default function App() {
       );
       const updated = [...filtered, teamWithUser];
       localStorage.setItem('t20fantasy_all_teams', JSON.stringify(updated));
+      console.log(`💾 Updated allTeams, now has ${updated.length} teams`);
       return updated;
     });
     
