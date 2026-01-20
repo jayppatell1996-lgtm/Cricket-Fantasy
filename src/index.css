@@ -868,6 +868,7 @@ button {
 
 .pickup-counter strong { color: var(--accent); font-family: 'JetBrains Mono', monospace; }
 .reset-note { color: var(--text-muted); font-size: 0.75rem; margin-left: var(--spacing-sm); }
+.pickup-reset-info { color: var(--text-muted); font-size: 0.75rem; margin-left: var(--spacing-sm); }
 
 .roster-section { margin-bottom: var(--spacing-lg); }
 
@@ -946,7 +947,7 @@ button {
 
 .standings-header {
   display: grid;
-  grid-template-columns: 50px 1fr 80px;
+  grid-template-columns: 50px 1fr 120px 80px;
   padding: var(--spacing-md);
   background: var(--bg-input);
   font-size: 0.75rem;
@@ -957,7 +958,7 @@ button {
 
 .standings-row {
   display: grid;
-  grid-template-columns: 50px 1fr 80px;
+  grid-template-columns: 50px 1fr 120px 80px;
   padding: var(--spacing-md);
   border-top: 1px solid var(--border-light);
   align-items: center;
@@ -966,7 +967,15 @@ button {
 .standings-row.user-team { background: rgba(212, 175, 55, 0.1); }
 .standings-row .rank { font-weight: 700; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; }
 .standings-row .team-name { font-weight: 600; }
+.standings-row .owner { font-size: 0.875rem; color: var(--text-secondary); }
 .standings-row .points { text-align: right; font-weight: 700; color: var(--accent); font-family: 'JetBrains Mono', monospace; }
+
+.no-teams-message {
+  text-align: center;
+  padding: var(--spacing-xl);
+  color: var(--text-muted);
+  font-style: italic;
+}
 
 /* Scoring View */
 .scoring-view { max-width: 600px; margin: 0 auto; }

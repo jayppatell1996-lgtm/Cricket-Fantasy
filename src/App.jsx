@@ -293,6 +293,37 @@ const PLAYING_SIZE = 12;
 const BENCH_SIZE = 4;
 const IL_SIZE = 2;
 
+// Get start of current week (Monday at midnight)
+const getStartOfWeek = (date = new Date()) => {
+  const d = new Date(date);
+  const day = d.getDay();
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Adjust for Sunday
+  d.setDate(diff);
+  d.setHours(0, 0, 0, 0);
+  return d;
+};
+
+// Check if weekly pickups should be reset
+const checkWeeklyReset = (team) => {
+  if (!team) return team;
+  
+  const currentWeekStart = getStartOfWeek();
+  const teamResetDate = team.weeklyPickupsResetDate 
+    ? new Date(team.weeklyPickupsResetDate) 
+    : new Date(0); // Very old date if not set
+  
+  // If we're in a new week, reset the counter
+  if (currentWeekStart > teamResetDate) {
+    return {
+      ...team,
+      weeklyPickups: 0,
+      weeklyPickupsResetDate: currentWeekStart.toISOString(),
+    };
+  }
+  
+  return team;
+};
+
 // Test Players for India vs NZ
 const TEST_PLAYERS_IND_NZ = [
   // INDIA T20I SQUAD (15 players)
@@ -742,11 +773,14 @@ const TeamCreationPage = ({ user, tournament, onTeamCreated }) => {
       id: Date.now(),
       name: teamName,
       owner: ownerName,
+      userId: user.id, // Link team to user
+      userEmail: user.email, // Also store email for lookup
       logo: logoPreview || null,
       roster: [],
       ir: [],
       weeklyPickups: 0,
       weeklyPickupLimit: FREE_AGENCY_LIMIT,
+      weeklyPickupsResetDate: getStartOfWeek().toISOString(), // Track when week started
       totalPoints: 0,
       tournamentId: tournament.id,
     });
@@ -1099,7 +1133,23 @@ const AdminPanel = ({ user, tournament, onUpdateTournament, onLogout, onBackToTo
     name: '', team: '', position: 'batter', price: 8.0, avgPoints: 30
   });
   const [players, setPlayers] = useState(tournament.isTest ? TEST_PLAYERS_IND_NZ : FULL_PLAYER_POOL);
-  const [draftStatus, setDraftStatus] = useState(tournament.draftStatus || 'pending');
+  
+  // Load draft status from localStorage
+  const savedDraftStatus = typeof window !== 'undefined' 
+    ? localStorage.getItem(`t20fantasy_draft_status_${tournament.id}`) 
+    : null;
+  const [draftStatus, setDraftStatusState] = useState(savedDraftStatus || tournament.draftStatus || 'pending');
+  
+  // Wrapper to save draft status to localStorage
+  const setDraftStatus = (status) => {
+    setDraftStatusState(status);
+    localStorage.setItem(`t20fantasy_draft_status_${tournament.id}`, status);
+    // Also update isDraftOpen in parent
+    if (status === 'open' || status === 'in_progress') {
+      onStartDraft && onStartDraft();
+    }
+  };
+  
   const [syncStatus, setSyncStatus] = useState({ players: null, scores: null });
   const [isSyncing, setIsSyncing] = useState({ players: false, scores: false });
   const [editingTeam, setEditingTeam] = useState(null);
@@ -1958,6 +2008,22 @@ const Dashboard = ({ user, team, tournament, onLogout, onUpdateTeam, onBackToTou
   
   const playerPool = tournament.isTest ? TEST_PLAYERS_IND_NZ : FULL_PLAYER_POOL;
   
+  // Check and reset weekly pickups if new week
+  useEffect(() => {
+    const updatedTeam = checkWeeklyReset(team);
+    if (updatedTeam !== team && updatedTeam.weeklyPickups !== team.weeklyPickups) {
+      onUpdateTeam(updatedTeam);
+    }
+  }, [team?.weeklyPickupsResetDate]);
+  
+  // Computed weekly pickups (accounts for weekly reset)
+  const currentWeekPickups = (() => {
+    const checkedTeam = checkWeeklyReset(team);
+    return checkedTeam?.weeklyPickups || 0;
+  })();
+  const weeklyPickupLimit = team?.weeklyPickupLimit || FREE_AGENCY_LIMIT;
+  const isPickupLimitReached = currentWeekPickups >= weeklyPickupLimit;
+  
   // Get API base URL for test mode API calls
   const getApiBaseUrl = () => {
     if (typeof window !== 'undefined' && window.location.origin) {
@@ -2398,8 +2464,18 @@ const Dashboard = ({ user, team, tournament, onLogout, onUpdateTeam, onBackToTou
       return;
     }
     
-    if (team.weeklyPickups >= team.weeklyPickupLimit) {
-      alert(`Weekly pickup limit reached (${FREE_AGENCY_LIMIT}/week)`);
+    // Check and reset weekly pickups if new week
+    const currentTeam = checkWeeklyReset(team);
+    if (currentTeam !== team) {
+      onUpdateTeam(currentTeam);
+    }
+    
+    // Check weekly pickup limit (use current team's value)
+    const pickupsUsed = currentTeam.weeklyPickups || 0;
+    const pickupLimit = currentTeam.weeklyPickupLimit || FREE_AGENCY_LIMIT;
+    
+    if (pickupsUsed >= pickupLimit) {
+      alert(`Weekly pickup limit reached (${FREE_AGENCY_LIMIT}/week). Resets every Monday.`);
       return;
     }
 
@@ -2662,7 +2738,10 @@ const Dashboard = ({ user, team, tournament, onLogout, onUpdateTeam, onBackToTou
             
             <div className="roster-header-row">
               <div className="pickup-counter">
-                Weekly Pickups: <strong>{team.weeklyPickups}/{team.weeklyPickupLimit}</strong>
+                Weekly Pickups: <strong>{currentWeekPickups}/{weeklyPickupLimit}</strong>
+                <span className="pickup-reset-info">
+                  (Resets Mon)
+                </span>
               </div>
               <div className="points-summary">
                 <span className="points-value">{Math.round(team.totalPoints)}</span>
@@ -3066,8 +3145,8 @@ const Dashboard = ({ user, team, tournament, onLogout, onUpdateTeam, onBackToTou
                         <button 
                           className="btn-primary btn-small"
                           onClick={() => handleAddPlayer(player)}
-                          disabled={team.weeklyPickups >= team.weeklyPickupLimit || isLocked}
-                          title={isLocked ? lockStatus.message || 'Locked' : ''}
+                          disabled={isPickupLimitReached || isLocked}
+                          title={isLocked ? lockStatus.message || 'Locked' : isPickupLimitReached ? 'Weekly pickup limit reached' : ''}
                         >+ Add</button>
                       ) : (
                         <span className="browse-only-badge">Browse Only</span>
@@ -3088,20 +3167,39 @@ const Dashboard = ({ user, team, tournament, onLogout, onUpdateTeam, onBackToTou
               <div className="standings-header">
                 <span className="rank">#</span>
                 <span className="team-name">Team</span>
+                <span className="owner">Owner</span>
                 <span className="points">Points</span>
               </div>
-              {[
-                { rank: 1, name: team.name, points: Math.round(team.totalPoints), isUser: true },
-                { rank: 2, name: 'Cricket Kings', points: 892 },
-                { rank: 3, name: 'Boundary Bashers', points: 845 },
-                { rank: 4, name: 'Wicket Warriors', points: 798 },
-              ].sort((a, b) => b.points - a.points).map((t, i) => (
-                <div key={i} className={`standings-row ${t.isUser ? 'user-team' : ''}`}>
-                  <span className="rank">{i + 1}</span>
-                  <span className="team-name">{t.name}</span>
-                  <span className="points">{t.points}</span>
-                </div>
-              ))}
+              {(() => {
+                // Get all teams for this tournament from localStorage
+                const savedAllTeams = localStorage.getItem('t20fantasy_all_teams');
+                const allTeamsData = savedAllTeams ? JSON.parse(savedAllTeams) : [];
+                const tournamentTeams = allTeamsData
+                  .filter(t => t.tournamentId === tournament.id)
+                  .map(t => ({
+                    ...t,
+                    isUser: t.id === team.id
+                  }))
+                  .sort((a, b) => (b.totalPoints || 0) - (a.totalPoints || 0));
+                
+                // If no other teams, show message
+                if (tournamentTeams.length === 0) {
+                  return (
+                    <div className="no-teams-message">
+                      No teams registered yet. Be the first!
+                    </div>
+                  );
+                }
+                
+                return tournamentTeams.map((t, i) => (
+                  <div key={t.id} className={`standings-row ${t.isUser ? 'user-team' : ''}`}>
+                    <span className="rank">{i + 1}</span>
+                    <span className="team-name">{t.name}</span>
+                    <span className="owner">{t.owner}</span>
+                    <span className="points">{Math.round(t.totalPoints || 0)}</span>
+                  </div>
+                ));
+              })()}
             </div>
           </div>
         )}
@@ -3443,9 +3541,9 @@ const Dashboard = ({ user, team, tournament, onLogout, onUpdateTeam, onBackToTou
                   <span className="check-icon">{team.totalPoints > 0 ? '✓' : '○'}</span>
                   Verify points update ({Math.round(team.totalPoints || 0)} total pts)
                 </li>
-                <li className={team.weeklyPickups > 0 ? 'checked' : ''}>
-                  <span className="check-icon">{team.weeklyPickups > 0 ? '✓' : '○'}</span>
-                  Test free agency ({team.weeklyPickups || 0}/{FREE_AGENCY_LIMIT} pickups)
+                <li className={currentWeekPickups > 0 ? 'checked' : ''}>
+                  <span className="check-icon">{currentWeekPickups > 0 ? '✓' : '○'}</span>
+                  Test free agency ({currentWeekPickups}/{FREE_AGENCY_LIMIT} pickups)
                 </li>
                 <li className={team.ir?.length > 0 ? 'checked' : ''}>
                   <span className="check-icon">{team.ir?.length > 0 ? '✓' : '○'}</span>
@@ -3459,7 +3557,7 @@ const Dashboard = ({ user, team, tournament, onLogout, onUpdateTeam, onBackToTou
                   apiTestStatus?.status === 'success',
                   testResults,
                   team.totalPoints > 0,
-                  team.weeklyPickups > 0,
+                  currentWeekPickups > 0,
                   team.ir?.length > 0,
                 ].filter(Boolean).length === 6 ? (
                   <p className="all-complete">🎉 All tests passed! Ready for production.</p>
@@ -3576,23 +3674,32 @@ export default function App() {
         
         // Get tournament-specific data
         const tournamentKey = tournamentToUse?.id || 'default';
-        const savedTeam = localStorage.getItem(`t20fantasy_team_${tournamentKey}`);
         const savedDraftStatus = localStorage.getItem(`t20fantasy_draft_complete_${tournamentKey}`);
         const savedDraftOpen = localStorage.getItem(`t20fantasy_draft_open_${tournamentKey}`);
+        const savedDraftPhase = localStorage.getItem(`t20fantasy_draft_status_${tournamentKey}`);
         
-        if (savedDraftOpen === 'true') {
+        // Look up user's team from allTeams
+        const savedAllTeams = localStorage.getItem('t20fantasy_all_teams');
+        const teams = savedAllTeams ? JSON.parse(savedAllTeams) : [];
+        const userTeam = teams.find(t => 
+          t.tournamentId === tournamentToUse.id && 
+          (t.userId === parsedUser.id || t.userEmail?.toLowerCase() === parsedUser.email?.toLowerCase())
+        );
+        
+        // Check if draft is open (from either old key or new key)
+        if (savedDraftOpen === 'true' || savedDraftPhase === 'open' || savedDraftPhase === 'in_progress') {
           setIsDraftOpen(true);
         }
         
         // Admin users go to admin panel
         if (parsedUser.isAdmin) {
           setCurrentPage('admin');
-        } else if (savedTeam && savedDraftStatus === 'true') {
-          setTeam(JSON.parse(savedTeam));
+        } else if (userTeam && savedDraftStatus === 'true') {
+          setTeam(userTeam);
           setIsDraftComplete(true);
           setCurrentPage('dashboard');
-        } else if (savedTeam) {
-          setTeam(JSON.parse(savedTeam));
+        } else if (userTeam) {
+          setTeam(userTeam);
           setCurrentPage('dashboard');
         } else {
           // User is logged in, has tournament but no team
@@ -3614,8 +3721,10 @@ export default function App() {
     const savedTeam = localStorage.getItem(`t20fantasy_team_${tournamentKey}`);
     const savedDraftStatus = localStorage.getItem(`t20fantasy_draft_complete_${tournamentKey}`);
     const savedDraftOpen = localStorage.getItem(`t20fantasy_draft_open_${tournamentKey}`);
+    const savedDraftPhase = localStorage.getItem(`t20fantasy_draft_status_${tournamentKey}`);
     
-    if (savedDraftOpen === 'true') {
+    // Check if draft is open (from either old key or new key)
+    if (savedDraftOpen === 'true' || savedDraftPhase === 'open' || savedDraftPhase === 'in_progress') {
       setIsDraftOpen(true);
     } else {
       setIsDraftOpen(false);
@@ -3627,10 +3736,19 @@ export default function App() {
       return;
     }
     
+    // Look up user's team from allTeams (stored globally)
+    const savedAllTeams = localStorage.getItem('t20fantasy_all_teams');
+    const teams = savedAllTeams ? JSON.parse(savedAllTeams) : [];
+    const userTeam = teams.find(t => 
+      t.tournamentId === tournament.id && 
+      (t.userId === user?.id || t.userEmail?.toLowerCase() === user?.email?.toLowerCase())
+    );
+    
     // Check if user has a team for this tournament
-    if (savedTeam) {
-      const parsedTeam = JSON.parse(savedTeam);
-      setTeam(parsedTeam);
+    if (userTeam) {
+      setTeam(userTeam);
+      // Also save to user-specific key for faster lookup
+      localStorage.setItem(`t20fantasy_team_${tournamentKey}_${user.id}`, JSON.stringify(userTeam));
       if (savedDraftStatus === 'true') {
         setIsDraftComplete(true);
       } else {
@@ -3682,12 +3800,26 @@ export default function App() {
 
   const handleTeamCreated = (teamData) => {
     const tournamentKey = selectedTournament?.id || 'default';
-    setTeam(teamData);
-    localStorage.setItem(`t20fantasy_team_${tournamentKey}`, JSON.stringify(teamData));
+    
+    // Ensure userId is set
+    const teamWithUser = {
+      ...teamData,
+      userId: user?.id,
+      userEmail: user?.email,
+    };
+    
+    setTeam(teamWithUser);
+    
+    // Save to user-specific key
+    localStorage.setItem(`t20fantasy_team_${tournamentKey}_${user?.id}`, JSON.stringify(teamWithUser));
     
     // Add to allTeams and persist
     setAllTeams(prev => {
-      const updated = [...prev, teamData];
+      // Remove any existing team for this user in this tournament first
+      const filtered = prev.filter(t => 
+        !(t.tournamentId === tournamentKey && (t.userId === user?.id || t.userEmail === user?.email))
+      );
+      const updated = [...filtered, teamWithUser];
       localStorage.setItem('t20fantasy_all_teams', JSON.stringify(updated));
       return updated;
     });
@@ -3702,8 +3834,11 @@ export default function App() {
       setAllUsers(users);
     }
     
-    // Check if draft is open - if not, go to dashboard in browse mode
-    if (isDraftOpen) {
+    // Check if draft is open from localStorage
+    const savedDraftStatus = localStorage.getItem(`t20fantasy_draft_status_${tournamentKey}`);
+    const draftIsOpen = savedDraftStatus === 'open' || savedDraftStatus === 'in_progress' || isDraftOpen;
+    
+    if (draftIsOpen) {
       setIsDraftComplete(false);
       localStorage.setItem(`t20fantasy_draft_complete_${tournamentKey}`, 'false');
       setCurrentPage('draft');
@@ -3740,7 +3875,7 @@ export default function App() {
       if (team && team.id === teamId) {
         const updatedTeam = { ...team, ...updates };
         setTeam(updatedTeam);
-        localStorage.setItem(`t20fantasy_team_${tournamentKey}`, JSON.stringify(updatedTeam));
+        localStorage.setItem(`t20fantasy_team_${tournamentKey}_${user?.id}`, JSON.stringify(updatedTeam));
       }
       
       // Update allTeams in localStorage
@@ -3755,7 +3890,14 @@ export default function App() {
       // Called with (updatedTeam) from dashboard
       const updatedTeam = teamIdOrTeam;
       setTeam(updatedTeam);
-      localStorage.setItem(`t20fantasy_team_${tournamentKey}`, JSON.stringify(updatedTeam));
+      localStorage.setItem(`t20fantasy_team_${tournamentKey}_${user?.id}`, JSON.stringify(updatedTeam));
+      
+      // Also update in allTeams
+      setAllTeams(prev => {
+        const updated = prev.map(t => t.id === updatedTeam.id ? updatedTeam : t);
+        localStorage.setItem('t20fantasy_all_teams', JSON.stringify(updated));
+        return updated;
+      });
     }
   };
   

@@ -398,15 +398,23 @@ async function syncTournamentPlayers(tournamentId) {
 // ============================================
 
 export default async function handler(req, res) {
-  // Verify authorization
+  // CORS headers for browser requests
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+  
+  // Authorization check - only required for automated cron jobs
+  // Manual sync from browser is allowed without auth
   const authHeader = req.headers.authorization;
   const cronSecret = process.env.CRON_SECRET;
+  const isVercelCron = req.headers['x-vercel-cron']; // Vercel cron header
   
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
-    // Allow without auth in development
-    if (process.env.NODE_ENV === 'production') {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
+  // Only enforce auth for automated cron requests, not manual browser requests
+  if (isVercelCron && cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+    return res.status(401).json({ error: 'Unauthorized cron request' });
   }
   
   try {
