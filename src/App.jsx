@@ -497,7 +497,10 @@ const generateSnakeDraftOrder = (teams, totalRounds) => {
 const TournamentSelectPage = ({ onSelectTournament, user, onLogout }) => {
   // Check which tournaments user already has teams for
   const getUserTeamStatus = (tournamentId) => {
+    if (!user) return false;
+    
     // Check all possible storage locations
+    // 1. User-specific key by ID
     const userSpecificKey = `t20fantasy_team_${tournamentId}_${user?.id}`;
     const userSpecificTeam = localStorage.getItem(userSpecificKey);
     if (userSpecificTeam) {
@@ -505,6 +508,15 @@ const TournamentSelectPage = ({ onSelectTournament, user, onLogout }) => {
       return true;
     }
     
+    // 2. User-specific key by email (more reliable)
+    const emailKey = `t20fantasy_team_${tournamentId}_${user?.email?.toLowerCase()}`;
+    const emailTeam = localStorage.getItem(emailKey);
+    if (emailTeam) {
+      console.log(`✅ Team found in email-specific key: ${emailKey}`);
+      return true;
+    }
+    
+    // 3. Old format (single team per tournament)
     const oldFormatTeam = localStorage.getItem(`t20fantasy_team_${tournamentId}`);
     if (oldFormatTeam) {
       const parsed = JSON.parse(oldFormatTeam);
@@ -516,6 +528,7 @@ const TournamentSelectPage = ({ onSelectTournament, user, onLogout }) => {
       }
     }
     
+    // 4. Check allTeams array
     const savedAllTeams = localStorage.getItem('t20fantasy_all_teams');
     if (savedAllTeams) {
       const teams = JSON.parse(savedAllTeams);
@@ -617,9 +630,21 @@ const LoginPage = ({ onLogin, onShowSignup }) => {
       const existingUsers = savedUsers ? JSON.parse(savedUsers) : [];
       const existingUser = existingUsers.find(u => u.email.toLowerCase() === email.toLowerCase());
       
+      console.log(`🔐 Login attempt:`);
+      console.log(`   Email: ${email.toLowerCase()}`);
+      console.log(`   Generated userId: ${userId}`);
+      console.log(`   Existing user found: ${existingUser ? 'YES' : 'NO'}`);
+      if (existingUser) {
+        console.log(`   Existing user ID: ${existingUser.id}`);
+        console.log(`   Existing user name: ${existingUser.name}`);
+      }
+      
+      const finalUserId = existingUser?.id || userId;
+      console.log(`   Final userId to use: ${finalUserId}`);
+      
       onLogin({ 
         email: email.toLowerCase(), 
-        id: existingUser?.id || userId,  // Reuse existing ID or generate consistent one
+        id: finalUserId,
         name: existingUser?.name || email.split('@')[0],
         isAdmin 
       });
@@ -1212,14 +1237,23 @@ const AdminPanel = ({ user, tournament, onUpdateTournament, onLogout, onBackToTo
     }
   };
   
-  // Load draft status from localStorage
-  const savedDraftStatus = typeof window !== 'undefined' 
-    ? localStorage.getItem(`t20fantasy_draft_status_${tournament.id}`) 
-    : null;
-  const [draftStatus, setDraftStatusState] = useState(savedDraftStatus || tournament.draftStatus || 'pending');
+  // Draft status state - initialize from localStorage
+  const [draftStatus, setDraftStatusState] = useState('pending');
+  
+  // Load draft status from localStorage when tournament changes
+  useEffect(() => {
+    const savedStatus = localStorage.getItem(`t20fantasy_draft_status_${tournament.id}`);
+    console.log(`📋 Admin: Loading draft status for ${tournament.id}: ${savedStatus}`);
+    if (savedStatus) {
+      setDraftStatusState(savedStatus);
+    } else {
+      setDraftStatusState(tournament.draftStatus || 'pending');
+    }
+  }, [tournament.id]);
   
   // Wrapper to save draft status to localStorage
   const setDraftStatus = (status) => {
+    console.log(`💾 Admin: Saving draft status for ${tournament.id}: ${status}`);
     setDraftStatusState(status);
     localStorage.setItem(`t20fantasy_draft_status_${tournament.id}`, status);
     // Also update isDraftOpen in parent
@@ -1228,8 +1262,8 @@ const AdminPanel = ({ user, tournament, onUpdateTournament, onLogout, onBackToTo
     }
   };
   
-  const [syncStatus, setSyncStatus] = useState({ players: null, scores: null });
-  const [isSyncing, setIsSyncing] = useState({ players: false, scores: false });
+  const [syncStatus, setSyncStatus] = useState({ players: null, scores: null, clearing: null });
+  const [isSyncing, setIsSyncing] = useState({ players: false, scores: false, clearing: false });
   const [editingTeam, setEditingTeam] = useState(null);
   const [editTeamForm, setEditTeamForm] = useState({ name: '', ownerName: '', totalPoints: 0 });
   const [userFilter, setUserFilter] = useState('all'); // all, with_team, without_team
@@ -1242,20 +1276,22 @@ const AdminPanel = ({ user, tournament, onUpdateTournament, onLogout, onBackToTo
     return '';
   };
   
-  // Manual Sync Functions
+  // Get player status (count)
   const handleSyncPlayers = async () => {
     setIsSyncing(prev => ({ ...prev, players: true }));
-    setSyncStatus(prev => ({ ...prev, players: 'syncing...' }));
+    setSyncStatus(prev => ({ ...prev, players: 'Checking...' }));
     
     try {
       const response = await fetch(`${getApiBaseUrl()}/api/sync/players?tournament=${tournament.id}`);
       const data = await response.json();
       
       if (data.success) {
-        const savedCount = data.results[0]?.saved || 0;
+        const count = data.playerCount || 0;
+        const teams = data.teams || [];
+        const teamInfo = teams.map(t => `${t.team}: ${t.count}`).join(', ');
         setSyncStatus(prev => ({ 
           ...prev, 
-          players: `✅ Synced! ${savedCount} players saved` 
+          players: `✅ ${count} players in database${teams.length > 0 ? ` (${teamInfo})` : ''}` 
         }));
         // Refetch players to update the list
         await refetchPlayers();
@@ -1266,6 +1302,35 @@ const AdminPanel = ({ user, tournament, onUpdateTournament, onLogout, onBackToTo
       setSyncStatus(prev => ({ ...prev, players: `❌ Error: ${error.message}` }));
     } finally {
       setIsSyncing(prev => ({ ...prev, players: false }));
+    }
+  };
+  
+  // Clear all players for tournament
+  const handleClearPlayers = async () => {
+    if (!confirm(`Are you sure you want to delete ALL players for ${tournament.name}? This cannot be undone.`)) {
+      return;
+    }
+    
+    setIsSyncing(prev => ({ ...prev, clearing: true }));
+    setSyncStatus(prev => ({ ...prev, clearing: 'Clearing...' }));
+    
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/api/sync/players?tournament=${tournament.id}`, {
+        method: 'DELETE',
+      });
+      const data = await response.json();
+      
+      if (data.success) {
+        setSyncStatus(prev => ({ ...prev, clearing: `✅ ${data.message}` }));
+        // Refetch to show empty list
+        await refetchPlayers();
+      } else {
+        setSyncStatus(prev => ({ ...prev, clearing: `❌ Error: ${data.error}` }));
+      }
+    } catch (error) {
+      setSyncStatus(prev => ({ ...prev, clearing: `❌ Error: ${error.message}` }));
+    } finally {
+      setIsSyncing(prev => ({ ...prev, clearing: false }));
     }
   };
   
@@ -1528,26 +1593,42 @@ const AdminPanel = ({ user, tournament, onUpdateTournament, onLogout, onBackToTo
         
         {activeTab === 'sync' && (
           <div className="admin-sync">
-            <h3>🔄 Data Synchronization</h3>
+            <h3>🔄 Data Management</h3>
             <p className="sync-info">
-              Sync player data and live scores from CricketData.org. 
-              Automatic sync runs every 15 minutes during match hours (4 AM - 12 PM MST).
+              Player data is managed manually. Use "Clear Players" to reset, then add players via the Players tab or API.
             </p>
             
             <div className="sync-controls">
               <div className="sync-card">
-                <h4>👥 Player Roster Sync</h4>
-                <p>Fetch latest player data for {tournament.name}</p>
+                <h4>👥 Player Data Status</h4>
+                <p>Check current player count for {tournament.name}</p>
                 <button 
                   className="btn-primary btn-large"
                   onClick={handleSyncPlayers}
                   disabled={isSyncing.players}
                 >
-                  {isSyncing.players ? '⏳ Syncing...' : '🔄 Sync Players Now'}
+                  {isSyncing.players ? '⏳ Checking...' : '📊 Check Player Status'}
                 </button>
                 {syncStatus.players && (
-                  <div className={`sync-result ${syncStatus.players.startsWith('✅') ? 'success' : 'error'}`}>
+                  <div className={`sync-result ${syncStatus.players.startsWith('✅') ? 'success' : syncStatus.players.startsWith('❌') ? 'error' : ''}`}>
                     {syncStatus.players}
+                  </div>
+                )}
+              </div>
+              
+              <div className="sync-card">
+                <h4>🗑️ Clear Player Data</h4>
+                <p>Remove all players for {tournament.name} (use before re-importing)</p>
+                <button 
+                  className="btn-danger btn-large"
+                  onClick={handleClearPlayers}
+                  disabled={isSyncing.clearing}
+                >
+                  {isSyncing.clearing ? '⏳ Clearing...' : '🗑️ Clear All Players'}
+                </button>
+                {syncStatus.clearing && (
+                  <div className={`sync-result ${syncStatus.clearing.startsWith('✅') ? 'success' : 'error'}`}>
+                    {syncStatus.clearing}
                   </div>
                 )}
               </div>
@@ -1565,23 +1646,6 @@ const AdminPanel = ({ user, tournament, onUpdateTournament, onLogout, onBackToTo
                 {syncStatus.scores && (
                   <div className={`sync-result ${syncStatus.scores.startsWith('✅') ? 'success' : 'error'}`}>
                     {syncStatus.scores}
-                  </div>
-                )}
-              </div>
-              
-              <div className="sync-card sync-all-card">
-                <h4>⚡ Sync Everything</h4>
-                <p>Run both player roster and live scores sync in one click</p>
-                <button 
-                  className="btn-primary btn-large btn-sync-all"
-                  onClick={handleSyncAll}
-                  disabled={isSyncing.all || isSyncing.players || isSyncing.scores}
-                >
-                  {isSyncing.all ? '⏳ ' + (syncStatus.all || 'Syncing...') : '🚀 Sync All Now'}
-                </button>
-                {syncStatus.all && !isSyncing.all && (
-                  <div className={`sync-result ${syncStatus.all.startsWith('✅') ? 'success' : 'error'}`}>
-                    {syncStatus.all}
                   </div>
                 )}
               </div>
@@ -3813,10 +3877,19 @@ export default function App() {
         // Try to find user's team - check multiple sources
         let userTeam = null;
         
-        // 1. Check user-specific storage key first
+        // 1. Check user-specific storage key first (by ID)
         const userSpecificTeam = localStorage.getItem(`t20fantasy_team_${tournamentKey}_${parsedUser?.id}`);
         if (userSpecificTeam) {
           userTeam = JSON.parse(userSpecificTeam);
+        }
+        
+        // 1b. Check email-specific key (more reliable)
+        if (!userTeam) {
+          const emailKey = `t20fantasy_team_${tournamentKey}_${parsedUser?.email?.toLowerCase()}`;
+          const emailTeam = localStorage.getItem(emailKey);
+          if (emailTeam) {
+            userTeam = JSON.parse(emailTeam);
+          }
         }
         
         // 2. Check old format (single team per tournament)
@@ -3826,6 +3899,7 @@ export default function App() {
             const parsedTeam = JSON.parse(oldFormatTeam);
             // Use if it's this user's team (check owner name or email)
             if (!parsedTeam.userId || parsedTeam.userId === parsedUser?.id || 
+                parsedTeam.userEmail?.toLowerCase() === parsedUser?.email?.toLowerCase() ||
                 parsedTeam.owner?.toLowerCase() === parsedUser?.name?.toLowerCase()) {
               userTeam = parsedTeam;
               // Migrate: add userId if missing
@@ -3885,6 +3959,9 @@ export default function App() {
   }, []);
 
   const handleSelectTournament = (tournament) => {
+    console.log(`\n🏆 === SELECTING TOURNAMENT: ${tournament.id} ===`);
+    console.log(`   User: ${user?.email} (ID: ${user?.id})`);
+    
     setSelectedTournament(tournament);
     localStorage.setItem('t20fantasy_tournament', JSON.stringify(tournament));
     
@@ -3893,6 +3970,8 @@ export default function App() {
     const savedDraftStatus = localStorage.getItem(`t20fantasy_draft_complete_${tournamentKey}`);
     const savedDraftOpen = localStorage.getItem(`t20fantasy_draft_open_${tournamentKey}`);
     const savedDraftPhase = localStorage.getItem(`t20fantasy_draft_status_${tournamentKey}`);
+    
+    console.log(`   Draft Phase: ${savedDraftPhase}, Draft Open: ${savedDraftOpen}, Draft Complete: ${savedDraftStatus}`);
     
     // Check if draft is open (from either old key or new key)
     if (savedDraftOpen === 'true' || savedDraftPhase === 'open' || savedDraftPhase === 'in_progress') {
@@ -3903,6 +3982,7 @@ export default function App() {
     
     // Admin goes to admin panel
     if (user?.isAdmin) {
+      console.log(`   → Admin user, going to admin panel`);
       setCurrentPage('admin');
       return;
     }
@@ -3910,26 +3990,46 @@ export default function App() {
     // Try to find user's team - check multiple sources
     let userTeam = null;
     
-    // 1. Check user-specific storage key first (newest format)
-    const userSpecificTeam = localStorage.getItem(`t20fantasy_team_${tournamentKey}_${user?.id}`);
+    // 1. Check user-specific storage key first (newest format - by ID)
+    const userSpecificKey = `t20fantasy_team_${tournamentKey}_${user?.id}`;
+    const userSpecificTeam = localStorage.getItem(userSpecificKey);
+    console.log(`   Checking key: ${userSpecificKey} → ${userSpecificTeam ? 'FOUND' : 'not found'}`);
     if (userSpecificTeam) {
       userTeam = JSON.parse(userSpecificTeam);
+      console.log(`   ✅ Found team in user-specific key: ${userTeam.name}`);
+    }
+    
+    // 1b. Check email-specific key (more reliable than ID)
+    if (!userTeam) {
+      const emailKey = `t20fantasy_team_${tournamentKey}_${user?.email?.toLowerCase()}`;
+      const emailTeam = localStorage.getItem(emailKey);
+      console.log(`   Checking email key: ${emailKey} → ${emailTeam ? 'FOUND' : 'not found'}`);
+      if (emailTeam) {
+        userTeam = JSON.parse(emailTeam);
+        console.log(`   ✅ Found team in email-specific key: ${userTeam.name}`);
+      }
     }
     
     // 2. Check old format (single team per tournament)
     if (!userTeam) {
-      const oldFormatTeam = localStorage.getItem(`t20fantasy_team_${tournamentKey}`);
+      const oldKey = `t20fantasy_team_${tournamentKey}`;
+      const oldFormatTeam = localStorage.getItem(oldKey);
+      console.log(`   Checking old key: ${oldKey} → ${oldFormatTeam ? 'FOUND' : 'not found'}`);
       if (oldFormatTeam) {
         const parsedTeam = JSON.parse(oldFormatTeam);
+        console.log(`   Old format team: userId=${parsedTeam.userId}, userEmail=${parsedTeam.userEmail}, owner=${parsedTeam.owner}`);
         // Only use if it's this user's team (check owner name or email)
         if (!parsedTeam.userId || parsedTeam.userId === user?.id || 
+            parsedTeam.userEmail?.toLowerCase() === user?.email?.toLowerCase() ||
             parsedTeam.owner?.toLowerCase() === user?.name?.toLowerCase()) {
           userTeam = parsedTeam;
+          console.log(`   ✅ Found team in old format: ${userTeam.name}`);
           // Migrate: add userId if missing
           if (!userTeam.userId) {
             userTeam.userId = user?.id;
             userTeam.userEmail = user?.email;
-            localStorage.setItem(`t20fantasy_team_${tournamentKey}_${user?.id}`, JSON.stringify(userTeam));
+            localStorage.setItem(userSpecificKey, JSON.stringify(userTeam));
+            console.log(`   📝 Migrated team to new format`);
           }
         }
       }
@@ -3939,6 +4039,18 @@ export default function App() {
     if (!userTeam) {
       const savedAllTeams = localStorage.getItem('t20fantasy_all_teams');
       const teams = savedAllTeams ? JSON.parse(savedAllTeams) : [];
+      console.log(`   Checking allTeams (${teams.length} teams total)`);
+      
+      // Log all teams for this tournament
+      const tournamentTeams = teams.filter(t => t.tournamentId === tournament.id);
+      console.log(`   Teams for ${tournament.id}:`, tournamentTeams.map(t => ({
+        name: t.name, 
+        owner: t.owner,
+        userId: t.userId, 
+        userEmail: t.userEmail,
+        tournamentId: t.tournamentId
+      })));
+      
       userTeam = teams.find(t => 
         t.tournamentId === tournament.id && 
         (t.userId === user?.id || 
@@ -3946,23 +4058,29 @@ export default function App() {
          t.owner?.toLowerCase() === user?.name?.toLowerCase())
       );
       
-      // If found in allTeams but missing userId, migrate it
-      if (userTeam && !userTeam.userId) {
-        userTeam.userId = user?.id;
-        userTeam.userEmail = user?.email;
-        // Update in allTeams
-        const updatedTeams = teams.map(t => 
-          t.id === userTeam.id ? userTeam : t
-        );
-        localStorage.setItem('t20fantasy_all_teams', JSON.stringify(updatedTeams));
+      if (userTeam) {
+        console.log(`   ✅ Found team in allTeams: ${userTeam.name}`);
+        // If found in allTeams but missing userId, migrate it
+        if (!userTeam.userId) {
+          userTeam.userId = user?.id;
+          userTeam.userEmail = user?.email;
+          // Update in allTeams
+          const updatedTeams = teams.map(t => 
+            t.id === userTeam.id ? userTeam : t
+          );
+          localStorage.setItem('t20fantasy_all_teams', JSON.stringify(updatedTeams));
+        }
+        // Also save to user-specific key for faster future lookups
+        localStorage.setItem(userSpecificKey, JSON.stringify(userTeam));
       }
     }
     
     // Check if user has a team for this tournament
     if (userTeam) {
+      console.log(`   ✅ TEAM FOUND: ${userTeam.name}, going to dashboard`);
       setTeam(userTeam);
       // Save to user-specific key for faster future lookups
-      localStorage.setItem(`t20fantasy_team_${tournamentKey}_${user?.id}`, JSON.stringify(userTeam));
+      localStorage.setItem(userSpecificKey, JSON.stringify(userTeam));
       if (savedDraftStatus === 'true') {
         setIsDraftComplete(true);
       } else {
@@ -3971,10 +4089,12 @@ export default function App() {
       setCurrentPage('dashboard');
     } else {
       // No team for this tournament - check if draft is open before allowing creation
+      console.log(`   ❌ NO TEAM FOUND, going to createTeam`);
       setTeam(null);
       setIsDraftComplete(false);
       setCurrentPage('createTeam');
     }
+    console.log(`🏆 === END TOURNAMENT SELECTION ===\n`);
   };
   
   // Switch tournament (dropdown handler)
@@ -3986,6 +4106,11 @@ export default function App() {
   };
 
   const handleLogin = (userData) => {
+    console.log(`\n🔐 === LOGIN ===`);
+    console.log(`   Email: ${userData.email}`);
+    console.log(`   User ID: ${userData.id}`);
+    console.log(`   Is Admin: ${userData.isAdmin}`);
+    
     setUser(userData);
     localStorage.setItem('t20fantasy_user', JSON.stringify(userData));
     
@@ -3997,6 +4122,7 @@ export default function App() {
     localStorage.removeItem('t20fantasy_tournament');
     setSelectedTournament(null);
     setCurrentPage('tournamentSelect');
+    console.log(`🔐 === END LOGIN ===\n`);
   };
 
   const handleSignup = (userData) => {
@@ -4015,11 +4141,11 @@ export default function App() {
   const handleTeamCreated = (teamData) => {
     const tournamentKey = selectedTournament?.id || 'default';
     
-    // Ensure userId is set
+    // Ensure userId and email are set
     const teamWithUser = {
       ...teamData,
       userId: user?.id,
-      userEmail: user?.email,
+      userEmail: user?.email?.toLowerCase(),
       tournamentId: tournamentKey, // Ensure this is set correctly
     };
     
@@ -4034,16 +4160,20 @@ export default function App() {
     
     setTeam(teamWithUser);
     
-    // Save to user-specific key
-    const userSpecificKey = `t20fantasy_team_${tournamentKey}_${user?.id}`;
-    localStorage.setItem(userSpecificKey, JSON.stringify(teamWithUser));
-    console.log(`💾 Saved to: ${userSpecificKey}`);
+    // Save to BOTH user ID key AND email key for reliable lookup
+    const userIdKey = `t20fantasy_team_${tournamentKey}_${user?.id}`;
+    const emailKey = `t20fantasy_team_${tournamentKey}_${user?.email?.toLowerCase()}`;
+    
+    localStorage.setItem(userIdKey, JSON.stringify(teamWithUser));
+    localStorage.setItem(emailKey, JSON.stringify(teamWithUser));
+    console.log(`💾 Saved to: ${userIdKey}`);
+    console.log(`💾 Saved to: ${emailKey}`);
     
     // Add to allTeams and persist
     setAllTeams(prev => {
       // Remove any existing team for this user in this tournament first
       const filtered = prev.filter(t => 
-        !(t.tournamentId === tournamentKey && (t.userId === user?.id || t.userEmail === user?.email))
+        !(t.tournamentId === tournamentKey && (t.userId === user?.id || t.userEmail?.toLowerCase() === user?.email?.toLowerCase()))
       );
       const updated = [...filtered, teamWithUser];
       localStorage.setItem('t20fantasy_all_teams', JSON.stringify(updated));
@@ -4174,13 +4304,21 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    // Only clear user session, NOT all data
+    // Keep: teams, draft status, users list
     setUser(null);
     setTeam(null);
     setSelectedTournament(null);
     setIsDraftComplete(false);
     setIsDraftOpen(false);
-    localStorage.clear();
-    setCurrentPage('login'); // Go back to login, not tournamentSelect
+    
+    // Only remove user session data, keep everything else
+    localStorage.removeItem('t20fantasy_user');
+    localStorage.removeItem('t20fantasy_tournament');
+    
+    // DO NOT call localStorage.clear() - it wipes all team data!
+    
+    setCurrentPage('login');
   };
 
   const handleBackToTournaments = () => {

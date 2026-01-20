@@ -1,20 +1,16 @@
 /**
- * Sync Players from CricketData.org API
- * ======================================
- * GET/POST /api/sync/players?tournament=ipl_2026
+ * Player Sync API - Simplified for Manual Data Entry
+ * ===================================================
  * 
- * API Endpoints Used (api.cricapi.com/v1):
- *   /series              → Find tournament by name
- *   /series_info?id=X    → Get match list for series
- *   /match_squad?id=X    → Get player squads for a match
- *   /matches             → Get current/upcoming matches
+ * POST /api/sync/players - Add players to database (manual entry)
+ *   Body: { tournament: "t20_wc_2026", players: [...] }
  * 
- * NO FALLBACK - API is the only data source.
+ * DELETE /api/sync/players?tournament=t20_wc_2026 - Clear tournament players
+ * 
+ * GET /api/sync/players?tournament=t20_wc_2026 - Get sync status
  */
 
 import { createClient } from '@libsql/client';
-
-const API_BASE = 'https://api.cricapi.com/v1';
 
 // Database
 let db = null;
@@ -33,7 +29,7 @@ try {
   dbError = e.message;
 }
 
-// Tournament configs
+// Tournament configs (for validation)
 const TOURNAMENTS = {
   test_ind_nz: {
     id: 'test_ind_nz',
@@ -43,8 +39,6 @@ const TOURNAMENTS = {
     startDate: '2026-01-15',
     endDate: '2026-01-25',
     teamCodes: ['IND', 'NZ'],
-    // More comprehensive search terms for CricketData.org
-    searchTerms: ['india vs new zealand', 'new zealand vs india', 'ind vs nz', 'nz vs ind', 'india tour of new zealand', 'new zealand tour of india', 'india t20', 'nz t20'],
     isTest: true,
   },
   t20_wc_2026: {
@@ -55,7 +49,6 @@ const TOURNAMENTS = {
     startDate: '2026-02-09',
     endDate: '2026-03-07',
     teamCodes: ['IND', 'AUS', 'ENG', 'PAK', 'SA', 'NZ', 'WI', 'SL', 'BAN', 'AFG', 'IRE', 'ZIM', 'NED', 'SCO', 'NAM', 'USA', 'NEP', 'UGA', 'PNG', 'OMA'],
-    searchTerms: ['t20 world cup', 'icc t20 world cup', 'world cup t20', 't20 wc', 'icc world twenty20', 'world twenty20'],
     isTest: false,
   },
   ipl_2026: {
@@ -66,228 +59,9 @@ const TOURNAMENTS = {
     startDate: '2026-03-22',
     endDate: '2026-05-26',
     teamCodes: ['CSK', 'MI', 'RCB', 'KKR', 'DC', 'PBKS', 'RR', 'SRH', 'GT', 'LSG'],
-    searchTerms: ['indian premier league', 'ipl 2026', 'ipl 2025', 'ipl 2024', 'ipl'],
     isTest: false,
   },
 };
-
-// Team name → code mapping
-const TEAM_CODES = {
-  'india': 'IND', 'australia': 'AUS', 'england': 'ENG', 'pakistan': 'PAK',
-  'south africa': 'SA', 'new zealand': 'NZ', 'west indies': 'WI', 'sri lanka': 'SL',
-  'bangladesh': 'BAN', 'afghanistan': 'AFG', 'ireland': 'IRE', 'zimbabwe': 'ZIM',
-  'netherlands': 'NED', 'scotland': 'SCO', 'namibia': 'NAM', 'usa': 'USA',
-  'nepal': 'NEP', 'uganda': 'UGA', 'papua new guinea': 'PNG', 'oman': 'OMA',
-  'chennai super kings': 'CSK', 'mumbai indians': 'MI', 'royal challengers bangalore': 'RCB',
-  'royal challengers bengaluru': 'RCB', 'kolkata knight riders': 'KKR', 'delhi capitals': 'DC',
-  'punjab kings': 'PBKS', 'rajasthan royals': 'RR', 'sunrisers hyderabad': 'SRH',
-  'gujarat titans': 'GT', 'lucknow super giants': 'LSG',
-  'csk': 'CSK', 'mi': 'MI', 'rcb': 'RCB', 'kkr': 'KKR', 'dc': 'DC',
-  'pbks': 'PBKS', 'rr': 'RR', 'srh': 'SRH', 'gt': 'GT', 'lsg': 'LSG',
-};
-
-// API request helper
-async function apiRequest(endpoint, params = {}) {
-  const apiKey = process.env.CRICKET_API_KEY;
-  if (!apiKey) throw new Error('CRICKET_API_KEY required - get it from https://cricketdata.org');
-  
-  const url = new URL(`${API_BASE}/${endpoint}`);
-  url.searchParams.set('apikey', apiKey);
-  url.searchParams.set('offset', '0');
-  Object.entries(params).forEach(([k, v]) => v && url.searchParams.set(k, v));
-  
-  console.log(`🌐 ${endpoint}`, params);
-  const res = await fetch(url);
-  const data = await res.json();
-  
-  if (data.status !== 'success') {
-    throw new Error(data.reason || data.message || `${endpoint} failed`);
-  }
-  return data.data || [];
-}
-
-// Get team code from name
-function getTeamCode(name) {
-  if (!name) return 'UNK';
-  const n = name.toLowerCase().trim();
-  if (TEAM_CODES[n]) return TEAM_CODES[n];
-  for (const [k, v] of Object.entries(TEAM_CODES)) {
-    if (n.includes(k) || k.includes(n)) return v;
-  }
-  return name.substring(0, 3).toUpperCase();
-}
-
-// Determine player position from API data
-function getPosition(player) {
-  const role = (player.role || player.playingRole || '').toLowerCase();
-  if (role.includes('keeper') || role.includes('wk')) return 'keeper';
-  if (role.includes('allrounder') || role.includes('all-rounder')) return 'allrounder';
-  if (role.includes('bowl')) return 'bowler';
-  return 'batter';
-}
-
-// Calculate price based on role
-function getPrice(position, playerName) {
-  const stars = ['virat kohli', 'rohit sharma', 'jasprit bumrah', 'babar azam', 'jos buttler', 
-    'pat cummins', 'rashid khan', 'suryakumar yadav', 'ms dhoni', 'hardik pandya'];
-  let price = 8.0;
-  if (stars.some(s => playerName.toLowerCase().includes(s))) price += 3.5;
-  if (position === 'allrounder') price += 1.5;
-  if (position === 'keeper') price += 1.0;
-  return Math.round(price * 2) / 2;
-}
-
-// ============================================
-// MAIN API FETCHING
-// ============================================
-
-async function fetchPlayers(config) {
-  const players = new Map();
-  
-  console.log(`\n${'='.repeat(50)}`);
-  console.log(`🏆 ${config.name}`);
-  console.log(`   Search terms: ${config.searchTerms.join(', ')}`);
-  console.log(`${'='.repeat(50)}`);
-  
-  // Step 1: GET /series - find matching tournament
-  console.log(`\n📡 Step 1: GET /series`);
-  const allSeries = await apiRequest('series');
-  
-  // Log first 10 series to help debug
-  console.log(`\n   📋 Available series (first 10):`);
-  allSeries.slice(0, 10).forEach(s => console.log(`      - ${s.name}`));
-  
-  const matchingSeries = allSeries.filter(s => {
-    const name = (s.name || '').toLowerCase();
-    // Check if ANY search term matches
-    return config.searchTerms.some(term => name.includes(term.toLowerCase()));
-  });
-  
-  console.log(`\n   ✅ Found ${matchingSeries.length} matching series`);
-  matchingSeries.slice(0, 5).forEach(s => console.log(`      - ${s.name} (${s.id})`));
-  
-  // Step 2: GET /series_info - get match list
-  for (const series of matchingSeries.slice(0, 3)) {
-    console.log(`\n📡 Step 2: GET /series_info?id=${series.id}`);
-    
-    try {
-      const info = await apiRequest('series_info', { id: series.id });
-      const matches = info.matchList || info.matches || [];
-      console.log(`   Matches: ${matches.length}`);
-      
-      // Step 3: GET /match_squad for each match
-      for (const match of matches.slice(0, 10)) {
-        const matchId = match.id || match.matchId;
-        if (!matchId) continue;
-        
-        console.log(`\n📡 Step 3: GET /match_squad?id=${matchId}`);
-        console.log(`   Match: ${match.name || matchId}`);
-        
-        try {
-          const squads = await apiRequest('match_squad', { id: matchId });
-          
-          for (const team of squads) {
-            const teamCode = getTeamCode(team.teamName);
-            console.log(`   ${team.teamName} (${teamCode}): ${team.players?.length || 0} players`);
-            
-            for (const p of (team.players || [])) {
-              const key = p.id || `${p.name}_${teamCode}`;
-              if (!players.has(key)) {
-                const pos = getPosition(p);
-                players.set(key, {
-                  id: p.id || `p_${teamCode}_${players.size}`,
-                  name: p.name,
-                  team: teamCode,
-                  position: pos,
-                  price: getPrice(pos, p.name),
-                  avgPoints: pos === 'bowler' ? 35 : pos === 'allrounder' ? 38 : 32,
-                  totalPoints: 0,
-                  tournamentId: config.id,
-                });
-              }
-            }
-          }
-        } catch (e) {
-          console.log(`   ⚠️ Squad error: ${e.message}`);
-        }
-        
-        await new Promise(r => setTimeout(r, 300)); // Rate limit
-      }
-      
-      if (players.size >= 100) break;
-    } catch (e) {
-      console.log(`   ⚠️ Series error: ${e.message}`);
-    }
-  }
-  
-  // Alternative: GET /matches if we don't have enough players
-  if (players.size < 20) {
-    console.log(`\n📡 Alternative: GET /matches`);
-    try {
-      const matches = await apiRequest('matches');
-      const relevant = matches.filter(m => {
-        const name = (m.name || '').toLowerCase();
-        return config.searchTerms.some(t => name.includes(t.toLowerCase()));
-      });
-      
-      console.log(`   Relevant matches: ${relevant.length}`);
-      
-      for (const match of relevant.slice(0, 10)) {
-        if (!match.id) continue;
-        try {
-          const squads = await apiRequest('match_squad', { id: match.id });
-          for (const team of squads) {
-            const teamCode = getTeamCode(team.teamName);
-            for (const p of (team.players || [])) {
-              const key = p.id || `${p.name}_${teamCode}`;
-              if (!players.has(key)) {
-                const pos = getPosition(p);
-                players.set(key, {
-                  id: p.id || `p_${teamCode}_${players.size}`,
-                  name: p.name,
-                  team: teamCode,
-                  position: pos,
-                  price: getPrice(pos, p.name),
-                  avgPoints: pos === 'bowler' ? 35 : pos === 'allrounder' ? 38 : 32,
-                  totalPoints: 0,
-                  tournamentId: config.id,
-                });
-              }
-            }
-          }
-        } catch (e) {
-          console.log(`   ⚠️ ${e.message}`);
-        }
-        await new Promise(r => setTimeout(r, 300));
-      }
-    } catch (e) {
-      console.log(`   ⚠️ Matches error: ${e.message}`);
-    }
-  }
-  
-  console.log(`\n✅ Total players: ${players.size}`);
-  return Array.from(players.values());
-}
-
-// Save to database
-async function savePlayers(players, tournamentId) {
-  let saved = 0, failed = 0;
-  
-  for (const p of players) {
-    try {
-      await db.execute({
-        sql: `INSERT OR REPLACE INTO players (id, name, team, position, price, avg_points, total_points, tournament_id)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        args: [p.id, p.name, p.team, p.position, p.price, p.avgPoints, p.totalPoints, tournamentId],
-      });
-      saved++;
-    } catch (e) {
-      failed++;
-    }
-  }
-  
-  return { saved, failed };
-}
 
 // Ensure tournament exists
 async function ensureTournament(config) {
@@ -306,24 +80,61 @@ async function ensureTournament(config) {
   }
 }
 
-// ============================================
-// API HANDLER
-// ============================================
+// Clear players for a tournament
+async function clearPlayers(tournamentId) {
+  await db.execute({
+    sql: `DELETE FROM players WHERE tournament_id = ?`,
+    args: [tournamentId],
+  });
+}
+
+// Add players to database
+async function addPlayers(players, tournamentId) {
+  let saved = 0, failed = 0;
+  const errors = [];
+  
+  for (const p of players) {
+    try {
+      const id = p.id || `p_${p.team}_${tournamentId}_${saved}_${Date.now()}`;
+      await db.execute({
+        sql: `INSERT OR REPLACE INTO players (id, name, team, position, price, avg_points, total_points, tournament_id)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [id, p.name, p.team, p.position, p.price || 8.0, p.avgPoints || 30, p.totalPoints || 0, tournamentId],
+      });
+      saved++;
+    } catch (e) {
+      failed++;
+      errors.push(`${p.name}: ${e.message}`);
+    }
+  }
+  
+  return { saved, failed, errors: errors.slice(0, 5) };
+}
+
+// Get player count for tournament
+async function getPlayerCount(tournamentId) {
+  const result = await db.execute({
+    sql: `SELECT COUNT(*) as count FROM players WHERE tournament_id = ?`,
+    args: [tournamentId],
+  });
+  return result.rows[0]?.count || 0;
+}
+
+// Get teams with player counts
+async function getTeamCounts(tournamentId) {
+  const result = await db.execute({
+    sql: `SELECT team, COUNT(*) as count FROM players WHERE tournament_id = ? GROUP BY team ORDER BY team`,
+    args: [tournamentId],
+  });
+  return result.rows.map(r => ({ team: r.team, count: r.count }));
+}
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   
   if (req.method === 'OPTIONS') return res.status(200).end();
-  
-  // Validate requirements
-  if (!process.env.CRICKET_API_KEY) {
-    return res.status(500).json({ 
-      error: 'CRICKET_API_KEY is required',
-      help: 'Get your API key from https://cricketdata.org and add to Vercel env vars',
-    });
-  }
   
   if (dbError || !db) {
     return res.status(500).json({ error: dbError || 'Database not configured' });
@@ -333,57 +144,111 @@ export default async function handler(req, res) {
     await db.execute('SELECT 1');
     
     const { tournament } = req.query;
-    const results = [];
     
-    const tournamentsToSync = tournament ? [tournament] : Object.keys(TOURNAMENTS);
-    
-    for (const tid of tournamentsToSync) {
-      const config = TOURNAMENTS[tid];
-      if (!config) {
-        results.push({ tournament: tid, error: 'Unknown tournament' });
-        continue;
-      }
-      
-      try {
-        await ensureTournament(config);
-        const players = await fetchPlayers(config);
-        
-        if (players.length === 0) {
+    // GET - Return sync status
+    if (req.method === 'GET') {
+      if (!tournament) {
+        // Return status for all tournaments
+        const results = [];
+        for (const [id, config] of Object.entries(TOURNAMENTS)) {
+          const count = await getPlayerCount(id);
+          const teams = await getTeamCounts(id);
           results.push({
-            tournament: tid,
+            tournament: id,
             name: config.name,
-            players: 0,
-            saved: 0,
-            message: 'No players found - tournament may not be active yet',
+            playerCount: count,
+            teams,
           });
-          continue;
         }
-        
-        const { saved, failed } = await savePlayers(players, tid);
-        results.push({
-          tournament: tid,
-          name: config.name,
-          players: players.length,
-          saved,
-          failed,
-          teams: [...new Set(players.map(p => p.team))],
-        });
-      } catch (e) {
-        results.push({ tournament: tid, error: e.message });
+        return res.status(200).json({ success: true, tournaments: results });
       }
       
-      await new Promise(r => setTimeout(r, 1000));
+      // Return status for specific tournament
+      const count = await getPlayerCount(tournament);
+      const teams = await getTeamCounts(tournament);
+      return res.status(200).json({
+        success: true,
+        tournament,
+        playerCount: count,
+        teams,
+      });
     }
     
-    res.status(200).json({
-      success: true,
-      source: 'CricketData.org API',
-      timestamp: new Date().toISOString(),
-      results,
-      totalSaved: results.reduce((s, r) => s + (r.saved || 0), 0),
-    });
+    // DELETE - Clear players for tournament
+    if (req.method === 'DELETE') {
+      if (!tournament) {
+        return res.status(400).json({ error: 'Tournament ID required' });
+      }
+      
+      await clearPlayers(tournament);
+      return res.status(200).json({
+        success: true,
+        message: `Cleared all players for ${tournament}`,
+      });
+    }
+    
+    // POST - Add players (manual entry)
+    if (req.method === 'POST') {
+      const { tournament: bodyTournament, players, clearFirst } = req.body || {};
+      const tournamentId = bodyTournament || tournament;
+      
+      if (!tournamentId) {
+        return res.status(400).json({ error: 'Tournament ID required' });
+      }
+      
+      if (!players || !Array.isArray(players) || players.length === 0) {
+        return res.status(400).json({ 
+          error: 'Players array required',
+          example: {
+            tournament: 'test_ind_nz',
+            clearFirst: true,
+            players: [
+              { name: 'Virat Kohli', team: 'IND', position: 'batter', price: 12.5, avgPoints: 45 },
+              { name: 'Rohit Sharma', team: 'IND', position: 'batter', price: 12.0, avgPoints: 42 },
+            ]
+          }
+        });
+      }
+      
+      const config = TOURNAMENTS[tournamentId];
+      if (!config) {
+        return res.status(400).json({ 
+          error: `Unknown tournament: ${tournamentId}`,
+          validTournaments: Object.keys(TOURNAMENTS),
+        });
+      }
+      
+      // Ensure tournament exists
+      await ensureTournament(config);
+      
+      // Clear existing players if requested
+      if (clearFirst) {
+        await clearPlayers(tournamentId);
+      }
+      
+      // Add players
+      const result = await addPlayers(players, tournamentId);
+      const teams = await getTeamCounts(tournamentId);
+      
+      return res.status(200).json({
+        success: true,
+        tournament: tournamentId,
+        results: [{
+          tournament: tournamentId,
+          name: config.name,
+          saved: result.saved,
+          failed: result.failed,
+          errors: result.errors,
+          teams,
+        }],
+        totalPlayersSaved: result.saved,
+      });
+    }
+    
+    return res.status(405).json({ error: 'Method not allowed' });
     
   } catch (e) {
+    console.error('API Error:', e);
     res.status(500).json({ error: e.message });
   }
 }
