@@ -917,7 +917,14 @@ button {
 
 /* Free Agents View */
 .free-agents-view { max-width: 800px; margin: 0 auto; }
-.search-filters { display: flex; gap: var(--spacing-md); margin-bottom: var(--spacing-lg); }
+.search-filters { 
+  display: flex; 
+  gap: var(--spacing-md); 
+  margin-bottom: var(--spacing-lg); 
+  flex-wrap: wrap;
+}
+.search-filters .search-input { flex: 1; min-width: 200px; }
+.search-filters .filter-select { min-width: 120px; }
 .players-grid { display: grid; gap: var(--spacing-md); }
 
 .player-card-full {
@@ -2518,6 +2525,32 @@ button {
   font-size: 0.75rem;
   color: var(--text-secondary);
   margin-bottom: var(--spacing-md);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
+}
+
+.player-count .active-filters {
+  color: var(--accent);
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.btn-clear-filters {
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  padding: 4px 8px;
+  font-size: 0.7rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.btn-clear-filters:hover {
+  background: var(--bg-card);
+  color: var(--text-primary);
 }
 
 /* Admin Login Hint */

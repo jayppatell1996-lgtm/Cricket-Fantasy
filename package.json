@@ -7,10 +7,9 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "db:generate": "drizzle-kit generate",
+    "db:generate": "drizzle-kit generate:sqlite",
     "db:migrate": "drizzle-kit migrate",
-    "db:push": "drizzle-kit push",
-    "db:push:turso": "drizzle-kit push:sqlite --driver turso --schema ./src/db/schema.js",
+    "db:push": "drizzle-kit push:sqlite",
     "db:studio": "drizzle-kit studio",
     "api:test": "node scripts/setup-cricket-api.js test",
     "api:search": "node scripts/setup-cricket-api.js search",
@@ -29,6 +28,7 @@
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
     "@vitejs/plugin-react": "^4.2.0",
+    "dotenv": "^16.3.1",
     "drizzle-kit": "^0.20.0",
     "vite": "^5.0.0"
   }

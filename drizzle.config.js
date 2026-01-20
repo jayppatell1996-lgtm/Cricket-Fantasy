@@ -1,11 +1,12 @@
-import { defineConfig } from 'drizzle-kit';
+import 'dotenv/config';
 
-export default defineConfig({
+/** @type {import('drizzle-kit').Config} */
+export default {
   schema: './src/db/schema.js',
   out: './drizzle',
-  dialect: 'turso',
+  driver: 'turso',
   dbCredentials: {
     url: process.env.TURSO_DATABASE_URL,
     authToken: process.env.TURSO_AUTH_TOKEN,
   },
-});
+};

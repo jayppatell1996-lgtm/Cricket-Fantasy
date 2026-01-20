@@ -14,11 +14,22 @@ import { createClient } from '@libsql/client';
 
 const CRICKET_API_BASE = 'https://api.cricapi.com/v1';
 
-// Database connection
-const db = createClient({
-  url: process.env.TURSO_DATABASE_URL,
-  authToken: process.env.TURSO_AUTH_TOKEN,
-});
+// Database connection - with error handling
+let db = null;
+let dbError = null;
+
+try {
+  if (!process.env.TURSO_DATABASE_URL || !process.env.TURSO_AUTH_TOKEN) {
+    dbError = 'Missing TURSO_DATABASE_URL or TURSO_AUTH_TOKEN environment variables';
+  } else {
+    db = createClient({
+      url: process.env.TURSO_DATABASE_URL,
+      authToken: process.env.TURSO_AUTH_TOKEN,
+    });
+  }
+} catch (error) {
+  dbError = `Database connection error: ${error.message}`;
+}
 
 // Tournament configurations with correct Series IDs
 const TOURNAMENTS = {
@@ -97,7 +108,94 @@ const FALLBACK_PLAYERS = {
     { name: 'Ish Sodhi', team: 'NZ', position: 'bowler', price: 8.5, avgPoints: 31 },
     { name: 'Adam Milne', team: 'NZ', position: 'bowler', price: 8.0, avgPoints: 30 },
   ],
-  t20_wc_2026: [], // Will be fetched from API
+  t20_wc_2026: [
+    // INDIA
+    { name: 'Rohit Sharma', team: 'IND', position: 'batter', price: 12.0, avgPoints: 42 },
+    { name: 'Virat Kohli', team: 'IND', position: 'batter', price: 12.5, avgPoints: 45 },
+    { name: 'Suryakumar Yadav', team: 'IND', position: 'batter', price: 11.5, avgPoints: 46 },
+    { name: 'Shubman Gill', team: 'IND', position: 'batter', price: 10.5, avgPoints: 40 },
+    { name: 'Rishabh Pant', team: 'IND', position: 'keeper', price: 10.5, avgPoints: 40 },
+    { name: 'Hardik Pandya', team: 'IND', position: 'allrounder', price: 11.0, avgPoints: 42 },
+    { name: 'Ravindra Jadeja', team: 'IND', position: 'allrounder', price: 10.0, avgPoints: 38 },
+    { name: 'Jasprit Bumrah', team: 'IND', position: 'bowler', price: 12.0, avgPoints: 42 },
+    { name: 'Arshdeep Singh', team: 'IND', position: 'bowler', price: 9.5, avgPoints: 36 },
+    { name: 'Kuldeep Yadav', team: 'IND', position: 'bowler', price: 9.0, avgPoints: 35 },
+    // AUSTRALIA
+    { name: 'David Warner', team: 'AUS', position: 'batter', price: 10.5, avgPoints: 40 },
+    { name: 'Travis Head', team: 'AUS', position: 'batter', price: 10.5, avgPoints: 42 },
+    { name: 'Glenn Maxwell', team: 'AUS', position: 'allrounder', price: 10.5, avgPoints: 42 },
+    { name: 'Mitchell Marsh', team: 'AUS', position: 'allrounder', price: 9.5, avgPoints: 36 },
+    { name: 'Marcus Stoinis', team: 'AUS', position: 'allrounder', price: 9.0, avgPoints: 35 },
+    { name: 'Josh Inglis', team: 'AUS', position: 'keeper', price: 9.0, avgPoints: 34 },
+    { name: 'Pat Cummins', team: 'AUS', position: 'bowler', price: 10.5, avgPoints: 38 },
+    { name: 'Mitchell Starc', team: 'AUS', position: 'bowler', price: 10.5, avgPoints: 38 },
+    { name: 'Adam Zampa', team: 'AUS', position: 'bowler', price: 9.0, avgPoints: 35 },
+    { name: 'Josh Hazlewood', team: 'AUS', position: 'bowler', price: 9.5, avgPoints: 35 },
+    // ENGLAND
+    { name: 'Jos Buttler', team: 'ENG', position: 'keeper', price: 11.5, avgPoints: 48 },
+    { name: 'Phil Salt', team: 'ENG', position: 'batter', price: 10.0, avgPoints: 40 },
+    { name: 'Harry Brook', team: 'ENG', position: 'batter', price: 10.0, avgPoints: 40 },
+    { name: 'Jonny Bairstow', team: 'ENG', position: 'batter', price: 9.5, avgPoints: 38 },
+    { name: 'Liam Livingstone', team: 'ENG', position: 'allrounder', price: 9.0, avgPoints: 36 },
+    { name: 'Moeen Ali', team: 'ENG', position: 'allrounder', price: 8.5, avgPoints: 32 },
+    { name: 'Sam Curran', team: 'ENG', position: 'allrounder', price: 9.0, avgPoints: 35 },
+    { name: 'Jofra Archer', team: 'ENG', position: 'bowler', price: 10.0, avgPoints: 38 },
+    { name: 'Mark Wood', team: 'ENG', position: 'bowler', price: 9.5, avgPoints: 36 },
+    { name: 'Adil Rashid', team: 'ENG', position: 'bowler', price: 9.0, avgPoints: 35 },
+    // PAKISTAN
+    { name: 'Babar Azam', team: 'PAK', position: 'batter', price: 12.0, avgPoints: 44 },
+    { name: 'Mohammad Rizwan', team: 'PAK', position: 'keeper', price: 10.5, avgPoints: 42 },
+    { name: 'Fakhar Zaman', team: 'PAK', position: 'batter', price: 9.5, avgPoints: 36 },
+    { name: 'Shadab Khan', team: 'PAK', position: 'allrounder', price: 9.0, avgPoints: 35 },
+    { name: 'Shaheen Afridi', team: 'PAK', position: 'bowler', price: 10.5, avgPoints: 38 },
+    { name: 'Haris Rauf', team: 'PAK', position: 'bowler', price: 9.0, avgPoints: 34 },
+    { name: 'Naseem Shah', team: 'PAK', position: 'bowler', price: 9.0, avgPoints: 34 },
+    // SOUTH AFRICA
+    { name: 'Quinton de Kock', team: 'SA', position: 'keeper', price: 10.5, avgPoints: 42 },
+    { name: 'Aiden Markram', team: 'SA', position: 'batter', price: 9.5, avgPoints: 36 },
+    { name: 'Heinrich Klaasen', team: 'SA', position: 'keeper', price: 10.0, avgPoints: 40 },
+    { name: 'David Miller', team: 'SA', position: 'batter', price: 9.5, avgPoints: 38 },
+    { name: 'Tristan Stubbs', team: 'SA', position: 'batter', price: 8.5, avgPoints: 32 },
+    { name: 'Kagiso Rabada', team: 'SA', position: 'bowler', price: 10.0, avgPoints: 38 },
+    { name: 'Anrich Nortje', team: 'SA', position: 'bowler', price: 9.5, avgPoints: 36 },
+    { name: 'Tabraiz Shamsi', team: 'SA', position: 'bowler', price: 8.5, avgPoints: 32 },
+    // NEW ZEALAND
+    { name: 'Devon Conway', team: 'NZ', position: 'batter', price: 10.0, avgPoints: 40 },
+    { name: 'Finn Allen', team: 'NZ', position: 'batter', price: 9.5, avgPoints: 38 },
+    { name: 'Kane Williamson', team: 'NZ', position: 'batter', price: 10.0, avgPoints: 38 },
+    { name: 'Glenn Phillips', team: 'NZ', position: 'batter', price: 10.0, avgPoints: 40 },
+    { name: 'Daryl Mitchell', team: 'NZ', position: 'allrounder', price: 9.5, avgPoints: 36 },
+    { name: 'Mitchell Santner', team: 'NZ', position: 'allrounder', price: 9.0, avgPoints: 34 },
+    { name: 'Trent Boult', team: 'NZ', position: 'bowler', price: 10.0, avgPoints: 36 },
+    { name: 'Lockie Ferguson', team: 'NZ', position: 'bowler', price: 10.0, avgPoints: 38 },
+    { name: 'Tim Southee', team: 'NZ', position: 'bowler', price: 9.0, avgPoints: 33 },
+    // WEST INDIES
+    { name: 'Nicholas Pooran', team: 'WI', position: 'keeper', price: 10.0, avgPoints: 40 },
+    { name: 'Shai Hope', team: 'WI', position: 'batter', price: 9.0, avgPoints: 35 },
+    { name: 'Shimron Hetmyer', team: 'WI', position: 'batter', price: 9.0, avgPoints: 36 },
+    { name: 'Andre Russell', team: 'WI', position: 'allrounder', price: 11.0, avgPoints: 42 },
+    { name: 'Sunil Narine', team: 'WI', position: 'allrounder', price: 10.0, avgPoints: 38 },
+    { name: 'Alzarri Joseph', team: 'WI', position: 'bowler', price: 8.5, avgPoints: 32 },
+    { name: 'Akeal Hosein', team: 'WI', position: 'bowler', price: 8.5, avgPoints: 32 },
+    // SRI LANKA
+    { name: 'Pathum Nissanka', team: 'SL', position: 'batter', price: 9.5, avgPoints: 38 },
+    { name: 'Kusal Mendis', team: 'SL', position: 'keeper', price: 9.0, avgPoints: 36 },
+    { name: 'Charith Asalanka', team: 'SL', position: 'batter', price: 8.5, avgPoints: 34 },
+    { name: 'Wanindu Hasaranga', team: 'SL', position: 'allrounder', price: 10.0, avgPoints: 38 },
+    { name: 'Maheesh Theekshana', team: 'SL', position: 'bowler', price: 9.0, avgPoints: 35 },
+    // BANGLADESH
+    { name: 'Litton Das', team: 'BAN', position: 'keeper', price: 9.0, avgPoints: 36 },
+    { name: 'Shakib Al Hasan', team: 'BAN', position: 'allrounder', price: 9.5, avgPoints: 36 },
+    { name: 'Mustafizur Rahman', team: 'BAN', position: 'bowler', price: 8.5, avgPoints: 32 },
+    { name: 'Taskin Ahmed', team: 'BAN', position: 'bowler', price: 8.5, avgPoints: 32 },
+    // AFGHANISTAN
+    { name: 'Rashid Khan', team: 'AFG', position: 'bowler', price: 11.0, avgPoints: 40 },
+    { name: 'Mohammad Nabi', team: 'AFG', position: 'allrounder', price: 9.0, avgPoints: 34 },
+    { name: 'Rahmanullah Gurbaz', team: 'AFG', position: 'keeper', price: 9.5, avgPoints: 38 },
+    { name: 'Ibrahim Zadran', team: 'AFG', position: 'batter', price: 8.5, avgPoints: 32 },
+    { name: 'Naveen-ul-Haq', team: 'AFG', position: 'bowler', price: 8.5, avgPoints: 32 },
+    { name: 'Fazalhaq Farooqi', team: 'AFG', position: 'bowler', price: 8.5, avgPoints: 34 },
+  ],
   ipl_2026: [
     // CSK
     { name: 'MS Dhoni', team: 'CSK', position: 'keeper', price: 10.0, avgPoints: 35 },
@@ -406,6 +504,14 @@ export default async function handler(req, res) {
     return res.status(200).end();
   }
   
+  // Check for database configuration errors
+  if (dbError) {
+    return res.status(500).json({ 
+      error: dbError,
+      help: 'Make sure TURSO_DATABASE_URL and TURSO_AUTH_TOKEN are set in Vercel Environment Variables, then run "npm run db:push" locally to create tables.',
+    });
+  }
+  
   // Authorization check - only required for automated cron jobs
   // Manual sync from browser is allowed without auth
   const authHeader = req.headers.authorization;
@@ -418,6 +524,16 @@ export default async function handler(req, res) {
   }
   
   try {
+    // Test database connection first
+    try {
+      await db.execute('SELECT 1');
+    } catch (connError) {
+      return res.status(500).json({ 
+        error: `Database connection failed: ${connError.message}`,
+        help: 'Check TURSO_DATABASE_URL and TURSO_AUTH_TOKEN in Vercel Environment Variables. Make sure you ran "npm run db:push" to create the tables.',
+      });
+    }
+    
     const { tournament } = req.query;
     const results = [];
     
@@ -443,6 +559,9 @@ export default async function handler(req, res) {
     
   } catch (error) {
     console.error('Sync error:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ 
+      error: error.message,
+      stack: process.env.NODE_ENV !== 'production' ? error.stack : undefined,
+    });
   }
 }
