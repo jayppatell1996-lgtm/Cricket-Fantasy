@@ -3024,3 +3024,470 @@ button {
   padding: var(--spacing-md) var(--spacing-lg);
   font-size: 1rem;
 }
+
+/* ============================================
+   PLAYER PROFILE MODAL
+   ============================================ */
+.player-profile-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: var(--spacing-md);
+  animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.player-profile-content {
+  background: var(--bg-card);
+  border-radius: var(--radius-lg);
+  width: 100%;
+  max-width: 500px;
+  max-height: 90vh;
+  overflow-y: auto;
+  border: 1px solid var(--border-color);
+  animation: slideUp 0.3s ease;
+}
+
+@keyframes slideUp {
+  from { transform: translateY(20px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.player-profile-content .close-btn {
+  position: absolute;
+  top: var(--spacing-md);
+  right: var(--spacing-md);
+  background: var(--bg-input);
+  border: none;
+  color: var(--text-secondary);
+  font-size: 1.5rem;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  z-index: 10;
+}
+
+.player-profile-content .close-btn:hover {
+  background: var(--danger);
+  color: white;
+}
+
+.profile-header {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  padding: var(--spacing-lg);
+  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+  position: relative;
+}
+
+.player-avatar {
+  width: 60px;
+  height: 60px;
+  background: var(--accent);
+  border-radius: var(--radius-full);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.8rem;
+}
+
+.profile-info h2 {
+  font-size: 1.25rem;
+  font-weight: 700;
+  margin-bottom: var(--spacing-xs);
+}
+
+.profile-meta {
+  display: flex;
+  gap: var(--spacing-sm);
+}
+
+.profile-meta .team-badge {
+  background: var(--bg-input);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.profile-stats-summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  background: var(--border-color);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.profile-stats-summary .stat-box {
+  background: var(--bg-card);
+  padding: var(--spacing-md);
+  text-align: center;
+}
+
+.profile-stats-summary .stat-value {
+  display: block;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.profile-stats-summary .stat-label {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+}
+
+.game-log-section {
+  padding: var(--spacing-md);
+}
+
+.game-log-section h3 {
+  font-size: 0.9rem;
+  margin-bottom: var(--spacing-md);
+  color: var(--text-secondary);
+}
+
+.game-log-table {
+  font-size: 0.75rem;
+}
+
+.game-log-header {
+  display: grid;
+  grid-template-columns: 55px 40px repeat(6, 1fr);
+  gap: var(--spacing-xs);
+  padding: var(--spacing-sm);
+  background: var(--bg-input);
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  font-size: 0.65rem;
+}
+
+.game-log-row {
+  display: grid;
+  grid-template-columns: 55px 40px repeat(6, 1fr);
+  gap: var(--spacing-xs);
+  padding: var(--spacing-sm);
+  border-bottom: 1px solid var(--border-light);
+  align-items: center;
+}
+
+.game-log-row:last-child {
+  border-bottom: none;
+}
+
+.game-log-row .pts {
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.no-games {
+  text-align: center;
+  padding: var(--spacing-xl);
+  color: var(--text-muted);
+}
+
+.no-games .sub-text {
+  font-size: 0.8rem;
+  margin-top: var(--spacing-sm);
+}
+
+/* Clickable player row */
+.player-row.clickable {
+  cursor: pointer;
+}
+
+.player-row.clickable:hover {
+  background: var(--bg-card-hover);
+}
+
+/* ============================================
+   MOBILE OPTIMIZATIONS
+   ============================================ */
+@media (max-width: 768px) {
+  html {
+    font-size: 14px;
+  }
+
+  /* Dashboard Header */
+  .dashboard-header {
+    flex-direction: column;
+    gap: var(--spacing-md);
+    padding: var(--spacing-md);
+  }
+
+  .dashboard-header .header-left,
+  .dashboard-header .header-right {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .dashboard-header .team-info h1 {
+    font-size: 1.1rem;
+  }
+
+  .tournament-dropdown {
+    font-size: 0.75rem;
+    padding: var(--spacing-xs) var(--spacing-sm);
+  }
+
+  .points-display {
+    padding: var(--spacing-sm);
+  }
+
+  .points-value {
+    font-size: 1.2rem;
+  }
+
+  /* Navigation Tabs */
+  .dashboard-nav {
+    padding: var(--spacing-sm);
+    gap: var(--spacing-xs);
+    flex-wrap: wrap;
+  }
+
+  .nav-tab {
+    padding: var(--spacing-sm) var(--spacing-md);
+    font-size: 0.75rem;
+    flex: 1;
+    min-width: 70px;
+  }
+
+  /* Roster Section */
+  .roster-section-yahoo {
+    padding: var(--spacing-sm);
+  }
+
+  .section-label {
+    font-size: 0.8rem;
+  }
+
+  .stat-headers {
+    display: none;
+  }
+
+  .player-row {
+    padding: var(--spacing-sm);
+    gap: var(--spacing-sm);
+  }
+
+  .slot-indicator {
+    width: 28px;
+    font-size: 0.6rem;
+  }
+
+  .player-info-yahoo {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .player-name-yahoo {
+    font-size: 0.85rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .player-sub {
+    font-size: 0.65rem;
+  }
+
+  .player-stats-yahoo {
+    min-width: 50px;
+    text-align: right;
+  }
+
+  .player-stats-yahoo .stat-value {
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: var(--accent);
+  }
+
+  .player-actions-yahoo {
+    display: none;
+  }
+
+  /* Player Profile Modal - Mobile */
+  .player-profile-modal {
+    padding: 0;
+    align-items: flex-end;
+  }
+
+  .player-profile-content {
+    max-width: 100%;
+    max-height: 85vh;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  }
+
+  .profile-header {
+    padding: var(--spacing-md);
+  }
+
+  .player-avatar {
+    width: 50px;
+    height: 50px;
+    font-size: 1.5rem;
+  }
+
+  .profile-info h2 {
+    font-size: 1.1rem;
+  }
+
+  .game-log-header,
+  .game-log-row {
+    grid-template-columns: 50px 35px repeat(6, 1fr);
+    font-size: 0.6rem;
+  }
+
+  /* Login/Register Pages */
+  .login-page,
+  .register-page {
+    padding: var(--spacing-md);
+  }
+
+  .login-container,
+  .register-container {
+    padding: var(--spacing-lg);
+  }
+
+  .login-container h2,
+  .register-container h2 {
+    font-size: 1.3rem;
+  }
+
+  /* Tournament Select */
+  .tournament-container {
+    padding: var(--spacing-md);
+  }
+
+  .tournament-card {
+    padding: var(--spacing-md);
+  }
+
+  .tournament-card h3 {
+    font-size: 1rem;
+  }
+
+  /* Team Creation */
+  .create-team-page {
+    padding: var(--spacing-md);
+  }
+
+  .create-team-form {
+    padding: var(--spacing-lg);
+  }
+
+  /* Draft Page */
+  .draft-page {
+    padding: var(--spacing-sm);
+  }
+
+  .draft-header {
+    flex-direction: column;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-sm);
+  }
+
+  .draft-intro-content {
+    padding: var(--spacing-lg);
+  }
+
+  .draft-intro-content h1 {
+    font-size: 1.5rem;
+  }
+
+  .team-order {
+    flex-direction: column;
+  }
+
+  .player-card {
+    padding: var(--spacing-sm);
+  }
+
+  .player-card .player-name {
+    font-size: 0.85rem;
+  }
+
+  /* Admin Panel */
+  .admin-header {
+    flex-direction: column;
+    gap: var(--spacing-md);
+  }
+
+  .admin-tabs {
+    flex-wrap: wrap;
+  }
+
+  .admin-tab {
+    flex: 1;
+    min-width: 80px;
+    font-size: 0.7rem;
+    padding: var(--spacing-sm);
+  }
+
+  .admin-content {
+    padding: var(--spacing-md);
+  }
+
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  /* Free Agents */
+  .free-agents-view {
+    padding: var(--spacing-sm);
+  }
+
+  .search-filters {
+    flex-direction: column;
+    gap: var(--spacing-sm);
+  }
+
+  .search-filters input,
+  .search-filters select {
+    width: 100%;
+  }
+
+  .player-grid {
+    grid-template-columns: 1fr;
+    gap: var(--spacing-sm);
+  }
+
+  /* Buttons */
+  .btn-primary,
+  .btn-secondary {
+    padding: var(--spacing-sm) var(--spacing-md);
+    font-size: 0.85rem;
+  }
+}
+
+/* Extra small devices */
+@media (max-width: 380px) {
+  html {
+    font-size: 13px;
+  }
+
+  .player-name-yahoo {
+    max-width: 120px;
+  }
+
+  .game-log-header,
+  .game-log-row {
+    grid-template-columns: 45px 30px repeat(6, 1fr);
+    font-size: 0.55rem;
+  }
+}

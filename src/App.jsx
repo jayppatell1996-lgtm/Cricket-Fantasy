@@ -186,43 +186,31 @@ const SCORING_RULES = {
 };
 
 // Squad Configuration
-// Squad Configuration - Playing 12 + 4 Bench + 2 IL = 18 total
+// Squad Configuration - Playing 12 only (no bench, no IL)
 const SQUAD_CONFIG = {
-  // Playing 12
-  batters: { min: 5, max: 5, label: 'Batters', icon: '🏏', isPlaying: true },
+  batters: { min: 4, max: 4, label: 'Batters', icon: '🏏', isPlaying: true },
   keepers: { min: 1, max: 1, label: 'Wicketkeeper', icon: '🧤', isPlaying: true },
-  bowlers: { min: 5, max: 5, label: 'Bowlers', icon: '🎯', isPlaying: true },
-  flex: { min: 1, max: 1, label: 'Flex/Utility', icon: '⚡', isPlaying: true },
-  // Bench
-  bench: { min: 4, max: 4, label: 'Bench', icon: '🪑', isPlaying: false },
-  // Injured List
-  il: { min: 0, max: 2, label: 'IL', icon: '🏥', isPlaying: false },
+  allrounders: { min: 3, max: 3, label: 'All-rounders', icon: '⚡', isPlaying: true },
+  bowlers: { min: 4, max: 4, label: 'Bowlers', icon: '🎯', isPlaying: true },
 };
 
 // Position compatibility rules
 // Which positions can fill which slots
 const POSITION_COMPATIBILITY = {
-  batter: ['batters', 'flex'],                    // Batters can go in batter or flex slot
-  keeper: ['keepers', 'batters', 'flex'],         // Keepers can go in keeper, batter, or flex slot
-  bowler: ['bowlers', 'flex'],                    // Bowlers can go in bowler or flex slot
-  allrounder: ['batters', 'bowlers', 'flex'],     // Allrounders can go in batter, bowler, or flex
-  flex: ['flex', 'batters', 'bowlers'],           // Flex players can go anywhere in playing slots
+  batter: ['batters'],
+  keeper: ['keepers'],
+  bowler: ['bowlers'],
+  allrounder: ['allrounders'],
 };
 
 // Get valid slots for a player position
 const getValidSlotsForPosition = (position) => {
-  return POSITION_COMPATIBILITY[position] || ['flex'];
+  return POSITION_COMPATIBILITY[position] || [];
 };
 
 // Check if a player can be placed in a specific slot
 const canPlaceInSlot = (playerPosition, slotKey) => {
-  // Bench and IL can hold anyone
-  if (slotKey === 'bench' || slotKey === 'il') return true;
-  
-  // Flex can hold anyone
-  if (slotKey === 'flex') return true;
-  
-  const validSlots = getValidSlotsForPosition(playerPosition);
+  const validSlots = POSITION_COMPATIBILITY[playerPosition] || [];
   return validSlots.includes(slotKey);
 };
 
@@ -288,10 +276,7 @@ const getPlayerGameStatus = (player, matches, selectedDate = new Date()) => {
 };
 
 const FREE_AGENCY_LIMIT = 4;
-const TOTAL_ROSTER_SIZE = 18; // 12 playing + 4 bench + 2 IL
-const PLAYING_SIZE = 12;
-const BENCH_SIZE = 4;
-const IL_SIZE = 2;
+const TOTAL_ROSTER_SIZE = 12; // 4 batters + 1 keeper + 3 allrounders + 4 bowlers
 
 // Get start of current week (Monday at midnight)
 const getStartOfWeek = (date = new Date()) => {
@@ -846,7 +831,6 @@ const TeamCreationPage = ({ user, tournament, onTeamCreated }) => {
       userEmail: user.email, // Also store email for lookup
       logo: logoPreview || null,
       roster: [],
-      ir: [],
       weeklyPickups: 0,
       weeklyPickupLimit: FREE_AGENCY_LIMIT,
       weeklyPickupsResetDate: getStartOfWeek().toISOString(), // Track when week started
@@ -2212,7 +2196,8 @@ const Dashboard = ({ user, team, tournament, onLogout, onUpdateTeam, onBackToTou
   const [filterPosition, setFilterPosition] = useState('all');
   const [filterTeam, setFilterTeam] = useState('all');
   const [tradingWindowStatus, setTradingWindowStatus] = useState({ open: true, message: '' });
-  const [selectedDate, setSelectedDate] = useState(new Date()); // For viewing game schedules
+  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [selectedPlayerProfile, setSelectedPlayerProfile] = useState(null); // Player profile modal
   
   // Enhanced Test Mode State
   const [selectedMatch, setSelectedMatch] = useState(null);
@@ -2352,32 +2337,24 @@ const Dashboard = ({ user, team, tournament, onLogout, onUpdateTeam, onBackToTou
     return () => clearInterval(interval);
   }, [tournament.matches]);
 
-  // Group roster by assigned slot (not just position)
-  // Each player has a 'slot' property that indicates where they're placed
+  // Group roster by assigned slot (no bench, no IL - just playing 12)
   const rosterBySlot = {
     batters: team.roster.filter(p => p.slot === 'batters'),
     keepers: team.roster.filter(p => p.slot === 'keepers'),
+    allrounders: team.roster.filter(p => p.slot === 'allrounders'),
     bowlers: team.roster.filter(p => p.slot === 'bowlers'),
-    flex: team.roster.filter(p => p.slot === 'flex'),
-    bench: team.roster.filter(p => p.slot === 'bench'),
-    il: team.roster.filter(p => p.slot === 'il'),
   };
-  
-  // Also use old IR array for backward compatibility
-  const ilPlayers = [...rosterBySlot.il, ...(team.ir || [])];
   
   // For backward compatibility - old rosters without slots
   // Auto-assign slots based on position
   const migrateRosterToSlots = (roster) => {
     return roster.map(p => {
-      if (p.slot) return p; // Already has slot
-      
-      // Auto-assign based on position
+      if (p.slot) return p;
       if (p.position === 'batter') return { ...p, slot: 'batters' };
       if (p.position === 'keeper') return { ...p, slot: 'keepers' };
       if (p.position === 'bowler') return { ...p, slot: 'bowlers' };
-      if (p.position === 'allrounder' || p.position === 'flex') return { ...p, slot: 'flex' };
-      return { ...p, slot: 'bench' };
+      if (p.position === 'allrounder') return { ...p, slot: 'allrounders' };
+      return { ...p, slot: 'batters' }; // Default fallback
     });
   };
   
@@ -2393,7 +2370,7 @@ const Dashboard = ({ user, team, tournament, onLogout, onUpdateTeam, onBackToTou
   const getSlotCount = (slotKey) => rosterBySlot[slotKey]?.length || 0;
   
   // Check if a slot is full
-  const isSlotFull = (slotKey) => getSlotCount(slotKey) >= SQUAD_CONFIG[slotKey].max;
+  const isSlotFull = (slotKey) => SQUAD_CONFIG[slotKey] && getSlotCount(slotKey) >= SQUAD_CONFIG[slotKey].max;
   
   // Get available slots for a player's position
   const getAvailableSlotsForPlayer = (player) => {
@@ -2801,97 +2778,82 @@ const Dashboard = ({ user, team, tournament, onLogout, onUpdateTeam, onBackToTou
     }
   };
 
-  // Move player to IL (Injured List)
-  const handleMoveToIL = (player) => {
-    if (getSlotCount('il') >= IL_SIZE) {
-      alert('IL is full (max 2 players). Remove a player from IL first.');
-      return;
-    }
-    
-    const updatedRoster = team.roster.map(p => 
-      p.id === player.id ? { ...p, slot: 'il', isInjured: true } : p
-    );
-    
-    onUpdateTeam({ ...team, roster: updatedRoster });
-  };
-
-  const handleActivateFromIL = (player) => {
-    // Find an available slot for this player
-    const availableSlots = getAvailableSlotsForPlayer(player).filter(s => s !== 'il');
-    
-    if (availableSlots.length === 0 && isSlotFull('bench')) {
-      alert(`No available slots. Drop a player first.`);
-      return;
-    }
-    
-    // Prefer bench first, then playing slots
-    const targetSlot = !isSlotFull('bench') ? 'bench' : availableSlots[0];
-    
-    const updatedRoster = team.roster.map(p => 
-      p.id === player.id ? { ...p, slot: targetSlot, isInjured: false } : p
-    );
-    
-    onUpdateTeam({ ...team, roster: updatedRoster });
-  };
-  
-  // Legacy: handle old IR array
-  const handleActivateFromIR = (player) => {
-    // Find an available slot for this player
-    const availableSlots = getAvailableSlotsForPlayer(player);
-    
-    if (availableSlots.length === 0 && isSlotFull('bench')) {
-      alert(`No available slots. Drop a player first.`);
-      return;
-    }
-    
-    // Prefer playing slot, fallback to bench
-    const targetSlot = availableSlots[0] || 'bench';
-
-    const updatedTeam = {
-      ...team,
-      ir: team.ir.filter(p => p.id !== player.id),
-      roster: [...team.roster, { ...player, slot: targetSlot }],
-    };
-    onUpdateTeam(updatedTeam);
-  };
-  
-  // Move player from playing 12 to bench
-  const handleMoveToBench = (player) => {
-    if (isSlotFull('bench')) {
-      alert('Bench is full. Drop a bench player first.');
-      return;
-    }
-    
-    const updatedRoster = team.roster.map(p => 
-      p.id === player.id ? { ...p, slot: 'bench' } : p
-    );
-    
-    onUpdateTeam({ ...team, roster: updatedRoster });
-  };
-  
-  // Move player from bench to playing 12
-  const handleMoveToPlaying = (player) => {
-    const availableSlots = getAvailableSlotsForPlayer(player).filter(s => s !== 'bench' && s !== 'il');
-    
-    if (availableSlots.length === 0) {
-      alert(`No available playing slots for ${player.position}. Drop a player first.`);
-      return;
-    }
-    
-    if (availableSlots.length === 1) {
-      // Only one option, use it
-      const updatedRoster = team.roster.map(p => 
-        p.id === player.id ? { ...p, slot: availableSlots[0] } : p
-      );
-      onUpdateTeam({ ...team, roster: updatedRoster });
-    } else {
-      // Multiple options, show selector
-      setPlayerToAdd({ ...player, movingFromBench: true });
-    }
-  };
-
   return (
     <div className="dashboard">
+      {/* Player Profile Modal */}
+      {selectedPlayerProfile && (
+        <div className="player-profile-modal" onClick={() => setSelectedPlayerProfile(null)}>
+          <div className="player-profile-content" onClick={(e) => e.stopPropagation()}>
+            <button className="close-btn" onClick={() => setSelectedPlayerProfile(null)}>×</button>
+            
+            <div className="profile-header">
+              <div className="player-avatar">{selectedPlayerProfile.position === 'keeper' ? '🧤' : selectedPlayerProfile.position === 'bowler' ? '🎯' : selectedPlayerProfile.position === 'allrounder' ? '⚡' : '🏏'}</div>
+              <div className="profile-info">
+                <h2>{selectedPlayerProfile.name}</h2>
+                <div className="profile-meta">
+                  <span className="team-badge">{selectedPlayerProfile.team}</span>
+                  <span className={`position-badge ${selectedPlayerProfile.position}`}>{selectedPlayerProfile.position.toUpperCase()}</span>
+                </div>
+              </div>
+            </div>
+            
+            <div className="profile-stats-summary">
+              <div className="stat-box">
+                <span className="stat-value">{selectedPlayerProfile.totalPoints || 0}</span>
+                <span className="stat-label">Total Pts</span>
+              </div>
+              <div className="stat-box">
+                <span className="stat-value">{selectedPlayerProfile.matchesPlayed || 0}</span>
+                <span className="stat-label">Matches</span>
+              </div>
+              <div className="stat-box">
+                <span className="stat-value">
+                  {selectedPlayerProfile.matchesPlayed > 0 
+                    ? Math.round((selectedPlayerProfile.totalPoints || 0) / selectedPlayerProfile.matchesPlayed) 
+                    : '-'}
+                </span>
+                <span className="stat-label">Avg Pts</span>
+              </div>
+            </div>
+            
+            <div className="game-log-section">
+              <h3>📊 Game Log</h3>
+              {selectedPlayerProfile.gameLog && selectedPlayerProfile.gameLog.length > 0 ? (
+                <div className="game-log-table">
+                  <div className="game-log-header">
+                    <span>Date</span>
+                    <span>vs</span>
+                    <span>Runs</span>
+                    <span>SR</span>
+                    <span>Wkts</span>
+                    <span>Econ</span>
+                    <span>Ct/RO</span>
+                    <span>Pts</span>
+                  </div>
+                  {selectedPlayerProfile.gameLog.map((game, idx) => (
+                    <div key={idx} className="game-log-row">
+                      <span>{new Date(game.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                      <span>{game.opponent}</span>
+                      <span>{game.runs ?? '-'}</span>
+                      <span>{game.strikeRate ? game.strikeRate.toFixed(1) : '-'}</span>
+                      <span>{game.wickets ?? '-'}</span>
+                      <span>{game.economy ? game.economy.toFixed(1) : '-'}</span>
+                      <span>{(game.catches || 0) + (game.runOuts || 0) || '-'}</span>
+                      <span className="pts">{game.points}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="no-games">
+                  <p>No completed games yet</p>
+                  <p className="sub-text">Stats will appear here as matches are played</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       <header className="dashboard-header">
         <div className="header-left">
           {team.logo ? (
@@ -3016,7 +2978,7 @@ const Dashboard = ({ user, team, tournament, onLogout, onUpdateTeam, onBackToTou
                   <h4>Select slot for {playerToAdd.name}</h4>
                   <p className="player-position-info">Position: {playerToAdd.position.toUpperCase()}</p>
                   <div className="slot-options">
-                    {getAvailableSlotsForPlayer(playerToAdd).filter(s => s !== 'bench' && s !== 'il').map(slot => (
+                    {getAvailableSlotsForPlayer(playerToAdd).map(slot => (
                       <button 
                         key={slot}
                         className="slot-option-btn"
@@ -3028,29 +2990,16 @@ const Dashboard = ({ user, team, tournament, onLogout, onUpdateTeam, onBackToTou
                         </span>
                       </button>
                     ))}
-                    {!isSlotFull('bench') && (
-                      <button 
-                        className="slot-option-btn bench-option"
-                        onClick={() => confirmAddToSlot('bench')}
-                      >
-                        {SQUAD_CONFIG.bench.icon} {SQUAD_CONFIG.bench.label}
-                        <span className="slot-capacity">
-                          ({getSlotCount('bench')}/{SQUAD_CONFIG.bench.max})
-                        </span>
-                      </button>
-                    )}
                   </div>
                   <button className="btn-secondary" onClick={() => setPlayerToAdd(null)}>Cancel</button>
                 </div>
               </div>
             )}
 
-            {/* Starters Section - Yahoo Style */}
+            {/* Roster - Playing 12 */}
             <div className="roster-section-yahoo starters-section">
-              <div className="section-label">Starters</div>
+              <div className="section-label">Your Squad ({team.roster?.length || 0}/12)</div>
               <div className="stat-headers">
-                <span className="stat-header">RUNS</span>
-                <span className="stat-header">WKTS</span>
                 <span className="stat-header">PTS</span>
               </div>
               
@@ -3060,52 +3009,26 @@ const Dashboard = ({ user, team, tournament, onLogout, onUpdateTeam, onBackToTou
                   <React.Fragment key={slotKey}>
                     {rosterBySlot[slotKey]?.map(player => {
                       const gameStatus = getPlayerGameStatus(player, tournament.matches, selectedDate);
-                      const lockStatus = getPlayerLockStatus(player, tournament.matches);
-                      const isLocked = lockStatus.locked || !tradingWindowStatus.open;
                       
                       return (
-                        <div key={player.id} className={`player-row ${gameStatus.status} ${isLocked ? 'locked' : ''}`}>
-                          <div className="slot-indicator">{slotKey === 'keepers' ? 'WK' : slotKey === 'batters' ? 'BAT' : slotKey === 'bowlers' ? 'BWL' : 'UTIL'}</div>
+                        <div 
+                          key={player.id} 
+                          className={`player-row ${gameStatus.status} clickable`}
+                          onClick={() => setSelectedPlayerProfile(player)}
+                        >
+                          <div className="slot-indicator">{slotKey === 'keepers' ? 'WK' : slotKey === 'batters' ? 'BAT' : slotKey === 'bowlers' ? 'BWL' : 'AR'}</div>
                           <div className={`game-status-dot ${gameStatus.color}`}></div>
                           <div className="player-info-yahoo">
                             <div className="player-main">
                               <span className="player-name-yahoo">{player.name}</span>
-                              {player.position !== slotKey.slice(0, -1) && (
-                                <span className="position-eligibility">{player.position.toUpperCase().slice(0,3)}</span>
-                              )}
                             </div>
                             <div className="player-sub">
                               <span className="player-team-yahoo">{player.team}</span>
                               <span className="player-positions">• {player.position.toUpperCase()}</span>
                             </div>
-                            <div className={`game-info ${gameStatus.color}`}>
-                              {gameStatus.message}
-                            </div>
                           </div>
                           <div className="player-stats-yahoo">
-                            <span className="stat-value">{player.runs || '-'}</span>
-                            <span className="stat-value">{player.wickets || '-'}</span>
-                            <span className="stat-value points">{Math.round(player.totalPoints || 0) || '-'}</span>
-                          </div>
-                          <div className="player-proj">{player.matchesPlayed || 0} gms</div>
-                          <div className="player-actions-yahoo">
-                            <button 
-                              className="action-btn" 
-                              onClick={() => handleMoveToBench(player)}
-                              disabled={isLocked || isSlotFull('bench')}
-                              title="Move to bench"
-                            >↓</button>
-                            <button 
-                              className="action-btn il-btn" 
-                              onClick={() => handleMoveToIL(player)}
-                              disabled={isLocked || getSlotCount('il') >= IL_SIZE}
-                              title="Move to IL"
-                            >IL</button>
-                            <button 
-                              className="action-btn danger" 
-                              onClick={() => handleDropPlayer(player)}
-                              disabled={isLocked}
-                            >✕</button>
+                            <span className="stat-value">{player.totalPoints || 0}</span>
                           </div>
                         </div>
                       );
@@ -3113,194 +3036,18 @@ const Dashboard = ({ user, team, tournament, onLogout, onUpdateTeam, onBackToTou
                     {/* Empty slots for this position */}
                     {Array(config.max - (rosterBySlot[slotKey]?.length || 0)).fill(null).map((_, i) => (
                       <div key={`empty-${slotKey}-${i}`} className="player-row empty-row">
-                        <div className="slot-indicator">{slotKey === 'keepers' ? 'WK' : slotKey === 'batters' ? 'BAT' : slotKey === 'bowlers' ? 'BWL' : 'UTIL'}</div>
+                        <div className="slot-indicator">{slotKey === 'keepers' ? 'WK' : slotKey === 'batters' ? 'BAT' : slotKey === 'bowlers' ? 'BWL' : 'AR'}</div>
                         <div className="game-status-dot red"></div>
                         <div className="player-info-yahoo">
                           <span className="empty-slot-text">Empty {config.label} Slot</span>
                         </div>
                         <div className="player-stats-yahoo">
                           <span className="stat-value">-</span>
-                          <span className="stat-value">-</span>
-                          <span className="stat-value">-</span>
-                        </div>
-                        <div className="player-proj">-</div>
-                        <div className="player-actions-yahoo">
-                          <button 
-                            className="action-btn primary"
-                            onClick={() => {
-                              setSelectedPosition(slotKey);
-                              setShowPlayerModal(true);
-                            }}
-                            disabled={!tradingWindowStatus.open && isDraftComplete}
-                          >+</button>
                         </div>
                       </div>
                     ))}
                   </React.Fragment>
                 ))}
-            </div>
-            
-            {/* Bench Section */}
-            <div className="roster-section-yahoo bench-section-yahoo">
-              <div className="section-label">Bench</div>
-              <div className="stat-headers">
-                <span className="stat-header">RUNS</span>
-                <span className="stat-header">WKTS</span>
-                <span className="stat-header">PTS</span>
-              </div>
-              
-              {rosterBySlot.bench?.map(player => {
-                const gameStatus = getPlayerGameStatus(player, tournament.matches, selectedDate);
-                const lockStatus = getPlayerLockStatus(player, tournament.matches);
-                const isLocked = lockStatus.locked || !tradingWindowStatus.open;
-                const availablePlayingSlots = getAvailableSlotsForPlayer(player).filter(s => s !== 'bench' && s !== 'il');
-                
-                return (
-                  <div key={player.id} className={`player-row bench-row ${gameStatus.status} ${isLocked ? 'locked' : ''}`}>
-                    <div className="slot-indicator bench">BN</div>
-                    <div className={`game-status-dot ${gameStatus.color}`}></div>
-                    <div className="player-info-yahoo">
-                      <div className="player-main">
-                        <span className="player-name-yahoo">{player.name}</span>
-                      </div>
-                      <div className="player-sub">
-                        <span className="player-team-yahoo">{player.team}</span>
-                        <span className="player-positions">• {player.position.toUpperCase()}</span>
-                      </div>
-                      <div className={`game-info ${gameStatus.color}`}>
-                        {gameStatus.message}
-                      </div>
-                    </div>
-                    <div className="player-stats-yahoo">
-                      <span className="stat-value">{player.runs || '-'}</span>
-                      <span className="stat-value">{player.wickets || '-'}</span>
-                      <span className="stat-value points">{Math.round(player.totalPoints || 0) || '-'}</span>
-                    </div>
-                    <div className="player-proj">{player.matchesPlayed || 0} gms</div>
-                    <div className="player-actions-yahoo">
-                      {availablePlayingSlots.length > 0 && (
-                        <button 
-                          className="action-btn primary" 
-                          onClick={() => handleMoveToPlaying(player)}
-                          disabled={isLocked}
-                          title="Move to starters"
-                        >↑</button>
-                      )}
-                      <button 
-                        className="action-btn il-btn" 
-                        onClick={() => handleMoveToIL(player)}
-                        disabled={isLocked || getSlotCount('il') >= IL_SIZE}
-                        title="Move to IL"
-                      >IL</button>
-                      <button 
-                        className="action-btn danger" 
-                        onClick={() => handleDropPlayer(player)}
-                        disabled={isLocked}
-                      >✕</button>
-                    </div>
-                  </div>
-                );
-              })}
-              {Array(SQUAD_CONFIG.bench.max - (rosterBySlot.bench?.length || 0)).fill(null).map((_, i) => (
-                <div key={`empty-bench-${i}`} className="player-row empty-row bench-row">
-                  <div className="slot-indicator bench">BN</div>
-                  <div className="game-status-dot red"></div>
-                  <div className="player-info-yahoo">
-                    <span className="empty-slot-text">Empty Bench Slot</span>
-                  </div>
-                  <div className="player-stats-yahoo">
-                    <span className="stat-value">-</span>
-                    <span className="stat-value">-</span>
-                    <span className="stat-value">-</span>
-                  </div>
-                  <div className="player-proj">-</div>
-                  <div className="player-actions-yahoo">
-                    <button 
-                      className="action-btn primary"
-                      onClick={() => {
-                        setSelectedPosition('bench');
-                        setShowPlayerModal(true);
-                      }}
-                      disabled={!tradingWindowStatus.open && isDraftComplete}
-                    >+</button>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {/* IL Section */}
-            <div className="roster-section-yahoo il-section-yahoo">
-              <div className="section-label">IL (Injured List)</div>
-              <div className="stat-headers">
-                <span className="stat-header">RUNS</span>
-                <span className="stat-header">WKTS</span>
-                <span className="stat-header">PTS</span>
-              </div>
-              
-              {ilPlayers.map(player => {
-                const gameStatus = getPlayerGameStatus(player, tournament.matches, selectedDate);
-                const isFromOldIR = team.ir?.some(p => p.id === player.id);
-                
-                return (
-                  <div key={player.id} className={`player-row il-row ${gameStatus.status}`}>
-                    <div className="slot-indicator il">IL</div>
-                    <div className={`game-status-dot ${gameStatus.color}`}></div>
-                    <div className="player-info-yahoo">
-                      <div className="player-main">
-                        <span className="player-name-yahoo">{player.name}</span>
-                        <span className="injury-badge">INJ</span>
-                      </div>
-                      <div className="player-sub">
-                        <span className="player-team-yahoo">{player.team}</span>
-                        <span className="player-positions">• {player.position.toUpperCase()}</span>
-                      </div>
-                      <div className={`game-info ${gameStatus.color}`}>
-                        {gameStatus.message}
-                      </div>
-                    </div>
-                    <div className="player-stats-yahoo">
-                      <span className="stat-value">-</span>
-                      <span className="stat-value">-</span>
-                      <span className="stat-value">0.00</span>
-                    </div>
-                    <div className="player-proj">{player.matchesPlayed || 0} gms</div>
-                    <div className="player-actions-yahoo">
-                      <button 
-                        className="action-btn primary" 
-                        onClick={() => isFromOldIR ? handleActivateFromIR(player) : handleActivateFromIL(player)}
-                        title="Activate from IL"
-                      >↑</button>
-                      <button 
-                        className="action-btn danger" 
-                        onClick={() => handleDropPlayer(player)}
-                        title="Drop player"
-                      >✕</button>
-                    </div>
-                  </div>
-                );
-              })}
-              {Array(IL_SIZE - ilPlayers.length).fill(null).map((_, i) => (
-                <div key={`empty-il-${i}`} className="player-row empty-row il-row">
-                  <div className="slot-indicator il">IL</div>
-                  <div className="game-status-dot red"></div>
-                  <div className="player-info-yahoo">
-                    <span className="empty-slot-text">Empty IL Slot</span>
-                  </div>
-                  <div className="player-stats-yahoo">
-                    <span className="stat-value">-</span>
-                    <span className="stat-value">-</span>
-                    <span className="stat-value">-</span>
-                  </div>
-                  <div className="player-proj">-</div>
-                  <div className="player-actions-yahoo">
-                    <button 
-                      className="action-btn"
-                      disabled
-                      title="Move injured player here"
-                    >+</button>
-                  </div>
-                </div>
-              ))}
             </div>
           </div>
         )}
