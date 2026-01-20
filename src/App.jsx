@@ -495,16 +495,40 @@ const generateSnakeDraftOrder = (teams, totalRounds) => {
 
 // Tournament Selection Page
 const TournamentSelectPage = ({ onSelectTournament, user, onLogout }) => {
+  // Debug: Log localStorage state when page loads
+  useEffect(() => {
+    console.log('📋 TournamentSelectPage loaded');
+    console.log('   User:', user?.email, 'ID:', user?.id);
+    const allTeamsRaw = localStorage.getItem('t20fantasy_all_teams');
+    console.log('   allTeams raw:', allTeamsRaw);
+    if (allTeamsRaw) {
+      try {
+        const teams = JSON.parse(allTeamsRaw);
+        console.log('   allTeams parsed:', teams.map(t => ({ name: t.name, owner: t.owner, tournamentId: t.tournamentId, userId: t.userId, userEmail: t.userEmail })));
+      } catch (e) {
+        console.log('   allTeams parse error:', e);
+      }
+    }
+    // List all t20fantasy localStorage keys
+    const keys = Object.keys(localStorage).filter(k => k.startsWith('t20fantasy'));
+    console.log('   All t20fantasy keys:', keys);
+  }, [user]);
+
   // Check which tournaments user already has teams for
   const getUserTeamStatus = (tournamentId) => {
-    if (!user) return false;
+    if (!user) {
+      console.log(`🔍 getUserTeamStatus(${tournamentId}): No user`);
+      return false;
+    }
+    
+    console.log(`🔍 Checking ${tournamentId} for ${user.email} (${user.id})`);
     
     // Check all possible storage locations
     // 1. User-specific key by ID
     const userSpecificKey = `t20fantasy_team_${tournamentId}_${user?.id}`;
     const userSpecificTeam = localStorage.getItem(userSpecificKey);
     if (userSpecificTeam) {
-      console.log(`✅ Team found in user-specific key: ${userSpecificKey}`);
+      console.log(`   ✅ Found via ID key`);
       return true;
     }
     
@@ -512,7 +536,7 @@ const TournamentSelectPage = ({ onSelectTournament, user, onLogout }) => {
     const emailKey = `t20fantasy_team_${tournamentId}_${user?.email?.toLowerCase()}`;
     const emailTeam = localStorage.getItem(emailKey);
     if (emailTeam) {
-      console.log(`✅ Team found in email-specific key: ${emailKey}`);
+      console.log(`   ✅ Found via email key`);
       return true;
     }
     
@@ -523,7 +547,7 @@ const TournamentSelectPage = ({ onSelectTournament, user, onLogout }) => {
       if (!parsed.userId || parsed.userId === user?.id || 
           parsed.owner?.toLowerCase() === user?.name?.toLowerCase() ||
           parsed.userEmail?.toLowerCase() === user?.email?.toLowerCase()) {
-        console.log(`✅ Team found in old format key for tournament: ${tournamentId}`);
+        console.log(`   ✅ Found via old format key`);
         return true;
       }
     }
@@ -532,19 +556,24 @@ const TournamentSelectPage = ({ onSelectTournament, user, onLogout }) => {
     const savedAllTeams = localStorage.getItem('t20fantasy_all_teams');
     if (savedAllTeams) {
       const teams = JSON.parse(savedAllTeams);
-      const hasTeam = teams.some(t => 
+      const matchingTeam = teams.find(t => 
         t.tournamentId === tournamentId && 
         (t.userId === user?.id || 
          t.userEmail?.toLowerCase() === user?.email?.toLowerCase() ||
          t.owner?.toLowerCase() === user?.name?.toLowerCase())
       );
-      if (hasTeam) {
-        console.log(`✅ Team found in allTeams for tournament: ${tournamentId}`);
+      if (matchingTeam) {
+        console.log(`   ✅ Found in allTeams: ${matchingTeam.name}`);
         return true;
+      }
+      // Debug: show all teams for this tournament
+      const tournamentTeams = teams.filter(t => t.tournamentId === tournamentId);
+      if (tournamentTeams.length > 0) {
+        console.log(`   Teams in ${tournamentId}:`, tournamentTeams.map(t => ({ name: t.name, owner: t.owner, userId: t.userId, userEmail: t.userEmail })));
       }
     }
     
-    console.log(`❌ No team found for tournament: ${tournamentId}, user: ${user?.email} (id: ${user?.id})`);
+    console.log(`   ❌ No team found`);
     return false;
   };
 
@@ -4304,6 +4333,9 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    console.log('🚪 LOGOUT - Preserving team data');
+    console.log('   Before logout, allTeams in localStorage:', localStorage.getItem('t20fantasy_all_teams'));
+    
     // Only clear user session, NOT all data
     // Keep: teams, draft status, users list
     setUser(null);
@@ -4317,6 +4349,8 @@ export default function App() {
     localStorage.removeItem('t20fantasy_tournament');
     
     // DO NOT call localStorage.clear() - it wipes all team data!
+    
+    console.log('   After logout, allTeams in localStorage:', localStorage.getItem('t20fantasy_all_teams'));
     
     setCurrentPage('login');
   };
