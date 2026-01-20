@@ -19,11 +19,11 @@ const TOURNAMENTS = {
     isTest: true,
     draftStatus: 'pending', // pending, open, in_progress, completed
     matches: [
-      { id: 'm1', name: '1st T20I', teams: 'IND vs NZ', venue: 'Rajkot', date: '2026-01-15', status: 'completed' },
-      { id: 'm2', name: '2nd T20I', teams: 'IND vs NZ', venue: 'Mumbai', date: '2026-01-18', status: 'completed' },
-      { id: 'm3', name: '3rd T20I', teams: 'IND vs NZ', venue: 'Kolkata', date: '2026-01-21', status: 'live' },
-      { id: 'm4', name: '4th T20I', teams: 'IND vs NZ', venue: 'Delhi', date: '2026-01-23', status: 'upcoming' },
-      { id: 'm5', name: '5th T20I', teams: 'IND vs NZ', venue: 'Bangalore', date: '2026-01-25', status: 'upcoming' },
+      { id: 'm1', name: '1st T20I', teams: ['IND', 'NZ'], venue: 'Rajkot', date: '2026-01-15', startTime: '19:00', status: 'completed' },
+      { id: 'm2', name: '2nd T20I', teams: ['IND', 'NZ'], venue: 'Mumbai', date: '2026-01-18', startTime: '19:00', status: 'completed' },
+      { id: 'm3', name: '3rd T20I', teams: ['IND', 'NZ'], venue: 'Kolkata', date: '2026-01-21', startTime: '19:00', status: 'live' },
+      { id: 'm4', name: '4th T20I', teams: ['IND', 'NZ'], venue: 'Delhi', date: '2026-01-23', startTime: '19:00', status: 'upcoming' },
+      { id: 'm5', name: '5th T20I', teams: ['IND', 'NZ'], venue: 'Bangalore', date: '2026-01-25', startTime: '19:00', status: 'upcoming' },
     ],
   },
   t20_wc_2026: {
@@ -37,7 +37,7 @@ const TOURNAMENTS = {
     teams: ['IND', 'AUS', 'ENG', 'PAK', 'NZ', 'SA', 'WI', 'SL', 'BAN', 'AFG', 'ZIM', 'IRE', 'SCO', 'NAM', 'USA', 'NEP'],
     isTest: false,
     draftStatus: 'pending',
-    matches: [], // Will be populated when tournament starts
+    matches: [], // Will be populated from API when tournament starts
   },
   ipl_2026: {
     id: 'ipl_2026',
@@ -50,8 +50,100 @@ const TOURNAMENTS = {
     teams: ['CSK', 'MI', 'RCB', 'KKR', 'DC', 'PBKS', 'RR', 'SRH', 'GT', 'LSG'],
     isTest: false,
     draftStatus: 'pending',
-    matches: [], // Will be populated when tournament starts
+    matches: [], // Will be populated from API when tournament starts
   },
+};
+
+// Trading Window Configuration
+// Trading window: 8 PM MST (previous day) to game start time
+// MST is UTC-7
+const TRADING_WINDOW = {
+  openHour: 20, // 8 PM MST
+  timezone: 'America/Denver', // MST
+};
+
+// Check if a player is locked (their game has started or is in progress)
+const isPlayerLocked = (player, matches) => {
+  if (!matches || matches.length === 0) return false;
+  
+  const now = new Date();
+  
+  // Find today's or upcoming match for this player's team
+  const playerTeam = player.team;
+  
+  for (const match of matches) {
+    // Check if player's team is in this match
+    const teamsInMatch = Array.isArray(match.teams) ? match.teams : match.teams.split(' vs ').map(t => t.trim());
+    if (!teamsInMatch.some(t => t === playerTeam || t.includes(playerTeam))) continue;
+    
+    // Parse match date and time
+    const matchDate = new Date(match.date);
+    const [hours, minutes] = (match.startTime || '19:00').split(':').map(Number);
+    matchDate.setHours(hours, minutes, 0, 0);
+    
+    // If match is live or completed today, player is locked
+    if (match.status === 'live') return true;
+    
+    // If match is upcoming and has started (current time > match start time)
+    if (match.status === 'upcoming' && now >= matchDate) return true;
+    
+    // If match is today and game time has passed
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const matchDay = new Date(match.date);
+    matchDay.setHours(0, 0, 0, 0);
+    
+    if (matchDay.getTime() === today.getTime() && now >= matchDate) return true;
+  }
+  
+  return false;
+};
+
+// Check if we're in the trading window
+const isInTradingWindow = (matches) => {
+  const now = new Date();
+  const currentHour = now.getHours();
+  
+  // Trading window opens at 8 PM MST
+  // For simplicity, we'll use local time comparison
+  // In production, you'd want proper timezone handling
+  
+  // Find the next match
+  const upcomingMatches = (matches || []).filter(m => m.status === 'upcoming');
+  if (upcomingMatches.length === 0) {
+    // No upcoming matches, trading is open
+    return true;
+  }
+  
+  // Sort by date to get next match
+  upcomingMatches.sort((a, b) => new Date(a.date) - new Date(b.date));
+  const nextMatch = upcomingMatches[0];
+  
+  // Parse next match date/time
+  const matchDate = new Date(nextMatch.date);
+  const [hours, minutes] = (nextMatch.startTime || '19:00').split(':').map(Number);
+  matchDate.setHours(hours, minutes, 0, 0);
+  
+  // Trading window: from 8 PM day before to match start
+  const windowStart = new Date(matchDate);
+  windowStart.setDate(windowStart.getDate() - 1);
+  windowStart.setHours(TRADING_WINDOW.openHour, 0, 0, 0);
+  
+  // We're in trading window if: now >= windowStart AND now < matchStart
+  return now >= windowStart && now < matchDate;
+};
+
+// Get lock status message for a player
+const getPlayerLockStatus = (player, matches) => {
+  if (isPlayerLocked(player, matches)) {
+    return { locked: true, message: '🔒 Locked - Game in progress' };
+  }
+  
+  if (!isInTradingWindow(matches)) {
+    return { locked: true, message: '⏰ Trading window closed' };
+  }
+  
+  return { locked: false, message: '' };
 };
 
 // Admin Configuration
@@ -94,44 +186,154 @@ const SCORING_RULES = {
 };
 
 // Squad Configuration
+// Squad Configuration - Playing 12 + 4 Bench + 2 IL = 18 total
 const SQUAD_CONFIG = {
-  batters: { min: 6, max: 6, label: 'Batters', icon: '🏏' },
-  keepers: { min: 2, max: 2, label: 'Wicketkeepers', icon: '🧤' },
-  bowlers: { min: 6, max: 6, label: 'Bowlers', icon: '🎯' },
-  flex: { min: 2, max: 2, label: 'Flex/Utility', icon: '⚡' },
+  // Playing 12
+  batters: { min: 5, max: 5, label: 'Batters', icon: '🏏', isPlaying: true },
+  keepers: { min: 1, max: 1, label: 'Wicketkeeper', icon: '🧤', isPlaying: true },
+  bowlers: { min: 5, max: 5, label: 'Bowlers', icon: '🎯', isPlaying: true },
+  flex: { min: 1, max: 1, label: 'Flex/Utility', icon: '⚡', isPlaying: true },
+  // Bench
+  bench: { min: 4, max: 4, label: 'Bench', icon: '🪑', isPlaying: false },
+  // Injured List
+  il: { min: 0, max: 2, label: 'IL', icon: '🏥', isPlaying: false },
+};
+
+// Position compatibility rules
+// Which positions can fill which slots
+const POSITION_COMPATIBILITY = {
+  batter: ['batters', 'flex'],                    // Batters can go in batter or flex slot
+  keeper: ['keepers', 'batters', 'flex'],         // Keepers can go in keeper, batter, or flex slot
+  bowler: ['bowlers', 'flex'],                    // Bowlers can go in bowler or flex slot
+  allrounder: ['batters', 'bowlers', 'flex'],     // Allrounders can go in batter, bowler, or flex
+  flex: ['flex', 'batters', 'bowlers'],           // Flex players can go anywhere in playing slots
+};
+
+// Get valid slots for a player position
+const getValidSlotsForPosition = (position) => {
+  return POSITION_COMPATIBILITY[position] || ['flex'];
+};
+
+// Check if a player can be placed in a specific slot
+const canPlaceInSlot = (playerPosition, slotKey) => {
+  // Bench and IL can hold anyone
+  if (slotKey === 'bench' || slotKey === 'il') return true;
+  
+  // Flex can hold anyone
+  if (slotKey === 'flex') return true;
+  
+  const validSlots = getValidSlotsForPosition(playerPosition);
+  return validSlots.includes(slotKey);
+};
+
+// Game status for a player on a specific date
+const getPlayerGameStatus = (player, matches, selectedDate = new Date()) => {
+  if (!matches || matches.length === 0) {
+    return { status: 'no_game', message: 'No Game', color: 'red' };
+  }
+  
+  const playerTeam = player.team;
+  const dateStr = selectedDate.toISOString().split('T')[0];
+  
+  for (const match of matches) {
+    // Check if player's team is in this match
+    const teamsInMatch = Array.isArray(match.teams) ? match.teams : match.teams.split(' vs ').map(t => t.trim());
+    if (!teamsInMatch.some(t => t === playerTeam || t.includes(playerTeam))) continue;
+    
+    // Check if match is on selected date
+    const matchDate = match.date;
+    if (matchDate !== dateStr) continue;
+    
+    // Found a match for this player on this date
+    const matchTime = match.startTime || '19:00';
+    const [hours, minutes] = matchTime.split(':').map(Number);
+    const matchDateTime = new Date(match.date);
+    matchDateTime.setHours(hours, minutes, 0, 0);
+    
+    const now = new Date();
+    
+    if (match.status === 'live' || match.status === 'in_progress') {
+      return { 
+        status: 'live', 
+        message: `LIVE vs ${teamsInMatch.find(t => t !== playerTeam)}`,
+        matchTime: matchTime,
+        color: 'green'
+      };
+    } else if (match.status === 'completed') {
+      return { 
+        status: 'completed', 
+        message: `Final vs ${teamsInMatch.find(t => t !== playerTeam)}`,
+        matchTime: matchTime,
+        color: 'gray'
+      };
+    } else if (now < matchDateTime) {
+      return { 
+        status: 'upcoming', 
+        message: `${matchTime} vs ${teamsInMatch.find(t => t !== playerTeam)}`,
+        matchTime: matchTime,
+        venue: match.venue,
+        color: 'blue'
+      };
+    } else {
+      return { 
+        status: 'live', 
+        message: `LIVE vs ${teamsInMatch.find(t => t !== playerTeam)}`,
+        matchTime: matchTime,
+        color: 'green'
+      };
+    }
+  }
+  
+  return { status: 'no_game', message: 'No Game', color: 'red' };
 };
 
 const FREE_AGENCY_LIMIT = 4;
-const TOTAL_ROSTER_SIZE = 16;
+const TOTAL_ROSTER_SIZE = 18; // 12 playing + 4 bench + 2 IL
+const PLAYING_SIZE = 12;
+const BENCH_SIZE = 4;
+const IL_SIZE = 2;
 
 // Test Players for India vs NZ
 const TEST_PLAYERS_IND_NZ = [
-  // India
+  // India - Batters
   { id: 't1', name: 'Virat Kohli', team: 'IND', position: 'batter', price: 12.5, avgPoints: 45.2, totalPoints: 0 },
   { id: 't2', name: 'Rohit Sharma', team: 'IND', position: 'batter', price: 12.0, avgPoints: 42.8, totalPoints: 0 },
   { id: 't3', name: 'Suryakumar Yadav', team: 'IND', position: 'batter', price: 11.0, avgPoints: 44.1, totalPoints: 0 },
   { id: 't4', name: 'Shubman Gill', team: 'IND', position: 'batter', price: 10.0, avgPoints: 38.5, totalPoints: 0 },
+  { id: 't25', name: 'Yashasvi Jaiswal', team: 'IND', position: 'batter', price: 10.0, avgPoints: 40.0, totalPoints: 0 },
+  // India - Keepers
   { id: 't5', name: 'Rishabh Pant', team: 'IND', position: 'keeper', price: 10.5, avgPoints: 40.2, totalPoints: 0 },
   { id: 't6', name: 'KL Rahul', team: 'IND', position: 'keeper', price: 9.5, avgPoints: 36.8, totalPoints: 0 },
+  // India - Bowlers
   { id: 't7', name: 'Jasprit Bumrah', team: 'IND', position: 'bowler', price: 11.0, avgPoints: 38.2, totalPoints: 0 },
   { id: 't8', name: 'Mohammed Shami', team: 'IND', position: 'bowler', price: 9.5, avgPoints: 34.5, totalPoints: 0 },
-  { id: 't9', name: 'Ravindra Jadeja', team: 'IND', position: 'flex', price: 10.0, avgPoints: 36.2, totalPoints: 0 },
-  { id: 't10', name: 'Hardik Pandya', team: 'IND', position: 'flex', price: 9.5, avgPoints: 35.8, totalPoints: 0 },
   { id: 't11', name: 'Yuzvendra Chahal', team: 'IND', position: 'bowler', price: 8.5, avgPoints: 32.1, totalPoints: 0 },
   { id: 't12', name: 'Kuldeep Yadav', team: 'IND', position: 'bowler', price: 8.0, avgPoints: 30.5, totalPoints: 0 },
-  // New Zealand
+  { id: 't26', name: 'Arshdeep Singh', team: 'IND', position: 'bowler', price: 8.5, avgPoints: 31.0, totalPoints: 0 },
+  // India - Allrounders (can go in batter/bowler/flex)
+  { id: 't9', name: 'Ravindra Jadeja', team: 'IND', position: 'allrounder', price: 10.0, avgPoints: 36.2, totalPoints: 0 },
+  { id: 't10', name: 'Hardik Pandya', team: 'IND', position: 'allrounder', price: 9.5, avgPoints: 35.8, totalPoints: 0 },
+  { id: 't27', name: 'Axar Patel', team: 'IND', position: 'allrounder', price: 8.5, avgPoints: 32.0, totalPoints: 0 },
+  
+  // New Zealand - Batters
   { id: 't13', name: 'Kane Williamson', team: 'NZ', position: 'batter', price: 11.0, avgPoints: 40.5, totalPoints: 0 },
   { id: 't14', name: 'Devon Conway', team: 'NZ', position: 'batter', price: 10.0, avgPoints: 38.2, totalPoints: 0 },
   { id: 't15', name: 'Glenn Phillips', team: 'NZ', position: 'batter', price: 9.5, avgPoints: 36.8, totalPoints: 0 },
   { id: 't16', name: 'Daryl Mitchell', team: 'NZ', position: 'batter', price: 9.0, avgPoints: 35.2, totalPoints: 0 },
+  { id: 't28', name: 'Finn Allen', team: 'NZ', position: 'batter', price: 8.5, avgPoints: 34.0, totalPoints: 0 },
+  // New Zealand - Keepers
   { id: 't17', name: 'Tom Latham', team: 'NZ', position: 'keeper', price: 8.5, avgPoints: 32.5, totalPoints: 0 },
   { id: 't18', name: 'Tom Blundell', team: 'NZ', position: 'keeper', price: 7.5, avgPoints: 28.2, totalPoints: 0 },
+  // New Zealand - Bowlers
   { id: 't19', name: 'Trent Boult', team: 'NZ', position: 'bowler', price: 10.0, avgPoints: 35.8, totalPoints: 0 },
   { id: 't20', name: 'Tim Southee', team: 'NZ', position: 'bowler', price: 9.0, avgPoints: 33.2, totalPoints: 0 },
   { id: 't21', name: 'Matt Henry', team: 'NZ', position: 'bowler', price: 8.0, avgPoints: 30.5, totalPoints: 0 },
-  { id: 't22', name: 'Mitchell Santner', team: 'NZ', position: 'flex', price: 8.5, avgPoints: 31.8, totalPoints: 0 },
-  { id: 't23', name: 'Rachin Ravindra', team: 'NZ', position: 'flex', price: 9.0, avgPoints: 34.5, totalPoints: 0 },
   { id: 't24', name: 'Lockie Ferguson', team: 'NZ', position: 'bowler', price: 8.5, avgPoints: 32.8, totalPoints: 0 },
+  { id: 't29', name: 'Ish Sodhi', team: 'NZ', position: 'bowler', price: 7.5, avgPoints: 28.0, totalPoints: 0 },
+  // New Zealand - Allrounders
+  { id: 't22', name: 'Mitchell Santner', team: 'NZ', position: 'allrounder', price: 8.5, avgPoints: 31.8, totalPoints: 0 },
+  { id: 't23', name: 'Rachin Ravindra', team: 'NZ', position: 'allrounder', price: 9.0, avgPoints: 34.5, totalPoints: 0 },
+  { id: 't30', name: 'Michael Bracewell', team: 'NZ', position: 'allrounder', price: 8.0, avgPoints: 30.0, totalPoints: 0 },
 ];
 
 // Full player pool for T20 WC and IPL
@@ -173,15 +375,18 @@ const FULL_PLAYER_POOL = [
   { id: 51, name: 'Kagiso Rabada', team: 'SA', position: 'bowler', price: 9.5, avgPoints: 35.2, totalPoints: 0 },
   { id: 52, name: 'Josh Hazlewood', team: 'AUS', position: 'bowler', price: 9.0, avgPoints: 33.5, totalPoints: 0 },
   { id: 53, name: 'Lockie Ferguson', team: 'NZ', position: 'bowler', price: 8.5, avgPoints: 32.8, totalPoints: 0 },
-  // Flex/All-rounders
-  { id: 60, name: 'Hardik Pandya', team: 'IND', position: 'flex', price: 10.5, avgPoints: 38.5, totalPoints: 0 },
-  { id: 61, name: 'Glenn Maxwell', team: 'AUS', position: 'flex', price: 10.0, avgPoints: 40.2, totalPoints: 0 },
-  { id: 62, name: 'Shakib Al Hasan', team: 'BAN', position: 'flex', price: 9.0, avgPoints: 34.5, totalPoints: 0 },
-  { id: 63, name: 'Ravindra Jadeja', team: 'IND', position: 'flex', price: 9.5, avgPoints: 36.2, totalPoints: 0 },
-  { id: 64, name: 'Marcus Stoinis', team: 'AUS', position: 'flex', price: 8.5, avgPoints: 33.8, totalPoints: 0 },
-  { id: 65, name: 'Mitchell Marsh', team: 'AUS', position: 'flex', price: 9.0, avgPoints: 35.5, totalPoints: 0 },
-  { id: 66, name: 'Moeen Ali', team: 'ENG', position: 'flex', price: 8.0, avgPoints: 31.2, totalPoints: 0 },
-  { id: 67, name: 'Liam Livingstone', team: 'ENG', position: 'flex', price: 8.5, avgPoints: 34.8, totalPoints: 0 },
+  // Allrounders (can go in batter/bowler/flex slots)
+  { id: 60, name: 'Hardik Pandya', team: 'IND', position: 'allrounder', price: 10.5, avgPoints: 38.5, totalPoints: 0 },
+  { id: 61, name: 'Glenn Maxwell', team: 'AUS', position: 'allrounder', price: 10.0, avgPoints: 40.2, totalPoints: 0 },
+  { id: 62, name: 'Shakib Al Hasan', team: 'BAN', position: 'allrounder', price: 9.0, avgPoints: 34.5, totalPoints: 0 },
+  { id: 63, name: 'Ravindra Jadeja', team: 'IND', position: 'allrounder', price: 9.5, avgPoints: 36.2, totalPoints: 0 },
+  { id: 64, name: 'Marcus Stoinis', team: 'AUS', position: 'allrounder', price: 8.5, avgPoints: 33.8, totalPoints: 0 },
+  { id: 65, name: 'Mitchell Marsh', team: 'AUS', position: 'allrounder', price: 9.0, avgPoints: 35.5, totalPoints: 0 },
+  { id: 66, name: 'Moeen Ali', team: 'ENG', position: 'allrounder', price: 8.0, avgPoints: 31.2, totalPoints: 0 },
+  { id: 67, name: 'Liam Livingstone', team: 'ENG', position: 'allrounder', price: 8.5, avgPoints: 34.8, totalPoints: 0 },
+  { id: 68, name: 'Sam Curran', team: 'ENG', position: 'allrounder', price: 8.5, avgPoints: 33.5, totalPoints: 0 },
+  { id: 69, name: 'Andre Russell', team: 'WI', position: 'allrounder', price: 10.0, avgPoints: 38.0, totalPoints: 0 },
+  { id: 70, name: 'Sunil Narine', team: 'WI', position: 'allrounder', price: 9.0, avgPoints: 35.0, totalPoints: 0 },
 ];
 
 // ============================================
@@ -291,7 +496,7 @@ const generateSnakeDraftOrder = (teams, totalRounds) => {
 // ============================================
 
 // Tournament Selection Page
-const TournamentSelectPage = ({ onSelectTournament }) => {
+const TournamentSelectPage = ({ onSelectTournament, user, onLogout }) => {
   return (
     <div className="tournament-select-page">
       <div className="tournament-container">
@@ -299,6 +504,12 @@ const TournamentSelectPage = ({ onSelectTournament }) => {
           <div className="logo-icon">🏏</div>
           <h1>T20 Fantasy Cricket</h1>
           <p>Select a Tournament</p>
+          {user && (
+            <div className="logged-in-as">
+              <span>👤 {user.name || user.email}</span>
+              <button className="btn-small btn-secondary" onClick={onLogout}>Logout</button>
+            </div>
+          )}
         </div>
         
         <div className="tournament-list">
@@ -332,7 +543,7 @@ const TournamentSelectPage = ({ onSelectTournament }) => {
 };
 
 // Login Page Component
-const LoginPage = ({ onLogin, onShowSignup, tournament }) => {
+const LoginPage = ({ onLogin, onShowSignup }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -363,9 +574,8 @@ const LoginPage = ({ onLogin, onShowSignup, tournament }) => {
       <div className="login-container">
         <div className="login-header">
           <div className="logo-icon">🏏</div>
-          <h1>T20 Fantasy</h1>
-          <p>{tournament?.shortName || 'World Cup 2026'}</p>
-          {tournament?.isTest && <span className="test-badge">TEST MODE</span>}
+          <h1>T20 Fantasy Cricket</h1>
+          <p>Login to Continue</p>
         </div>
         
         <form onSubmit={handleSubmit} className="login-form">
@@ -845,7 +1055,7 @@ const SnakeDraftPage = ({ team, tournament, players, onDraftComplete, onUpdateTe
               <option value="batter">Batters</option>
               <option value="keeper">Keepers</option>
               <option value="bowler">Bowlers</option>
-              <option value="flex">Flex</option>
+              <option value="allrounder">Allrounders</option>
             </select>
           </div>
 
@@ -881,13 +1091,74 @@ const SnakeDraftPage = ({ team, tournament, players, onDraftComplete, onUpdateTe
 };
 
 // Admin Panel Component
-const AdminPanel = ({ user, tournament, onUpdateTournament, onLogout, onBackToTournaments, allTeams, onStartDraft }) => {
+const AdminPanel = ({ user, tournament, onUpdateTournament, onLogout, onBackToTournaments, onSwitchTournament, allTeams, allUsers, onStartDraft, onDeleteTeam, onUpdateTeam, onDeleteUser }) => {
   const [activeTab, setActiveTab] = useState('overview');
   const [newPlayerForm, setNewPlayerForm] = useState({
     name: '', team: '', position: 'batter', price: 8.0, avgPoints: 30
   });
   const [players, setPlayers] = useState(tournament.isTest ? TEST_PLAYERS_IND_NZ : FULL_PLAYER_POOL);
   const [draftStatus, setDraftStatus] = useState(tournament.draftStatus || 'pending');
+  const [syncStatus, setSyncStatus] = useState({ players: null, scores: null });
+  const [isSyncing, setIsSyncing] = useState({ players: false, scores: false });
+  const [editingTeam, setEditingTeam] = useState(null);
+  const [editTeamForm, setEditTeamForm] = useState({ name: '', ownerName: '', totalPoints: 0 });
+  const [userFilter, setUserFilter] = useState('all'); // all, with_team, without_team
+  
+  // Get API base URL
+  const getApiBaseUrl = () => {
+    if (typeof window !== 'undefined') {
+      return window.location.origin;
+    }
+    return '';
+  };
+  
+  // Manual Sync Functions
+  const handleSyncPlayers = async () => {
+    setIsSyncing(prev => ({ ...prev, players: true }));
+    setSyncStatus(prev => ({ ...prev, players: 'syncing...' }));
+    
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/api/sync/players?tournament=${tournament.id}`);
+      const data = await response.json();
+      
+      if (data.success) {
+        setSyncStatus(prev => ({ 
+          ...prev, 
+          players: `✅ Synced! ${data.results[0]?.saved || 0} players saved` 
+        }));
+      } else {
+        setSyncStatus(prev => ({ ...prev, players: `❌ Error: ${data.error}` }));
+      }
+    } catch (error) {
+      setSyncStatus(prev => ({ ...prev, players: `❌ Error: ${error.message}` }));
+    } finally {
+      setIsSyncing(prev => ({ ...prev, players: false }));
+    }
+  };
+  
+  const handleSyncLiveScores = async () => {
+    setIsSyncing(prev => ({ ...prev, scores: true }));
+    setSyncStatus(prev => ({ ...prev, scores: 'syncing...' }));
+    
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/api/sync/live-scores`);
+      const data = await response.json();
+      
+      if (data.success) {
+        const matchCount = data.results?.length || 0;
+        setSyncStatus(prev => ({ 
+          ...prev, 
+          scores: `✅ Synced! ${matchCount} matches processed` 
+        }));
+      } else {
+        setSyncStatus(prev => ({ ...prev, scores: `❌ Error: ${data.error}` }));
+      }
+    } catch (error) {
+      setSyncStatus(prev => ({ ...prev, scores: `❌ Error: ${error.message}` }));
+    } finally {
+      setIsSyncing(prev => ({ ...prev, scores: false }));
+    }
+  };
   
   const handleAddPlayer = () => {
     if (!newPlayerForm.name || !newPlayerForm.team) return;
@@ -908,15 +1179,73 @@ const AdminPanel = ({ user, tournament, onUpdateTournament, onLogout, onBackToTo
     }
   };
   
+  // Draft Control Functions
   const handleStartDraft = () => {
-    if (window.confirm('Start the draft? All registered teams will be notified.')) {
+    if (window.confirm('Open draft registration? Users will be able to create teams and join.')) {
       setDraftStatus('open');
-      onStartDraft();
+      onStartDraft && onStartDraft();
     }
   };
   
-  const handleCloseDraft = () => {
-    setDraftStatus('completed');
+  const handleBeginDraft = () => {
+    if (window.confirm('Begin the snake draft? Make sure all teams are registered.')) {
+      setDraftStatus('in_progress');
+    }
+  };
+  
+  const handleCompleteDraft = () => {
+    if (window.confirm('Mark draft as completed?')) {
+      setDraftStatus('completed');
+    }
+  };
+  
+  const handleResetDraft = () => {
+    if (window.confirm('⚠️ RESET DRAFT?\n\nThis will:\n- Set draft status back to "pending"\n- Keep all registered teams\n- Clear all draft picks\n\nContinue?')) {
+      setDraftStatus('pending');
+    }
+  };
+  
+  const handleDeleteDraft = () => {
+    if (window.confirm('⚠️ DELETE DRAFT & ALL TEAMS?\n\nThis will:\n- Remove ALL registered teams\n- Reset draft to "pending"\n- Clear all draft picks\n\nThis cannot be undone! Continue?')) {
+      setDraftStatus('pending');
+      // Clear all teams
+      if (onDeleteTeam) {
+        allTeams?.forEach(team => onDeleteTeam(team.id));
+      }
+    }
+  };
+  
+  // Team Management Functions
+  const handleEditTeam = (team) => {
+    setEditingTeam(team.id);
+    setEditTeamForm({
+      name: team.name,
+      ownerName: team.ownerName,
+      totalPoints: team.totalPoints || 0
+    });
+  };
+  
+  const handleSaveTeam = (teamId) => {
+    if (onUpdateTeam) {
+      onUpdateTeam(teamId, editTeamForm);
+    }
+    setEditingTeam(null);
+  };
+  
+  const handleDeleteTeam = (teamId, teamName) => {
+    if (window.confirm(`Delete team "${teamName}"?\n\nThis will remove the team and all their roster picks.`)) {
+      if (onDeleteTeam) {
+        onDeleteTeam(teamId);
+      }
+    }
+  };
+  
+  const handleDeleteUser = (userId, userEmail) => {
+    if (window.confirm(`Delete user "${userEmail}"?\n\nThis will remove the user account. If they have a team, delete the team first.`)) {
+      if (onDeleteUser) {
+        onDeleteUser(userId);
+      }
+    }
   };
   
   return (
@@ -925,26 +1254,40 @@ const AdminPanel = ({ user, tournament, onUpdateTournament, onLogout, onBackToTo
         <div className="header-left">
           <div className="admin-badge">👑 ADMIN</div>
           <div>
-            <h1>{tournament.name}</h1>
+            <div className="tournament-dropdown-wrapper">
+              <select 
+                className="tournament-dropdown admin-dropdown"
+                value={tournament.id}
+                onChange={(e) => onSwitchTournament && onSwitchTournament(e.target.value)}
+              >
+                {Object.values(TOURNAMENTS).map(t => (
+                  <option key={t.id} value={t.id}>
+                    {t.name} {t.isTest ? '(Test)' : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
             <p>League Administration</p>
           </div>
         </div>
         <div className="header-right">
-          <button className="btn-icon" onClick={onBackToTournaments} title="Change Tournament">🏆</button>
+          <button className="btn-icon" onClick={onBackToTournaments} title="All Tournaments">🏆</button>
           <button className="btn-icon" onClick={onLogout} title="Logout">🚪</button>
         </div>
       </header>
       
       <nav className="admin-nav">
-        {['overview', 'players', 'teams', 'draft', 'settings'].map(tab => (
+        {['overview', 'sync', 'players', 'teams', 'users', 'draft', 'settings'].map(tab => (
           <button 
             key={tab}
             className={`nav-tab ${activeTab === tab ? 'active' : ''}`}
             onClick={() => setActiveTab(tab)}
           >
             {tab === 'overview' && '📊 '}
+            {tab === 'sync' && '🔄 '}
             {tab === 'players' && '👥 '}
             {tab === 'teams' && '🏏 '}
+            {tab === 'users' && '👤 '}
             {tab === 'draft' && '📝 '}
             {tab === 'settings' && '⚙️ '}
             {tab.charAt(0).toUpperCase() + tab.slice(1)}
@@ -987,19 +1330,93 @@ const AdminPanel = ({ user, tournament, onUpdateTournament, onLogout, onBackToTo
                   </button>
                 )}
                 {draftStatus === 'open' && (
-                  <button className="btn-primary" onClick={() => setDraftStatus('in_progress')}>
+                  <button className="btn-primary" onClick={handleBeginDraft}>
                     ▶️ Start Draft
                   </button>
                 )}
                 {draftStatus === 'in_progress' && (
-                  <button className="btn-secondary" onClick={handleCloseDraft}>
+                  <button className="btn-secondary" onClick={handleCompleteDraft}>
                     ✅ Complete Draft
                   </button>
                 )}
+                <button className="btn-secondary" onClick={() => setActiveTab('sync')}>
+                  🔄 Sync Data
+                </button>
                 <button className="btn-secondary" onClick={() => setActiveTab('players')}>
                   ➕ Manage Players
                 </button>
               </div>
+            </div>
+          </div>
+        )}
+        
+        {activeTab === 'sync' && (
+          <div className="admin-sync">
+            <h3>🔄 Data Synchronization</h3>
+            <p className="sync-info">
+              Sync player data and live scores from CricketData.org. 
+              Automatic sync runs every 15 minutes during match hours (4 AM - 12 PM MST).
+            </p>
+            
+            <div className="sync-controls">
+              <div className="sync-card">
+                <h4>👥 Player Roster Sync</h4>
+                <p>Fetch latest player data for {tournament.name}</p>
+                <button 
+                  className="btn-primary btn-large"
+                  onClick={handleSyncPlayers}
+                  disabled={isSyncing.players}
+                >
+                  {isSyncing.players ? '⏳ Syncing...' : '🔄 Sync Players Now'}
+                </button>
+                {syncStatus.players && (
+                  <div className={`sync-result ${syncStatus.players.startsWith('✅') ? 'success' : 'error'}`}>
+                    {syncStatus.players}
+                  </div>
+                )}
+              </div>
+              
+              <div className="sync-card">
+                <h4>📊 Live Scores Sync</h4>
+                <p>Fetch live match scores and calculate fantasy points</p>
+                <button 
+                  className="btn-primary btn-large"
+                  onClick={handleSyncLiveScores}
+                  disabled={isSyncing.scores}
+                >
+                  {isSyncing.scores ? '⏳ Syncing...' : '🔄 Sync Live Scores Now'}
+                </button>
+                {syncStatus.scores && (
+                  <div className={`sync-result ${syncStatus.scores.startsWith('✅') ? 'success' : 'error'}`}>
+                    {syncStatus.scores}
+                  </div>
+                )}
+              </div>
+            </div>
+            
+            <div className="sync-schedule">
+              <h4>⏰ Automatic Sync Schedule</h4>
+              <table className="schedule-table">
+                <thead>
+                  <tr>
+                    <th>Sync Type</th>
+                    <th>Schedule</th>
+                    <th>Time (MST)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Player Roster</td>
+                    <td>Daily</td>
+                    <td>7:00 PM</td>
+                  </tr>
+                  <tr>
+                    <td>Live Scores</td>
+                    <td>Every 15 min</td>
+                    <td>4:00 AM - 12:00 PM</td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
           </div>
         )}
@@ -1028,7 +1445,7 @@ const AdminPanel = ({ user, tournament, onUpdateTournament, onLogout, onBackToTo
                   <option value="batter">Batter</option>
                   <option value="keeper">Keeper</option>
                   <option value="bowler">Bowler</option>
-                  <option value="flex">Flex</option>
+                  <option value="allrounder">Allrounder</option>
                 </select>
                 <input
                   type="number"
@@ -1077,23 +1494,156 @@ const AdminPanel = ({ user, tournament, onUpdateTournament, onLogout, onBackToTo
         
         {activeTab === 'teams' && (
           <div className="admin-teams">
-            <h3>🏏 Registered Fantasy Teams</h3>
+            <h3>🏏 Registered Fantasy Teams ({allTeams?.length || 0})</h3>
             {allTeams && allTeams.length > 0 ? (
-              <div className="teams-list">
+              <div className="teams-list-admin">
                 {allTeams.map((t, i) => (
-                  <div key={i} className="team-card-admin">
-                    <span className="team-rank">#{i + 1}</span>
-                    <div className="team-info">
-                      <span className="team-name">{t.name}</span>
-                      <span className="team-owner">{t.ownerName}</span>
-                    </div>
-                    <span className="team-points">{Math.round(t.totalPoints || 0)} pts</span>
+                  <div key={t.id || i} className="team-card-admin">
+                    {editingTeam === t.id ? (
+                      <div className="team-edit-form">
+                        <input
+                          type="text"
+                          value={editTeamForm.name}
+                          onChange={(e) => setEditTeamForm({...editTeamForm, name: e.target.value})}
+                          placeholder="Team Name"
+                        />
+                        <input
+                          type="text"
+                          value={editTeamForm.ownerName}
+                          onChange={(e) => setEditTeamForm({...editTeamForm, ownerName: e.target.value})}
+                          placeholder="Owner Name"
+                        />
+                        <input
+                          type="number"
+                          value={editTeamForm.totalPoints}
+                          onChange={(e) => setEditTeamForm({...editTeamForm, totalPoints: parseFloat(e.target.value) || 0})}
+                          placeholder="Total Points"
+                        />
+                        <div className="edit-actions">
+                          <button className="btn-small btn-primary" onClick={() => handleSaveTeam(t.id)}>💾 Save</button>
+                          <button className="btn-small btn-secondary" onClick={() => setEditingTeam(null)}>❌ Cancel</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <span className="team-rank">#{i + 1}</span>
+                        <div className="team-info">
+                          <span className="team-name">{t.name}</span>
+                          <span className="team-owner">{t.ownerName}</span>
+                        </div>
+                        <span className="team-points">{Math.round(t.totalPoints || 0)} pts</span>
+                        <div className="team-actions">
+                          <button className="btn-small btn-secondary" onClick={() => handleEditTeam(t)} title="Edit">✏️</button>
+                          <button className="btn-small btn-danger" onClick={() => handleDeleteTeam(t.id, t.name)} title="Delete">🗑️</button>
+                        </div>
+                      </>
+                    )}
                   </div>
                 ))}
               </div>
             ) : (
-              <p className="no-data">No teams registered yet</p>
+              <p className="no-data">No teams registered yet. Open the draft to allow users to create teams.</p>
             )}
+          </div>
+        )}
+        
+        {activeTab === 'users' && (
+          <div className="admin-users">
+            <h3>👤 Registered Users ({allUsers?.length || 0})</h3>
+            
+            <div className="user-filters">
+              <button 
+                className={`filter-btn ${userFilter === 'all' ? 'active' : ''}`}
+                onClick={() => setUserFilter('all')}
+              >
+                All Users
+              </button>
+              <button 
+                className={`filter-btn ${userFilter === 'with_team' ? 'active' : ''}`}
+                onClick={() => setUserFilter('with_team')}
+              >
+                With Team
+              </button>
+              <button 
+                className={`filter-btn ${userFilter === 'without_team' ? 'active' : ''}`}
+                onClick={() => setUserFilter('without_team')}
+              >
+                No Team
+              </button>
+            </div>
+            
+            {allUsers && allUsers.length > 0 ? (
+              <div className="users-list-admin">
+                <table className="users-table">
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>Name</th>
+                      <th>Email</th>
+                      <th>Team</th>
+                      <th>Tournament</th>
+                      <th>Points</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {allUsers
+                      .filter(u => {
+                        if (userFilter === 'all') return true;
+                        const hasTeam = allTeams?.some(t => t.ownerId === u.id || t.ownerEmail === u.email);
+                        return userFilter === 'with_team' ? hasTeam : !hasTeam;
+                      })
+                      .map((u, i) => {
+                        const userTeam = allTeams?.find(t => t.ownerId === u.id || t.ownerEmail === u.email);
+                        return (
+                          <tr key={u.id || i}>
+                            <td>{i + 1}</td>
+                            <td>{u.name}</td>
+                            <td>{u.email}</td>
+                            <td>
+                              {userTeam ? (
+                                <span className="user-team-badge">{userTeam.name}</span>
+                              ) : (
+                                <span className="no-team-badge">No Team</span>
+                              )}
+                            </td>
+                            <td>{userTeam?.tournamentId || '-'}</td>
+                            <td>{userTeam ? Math.round(userTeam.totalPoints || 0) : '-'}</td>
+                            <td>
+                              <button 
+                                className="btn-small btn-danger" 
+                                onClick={() => handleDeleteUser(u.id, u.email)}
+                                title="Delete User"
+                              >
+                                🗑️
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="no-data">No users registered yet.</p>
+            )}
+            
+            <div className="users-summary">
+              <div className="summary-card">
+                <span className="summary-value">{allUsers?.length || 0}</span>
+                <span className="summary-label">Total Users</span>
+              </div>
+              <div className="summary-card">
+                <span className="summary-value">{allTeams?.length || 0}</span>
+                <span className="summary-label">Teams Created</span>
+              </div>
+              <div className="summary-card">
+                <span className="summary-value">
+                  {(allUsers?.length || 0) - (allTeams?.length || 0)}
+                </span>
+                <span className="summary-label">Without Team</span>
+              </div>
+            </div>
           </div>
         )}
         
@@ -1102,42 +1652,168 @@ const AdminPanel = ({ user, tournament, onUpdateTournament, onLogout, onBackToTo
             <h3>📝 Draft Management</h3>
             <div className="draft-status-card">
               <div className={`status-indicator ${draftStatus}`}>
-                {draftStatus === 'pending' && '⏸️ Pending'}
-                {draftStatus === 'open' && '🟢 Open for Registration'}
-                {draftStatus === 'in_progress' && '🔴 In Progress'}
-                {draftStatus === 'completed' && '✅ Completed'}
+                {draftStatus === 'pending' && '⏸️ Pending - Draft not yet open'}
+                {draftStatus === 'open' && '🟢 Open - Teams can register'}
+                {draftStatus === 'in_progress' && '🔴 In Progress - Snake draft running'}
+                {draftStatus === 'completed' && '✅ Completed - Season active'}
+              </div>
+              
+              <div className="draft-info">
+                <p><strong>Registered Teams:</strong> {allTeams?.length || 0}</p>
+                <p><strong>Players Available:</strong> {players.length}</p>
               </div>
               
               <div className="draft-controls">
-                {draftStatus === 'pending' && (
-                  <button className="btn-primary btn-large" onClick={handleStartDraft}>
-                    🚀 Open Draft Registration
+                <h4>Draft Actions</h4>
+                
+                <div className="draft-buttons">
+                  {draftStatus === 'pending' && (
+                    <button className="btn-primary btn-large" onClick={handleStartDraft}>
+                      🚀 Open Draft Registration
+                    </button>
+                  )}
+                  
+                  {draftStatus === 'open' && (
+                    <>
+                      <button className="btn-primary btn-large" onClick={handleBeginDraft}>
+                        ▶️ Start Snake Draft
+                      </button>
+                      <button className="btn-secondary" onClick={() => setDraftStatus('pending')}>
+                        ⏪ Close Registration
+                      </button>
+                    </>
+                  )}
+                  
+                  {draftStatus === 'in_progress' && (
+                    <>
+                      <button className="btn-primary btn-large" onClick={handleCompleteDraft}>
+                        ✅ Complete Draft
+                      </button>
+                      <button className="btn-secondary" onClick={handleResetDraft}>
+                        🔄 Reset Draft (Keep Teams)
+                      </button>
+                    </>
+                  )}
+                  
+                  {draftStatus === 'completed' && (
+                    <button className="btn-secondary" onClick={handleResetDraft}>
+                      🔄 Reset Draft (Keep Teams)
+                    </button>
+                  )}
+                </div>
+                
+                <div className="draft-danger-zone">
+                  <h4>⚠️ Danger Zone</h4>
+                  <button className="btn-danger" onClick={handleDeleteDraft}>
+                    🗑️ Delete Draft & All Teams
                   </button>
-                )}
-                {draftStatus === 'open' && (
-                  <>
-                    <p>Waiting for teams to join...</p>
-                    <button className="btn-primary btn-large" onClick={() => setDraftStatus('in_progress')}>
-                      ▶️ Start Snake Draft
-                    </button>
-                  </>
-                )}
-                {draftStatus === 'in_progress' && (
-                  <>
-                    <p>Draft is currently running</p>
-                    <button className="btn-secondary" onClick={handleCloseDraft}>
-                      ⏹️ End Draft Early
-                    </button>
-                  </>
-                )}
-                {draftStatus === 'completed' && (
-                  <>
-                    <p>Draft has been completed!</p>
-                    <button className="btn-secondary" onClick={() => setDraftStatus('pending')}>
-                      🔄 Reset Draft
-                    </button>
-                  </>
-                )}
+                  <p className="danger-warning">This permanently removes all teams and resets the draft.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+        
+        {activeTab === 'users' && (
+          <div className="admin-users">
+            <h3>👤 Registered Users & Teams</h3>
+            
+            <div className="user-filters">
+              <select value={userFilter} onChange={(e) => setUserFilter(e.target.value)}>
+                <option value="all">All Users</option>
+                <option value="with_team">Users with Teams</option>
+                <option value="without_team">Users without Teams</option>
+              </select>
+              <span className="user-count">
+                {allUsers?.length || 0} total users
+              </span>
+            </div>
+            
+            {allUsers && allUsers.length > 0 ? (
+              <div className="users-table">
+                <div className="table-header">
+                  <span>User</span>
+                  <span>Email</span>
+                  <span>Team</span>
+                  <span>Tournament</span>
+                  <span>Points</span>
+                  <span>Actions</span>
+                </div>
+                {allUsers
+                  .filter(u => {
+                    if (userFilter === 'with_team') return u.hasTeam;
+                    if (userFilter === 'without_team') return !u.hasTeam;
+                    return true;
+                  })
+                  .map((u, i) => {
+                    const userTeam = allTeams?.find(t => t.userId === u.id);
+                    return (
+                      <div key={u.id || i} className="table-row">
+                        <span className="user-name">
+                          {u.isAdmin && <span className="admin-tag">👑</span>}
+                          {u.name}
+                        </span>
+                        <span className="user-email">{u.email}</span>
+                        <span className="user-team">
+                          {userTeam ? (
+                            <span className="team-badge">{userTeam.name}</span>
+                          ) : (
+                            <span className="no-team">No team</span>
+                          )}
+                        </span>
+                        <span className="user-tournament">
+                          {userTeam ? TOURNAMENTS[userTeam.tournamentId]?.shortName || userTeam.tournamentId : '-'}
+                        </span>
+                        <span className="user-points">
+                          {userTeam ? `${Math.round(userTeam.totalPoints || 0)} pts` : '-'}
+                        </span>
+                        <span className="user-actions">
+                          {userTeam && (
+                            <button 
+                              className="btn-small btn-secondary" 
+                              onClick={() => {
+                                setActiveTab('teams');
+                                handleEditTeam(userTeam);
+                              }}
+                              title="Edit Team"
+                            >
+                              ✏️
+                            </button>
+                          )}
+                          {!u.isAdmin && (
+                            <button 
+                              className="btn-small btn-danger" 
+                              onClick={() => {
+                                if (window.confirm(`Delete user "${u.name}"?\n\nThis will also remove their team if they have one.`)) {
+                                  onDeleteUser && onDeleteUser(u.id);
+                                }
+                              }}
+                              title="Delete User"
+                            >
+                              🗑️
+                            </button>
+                          )}
+                        </span>
+                      </div>
+                    );
+                  })}
+              </div>
+            ) : (
+              <p className="no-data">No users registered yet.</p>
+            )}
+            
+            <div className="users-summary">
+              <h4>📊 Summary by Tournament</h4>
+              <div className="summary-cards">
+                {Object.values(TOURNAMENTS).map(t => {
+                  const tournamentTeams = allTeams?.filter(team => team.tournamentId === t.id) || [];
+                  return (
+                    <div key={t.id} className="summary-card">
+                      <span className="tournament-name">{t.shortName}</span>
+                      <span className="team-count">{tournamentTeams.length} teams</span>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -1150,6 +1826,10 @@ const AdminPanel = ({ user, tournament, onUpdateTournament, onLogout, onBackToTo
               <div className="setting-item">
                 <label>Tournament Name</label>
                 <input type="text" value={tournament.name} readOnly />
+              </div>
+              <div className="setting-item">
+                <label>Tournament ID</label>
+                <input type="text" value={tournament.id} readOnly />
               </div>
               <div className="setting-item">
                 <label>Start Date</label>
@@ -1168,6 +1848,20 @@ const AdminPanel = ({ user, tournament, onUpdateTournament, onLogout, onBackToTo
                 <input type="number" value={TOTAL_ROSTER_SIZE} readOnly />
               </div>
             </div>
+            
+            <div className="api-info">
+              <h4>🔗 API Endpoints</h4>
+              <div className="endpoint-list">
+                <div className="endpoint">
+                  <code>GET /api/sync/players?tournament={tournament.id}</code>
+                  <span>Sync player roster</span>
+                </div>
+                <div className="endpoint">
+                  <code>GET /api/sync/live-scores</code>
+                  <span>Sync live match scores</span>
+                </div>
+              </div>
+            </div>
           </div>
         )}
       </main>
@@ -1176,7 +1870,7 @@ const AdminPanel = ({ user, tournament, onUpdateTournament, onLogout, onBackToTo
 };
 
 // Main Dashboard Component  
-const Dashboard = ({ user, team, tournament, onLogout, onUpdateTeam, onBackToTournaments, isDraftComplete, isDraftOpen, onGoToDraft }) => {
+const Dashboard = ({ user, team, tournament, onLogout, onUpdateTeam, onBackToTournaments, onSwitchTournament, isDraftComplete, isDraftOpen, onGoToDraft }) => {
   const [activeTab, setActiveTab] = useState('roster');
   const [showPlayerModal, setShowPlayerModal] = useState(false);
   const [selectedPosition, setSelectedPosition] = useState(null);
@@ -1184,6 +1878,8 @@ const Dashboard = ({ user, team, tournament, onLogout, onUpdateTeam, onBackToTou
   const [isSimulating, setIsSimulating] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterPosition, setFilterPosition] = useState('all');
+  const [tradingWindowStatus, setTradingWindowStatus] = useState({ open: true, message: '' });
+  const [selectedDate, setSelectedDate] = useState(new Date()); // For viewing game schedules
   
   // Enhanced Test Mode State
   const [selectedMatch, setSelectedMatch] = useState(null);
@@ -1196,15 +1892,156 @@ const Dashboard = ({ user, team, tournament, onLogout, onUpdateTeam, onBackToTou
   const [pointsVerification, setPointsVerification] = useState(null);
   
   const playerPool = tournament.isTest ? TEST_PLAYERS_IND_NZ : FULL_PLAYER_POOL;
-  const [freeAgents, setFreeAgents] = useState(
-    playerPool.filter(p => !team.roster.find(r => r.id === p.id))
-  );
+  
+  // Date navigation helpers
+  const goToPreviousDay = () => {
+    const newDate = new Date(selectedDate);
+    newDate.setDate(newDate.getDate() - 1);
+    setSelectedDate(newDate);
+  };
+  
+  const goToNextDay = () => {
+    const newDate = new Date(selectedDate);
+    newDate.setDate(newDate.getDate() + 1);
+    setSelectedDate(newDate);
+  };
+  
+  const goToToday = () => {
+    setSelectedDate(new Date());
+  };
+  
+  const formatDateDisplay = (date) => {
+    const today = new Date();
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    
+    if (date.toDateString() === today.toDateString()) return 'Today';
+    if (date.toDateString() === tomorrow.toDateString()) return 'Tomorrow';
+    if (date.toDateString() === yesterday.toDateString()) return 'Yesterday';
+    
+    return date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  };
+  
+  // Global dropped players pool (persisted in localStorage)
+  const getDroppedPlayers = () => {
+    const key = `t20fantasy_dropped_${tournament.id}`;
+    const saved = localStorage.getItem(key);
+    return saved ? JSON.parse(saved) : [];
+  };
+  
+  const addToDroppedPlayers = (player) => {
+    const key = `t20fantasy_dropped_${tournament.id}`;
+    const dropped = getDroppedPlayers();
+    if (!dropped.find(p => p.id === player.id)) {
+      dropped.push({ ...player, droppedAt: new Date().toISOString() });
+      localStorage.setItem(key, JSON.stringify(dropped));
+    }
+  };
+  
+  const removeFromDroppedPlayers = (playerId) => {
+    const key = `t20fantasy_dropped_${tournament.id}`;
+    const dropped = getDroppedPlayers().filter(p => p.id !== playerId);
+    localStorage.setItem(key, JSON.stringify(dropped));
+  };
+  
+  // Get all rostered players across all teams in this tournament
+  const getAllRosteredPlayers = () => {
+    const allTeamsKey = 't20fantasy_all_teams';
+    const allTeams = JSON.parse(localStorage.getItem(allTeamsKey) || '[]');
+    const tournamentTeams = allTeams.filter(t => t.tournamentId === tournament.id);
+    const rosteredIds = new Set();
+    tournamentTeams.forEach(t => {
+      (t.roster || []).forEach(p => rosteredIds.add(p.id));
+    });
+    return rosteredIds;
+  };
+  
+  // Free agents = pool players not rostered + dropped players not re-rostered
+  const [freeAgents, setFreeAgents] = useState(() => {
+    const rosteredIds = getAllRosteredPlayers();
+    const droppedPlayers = getDroppedPlayers();
+    
+    // Start with pool players not rostered
+    const availableFromPool = playerPool.filter(p => !rosteredIds.has(p.id));
+    
+    // Add dropped players that aren't re-rostered
+    const availableDropped = droppedPlayers.filter(p => !rosteredIds.has(p.id));
+    
+    // Combine, avoiding duplicates
+    const combined = [...availableFromPool];
+    availableDropped.forEach(dp => {
+      if (!combined.find(p => p.id === dp.id)) {
+        combined.push(dp);
+      }
+    });
+    
+    return combined;
+  });
+  
+  // Update trading window status periodically
+  useEffect(() => {
+    const checkTradingWindow = () => {
+      const inWindow = isInTradingWindow(tournament.matches);
+      setTradingWindowStatus({
+        open: inWindow,
+        message: inWindow ? '' : '⏰ Trading window closed (Opens 8 PM MST)'
+      });
+    };
+    
+    checkTradingWindow();
+    const interval = setInterval(checkTradingWindow, 60000); // Check every minute
+    return () => clearInterval(interval);
+  }, [tournament.matches]);
 
-  const rosterByPosition = {
-    batters: team.roster.filter(p => p.position === 'batter'),
-    keepers: team.roster.filter(p => p.position === 'keeper'),
-    bowlers: team.roster.filter(p => p.position === 'bowler'),
-    flex: team.roster.filter(p => p.position === 'flex'),
+  // Group roster by assigned slot (not just position)
+  // Each player has a 'slot' property that indicates where they're placed
+  const rosterBySlot = {
+    batters: team.roster.filter(p => p.slot === 'batters'),
+    keepers: team.roster.filter(p => p.slot === 'keepers'),
+    bowlers: team.roster.filter(p => p.slot === 'bowlers'),
+    flex: team.roster.filter(p => p.slot === 'flex'),
+    bench: team.roster.filter(p => p.slot === 'bench'),
+    il: team.roster.filter(p => p.slot === 'il'),
+  };
+  
+  // Also use old IR array for backward compatibility
+  const ilPlayers = [...rosterBySlot.il, ...(team.ir || [])];
+  
+  // For backward compatibility - old rosters without slots
+  // Auto-assign slots based on position
+  const migrateRosterToSlots = (roster) => {
+    return roster.map(p => {
+      if (p.slot) return p; // Already has slot
+      
+      // Auto-assign based on position
+      if (p.position === 'batter') return { ...p, slot: 'batters' };
+      if (p.position === 'keeper') return { ...p, slot: 'keepers' };
+      if (p.position === 'bowler') return { ...p, slot: 'bowlers' };
+      if (p.position === 'allrounder' || p.position === 'flex') return { ...p, slot: 'flex' };
+      return { ...p, slot: 'bench' };
+    });
+  };
+  
+  // Check if we need to migrate
+  useEffect(() => {
+    if (team.roster.length > 0 && !team.roster[0].slot) {
+      const migratedRoster = migrateRosterToSlots(team.roster);
+      onUpdateTeam({ ...team, roster: migratedRoster });
+    }
+  }, []);
+  
+  // Get count of players in a slot
+  const getSlotCount = (slotKey) => rosterBySlot[slotKey]?.length || 0;
+  
+  // Check if a slot is full
+  const isSlotFull = (slotKey) => getSlotCount(slotKey) >= SQUAD_CONFIG[slotKey].max;
+  
+  // Get available slots for a player's position
+  const getAvailableSlotsForPlayer = (player) => {
+    const validSlots = getValidSlotsForPosition(player.position);
+    return validSlots.filter(slot => !isSlotFull(slot));
   };
   
   // Filter free agents based on search and position
@@ -1382,65 +2219,215 @@ const Dashboard = ({ user, team, tournament, onLogout, onUpdateTeam, onBackToTou
     await simulateSpecificMatch(defaultMatch);
   };
 
-  const handleAddPlayer = (player) => {
+  // State for slot selection when adding players
+  const [selectedSlotForAdd, setSelectedSlotForAdd] = useState(null);
+  const [playerToAdd, setPlayerToAdd] = useState(null);
+
+  const handleAddPlayer = (player, targetSlot = null) => {
+    // Check if in trading window
+    if (!tradingWindowStatus.open) {
+      alert(tradingWindowStatus.message);
+      return;
+    }
+    
+    // Check if player is locked (their game has started)
+    const lockStatus = getPlayerLockStatus(player, tournament.matches);
+    if (lockStatus.locked) {
+      alert(lockStatus.message);
+      return;
+    }
+    
     if (team.weeklyPickups >= team.weeklyPickupLimit) {
       alert(`Weekly pickup limit reached (${FREE_AGENCY_LIMIT}/week)`);
       return;
     }
 
-    const posKey = player.position === 'keeper' ? 'keepers' : player.position + 's';
-    const positionCount = team.roster.filter(p => p.position === player.position).length;
+    // Get available slots for this player
+    const availableSlots = getAvailableSlotsForPlayer(player);
     
-    if (positionCount >= SQUAD_CONFIG[posKey].max) {
-      alert(`Maximum ${player.position}s reached`);
+    // Also check if bench is available
+    if (!isSlotFull('bench') && !availableSlots.includes('bench')) {
+      availableSlots.push('bench');
+    }
+    
+    if (availableSlots.length === 0) {
+      alert(`No available slots for ${player.name} (${player.position}). Check position compatibility.`);
+      return;
+    }
+    
+    // If targetSlot is provided, use it
+    let slotToUse = targetSlot;
+    
+    // If no target slot and multiple options, show selector
+    if (!slotToUse && availableSlots.length > 1) {
+      setPlayerToAdd(player);
+      setSelectedSlotForAdd(null);
+      return; // Wait for user to select slot
+    }
+    
+    // If only one option, use it
+    if (!slotToUse) {
+      slotToUse = availableSlots[0];
+    }
+    
+    // Validate the slot is valid for this position
+    if (!canPlaceInSlot(player.position, slotToUse)) {
+      alert(`${player.position} cannot be placed in ${SQUAD_CONFIG[slotToUse].label} slot.`);
+      return;
+    }
+    
+    // Check if slot is full
+    if (isSlotFull(slotToUse)) {
+      alert(`${SQUAD_CONFIG[slotToUse].label} slot is full.`);
       return;
     }
 
+    const playerWithSlot = { ...player, slot: slotToUse };
     const updatedTeam = {
       ...team,
-      roster: [...team.roster, player],
+      roster: [...team.roster, playerWithSlot],
       weeklyPickups: team.weeklyPickups + 1,
     };
     onUpdateTeam(updatedTeam);
+    
+    // Remove from free agents and dropped players pool
     setFreeAgents(freeAgents.filter(p => p.id !== player.id));
+    removeFromDroppedPlayers(player.id);
     setShowPlayerModal(false);
+    setPlayerToAdd(null);
+  };
+  
+  // Confirm add player to specific slot
+  const confirmAddToSlot = (slot) => {
+    if (playerToAdd) {
+      if (playerToAdd.movingFromBench) {
+        // Moving from bench to playing
+        const updatedRoster = team.roster.map(p => 
+          p.id === playerToAdd.id ? { ...p, slot: slot } : p
+        );
+        onUpdateTeam({ ...team, roster: updatedRoster });
+        setPlayerToAdd(null);
+      } else {
+        // Adding new player
+        handleAddPlayer(playerToAdd, slot);
+      }
+    }
   };
 
   const handleDropPlayer = (player) => {
-    if (window.confirm(`Drop ${player.name}?`)) {
+    // Check if in trading window
+    if (!tradingWindowStatus.open) {
+      alert(tradingWindowStatus.message);
+      return;
+    }
+    
+    // Check if player is locked (their game has started)
+    const lockStatus = getPlayerLockStatus(player, tournament.matches);
+    if (lockStatus.locked) {
+      alert(lockStatus.message);
+      return;
+    }
+    
+    if (window.confirm(`Drop ${player.name}?\n\nThey will be available in free agency for other teams to pick up.`)) {
       const updatedTeam = {
         ...team,
         roster: team.roster.filter(p => p.id !== player.id),
       };
       onUpdateTeam(updatedTeam);
+      
+      // Add to both local free agents AND global dropped players pool
       setFreeAgents([...freeAgents, player]);
+      addToDroppedPlayers(player);
     }
   };
 
-  const handleMoveToIR = (player) => {
-    const updatedTeam = {
-      ...team,
-      roster: team.roster.filter(p => p.id !== player.id),
-      ir: [...team.ir, { ...player, irDate: new Date().toISOString() }],
-    };
-    onUpdateTeam(updatedTeam);
-  };
-
-  const handleActivateFromIR = (player) => {
-    const posKey = player.position === 'keeper' ? 'keepers' : player.position + 's';
-    const positionCount = team.roster.filter(p => p.position === player.position).length;
-    
-    if (positionCount >= SQUAD_CONFIG[posKey].max) {
-      alert(`Drop a ${player.position} first`);
+  // Move player to IL (Injured List)
+  const handleMoveToIL = (player) => {
+    if (getSlotCount('il') >= IL_SIZE) {
+      alert('IL is full (max 2 players). Remove a player from IL first.');
       return;
     }
+    
+    const updatedRoster = team.roster.map(p => 
+      p.id === player.id ? { ...p, slot: 'il', isInjured: true } : p
+    );
+    
+    onUpdateTeam({ ...team, roster: updatedRoster });
+  };
+
+  const handleActivateFromIL = (player) => {
+    // Find an available slot for this player
+    const availableSlots = getAvailableSlotsForPlayer(player).filter(s => s !== 'il');
+    
+    if (availableSlots.length === 0 && isSlotFull('bench')) {
+      alert(`No available slots. Drop a player first.`);
+      return;
+    }
+    
+    // Prefer bench first, then playing slots
+    const targetSlot = !isSlotFull('bench') ? 'bench' : availableSlots[0];
+    
+    const updatedRoster = team.roster.map(p => 
+      p.id === player.id ? { ...p, slot: targetSlot, isInjured: false } : p
+    );
+    
+    onUpdateTeam({ ...team, roster: updatedRoster });
+  };
+  
+  // Legacy: handle old IR array
+  const handleActivateFromIR = (player) => {
+    // Find an available slot for this player
+    const availableSlots = getAvailableSlotsForPlayer(player);
+    
+    if (availableSlots.length === 0 && isSlotFull('bench')) {
+      alert(`No available slots. Drop a player first.`);
+      return;
+    }
+    
+    // Prefer playing slot, fallback to bench
+    const targetSlot = availableSlots[0] || 'bench';
 
     const updatedTeam = {
       ...team,
       ir: team.ir.filter(p => p.id !== player.id),
-      roster: [...team.roster, player],
+      roster: [...team.roster, { ...player, slot: targetSlot }],
     };
     onUpdateTeam(updatedTeam);
+  };
+  
+  // Move player from playing 12 to bench
+  const handleMoveToBench = (player) => {
+    if (isSlotFull('bench')) {
+      alert('Bench is full. Drop a bench player first.');
+      return;
+    }
+    
+    const updatedRoster = team.roster.map(p => 
+      p.id === player.id ? { ...p, slot: 'bench' } : p
+    );
+    
+    onUpdateTeam({ ...team, roster: updatedRoster });
+  };
+  
+  // Move player from bench to playing 12
+  const handleMoveToPlaying = (player) => {
+    const availableSlots = getAvailableSlotsForPlayer(player).filter(s => s !== 'bench' && s !== 'il');
+    
+    if (availableSlots.length === 0) {
+      alert(`No available playing slots for ${player.position}. Drop a player first.`);
+      return;
+    }
+    
+    if (availableSlots.length === 1) {
+      // Only one option, use it
+      const updatedRoster = team.roster.map(p => 
+        p.id === player.id ? { ...p, slot: availableSlots[0] } : p
+      );
+      onUpdateTeam({ ...team, roster: updatedRoster });
+    } else {
+      // Multiple options, show selector
+      setPlayerToAdd({ ...player, movingFromBench: true });
+    }
   };
 
   return (
@@ -1454,7 +2441,19 @@ const Dashboard = ({ user, team, tournament, onLogout, onUpdateTeam, onBackToTou
           )}
           <div className="team-info">
             <h1>{team.name}</h1>
-            <p>{tournament.shortName} {tournament.isTest && <span className="test-badge-small">TEST</span>}</p>
+            <div className="tournament-dropdown-wrapper">
+              <select 
+                className="tournament-dropdown"
+                value={tournament.id}
+                onChange={(e) => onSwitchTournament && onSwitchTournament(e.target.value)}
+              >
+                {Object.values(TOURNAMENTS).map(t => (
+                  <option key={t.id} value={t.id}>
+                    {t.shortName} {t.isTest ? '(Test)' : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
         </div>
         <div className="header-right">
@@ -1462,8 +2461,8 @@ const Dashboard = ({ user, team, tournament, onLogout, onUpdateTeam, onBackToTou
             <span className="points-value">{Math.round(team.totalPoints)}</span>
             <span className="points-label">Total Pts</span>
           </div>
-          <button className="btn-icon" onClick={onBackToTournaments} title="Change Tournament">🏆</button>
-          <button className="btn-icon" onClick={onLogout} title="Logout">⚙️</button>
+          <button className="btn-icon" onClick={onBackToTournaments} title="All Tournaments">🏆</button>
+          <button className="btn-icon" onClick={onLogout} title="Logout">🚪</button>
         </div>
       </header>
 
@@ -1484,11 +2483,45 @@ const Dashboard = ({ user, team, tournament, onLogout, onUpdateTeam, onBackToTou
 
       <main className="dashboard-content">
         {activeTab === 'roster' && (
-          <div className="roster-view">
-            <div className="pickup-counter">
-              Weekly Pickups: <strong>{team.weeklyPickups}/{team.weeklyPickupLimit}</strong>
-              <span className="reset-note">(Resets Monday)</span>
+          <div className="roster-view yahoo-style">
+            {/* Date Selector */}
+            <div className="date-selector">
+              <button className="date-nav-btn" onClick={goToPreviousDay}>‹</button>
+              <div className="date-display">
+                <span className="current-date">{formatDateDisplay(selectedDate)}</span>
+                {selectedDate.toDateString() !== new Date().toDateString() && (
+                  <button className="today-btn" onClick={goToToday}>Today</button>
+                )}
+              </div>
+              <button className="date-nav-btn" onClick={goToNextDay}>›</button>
             </div>
+            
+            <div className="roster-header-row">
+              <div className="pickup-counter">
+                Weekly Pickups: <strong>{team.weeklyPickups}/{team.weeklyPickupLimit}</strong>
+              </div>
+              <div className="points-summary">
+                <span className="points-value">{Math.round(team.totalPoints)}</span>
+                <span className="points-label">Points</span>
+              </div>
+            </div>
+            
+            {/* Trading Window Status Banner */}
+            {isDraftComplete && (
+              <div className={`trading-window-banner ${tradingWindowStatus.open ? 'window-open' : 'window-closed'}`}>
+                {tradingWindowStatus.open ? (
+                  <>
+                    <span className="banner-icon">✅</span>
+                    <span className="banner-text">Trading window OPEN - You can add/drop players</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="banner-icon">🔒</span>
+                    <span className="banner-text">{tradingWindowStatus.message}</span>
+                  </>
+                )}
+              </div>
+            )}
             
             {/* Draft Status Banner */}
             {!isDraftComplete && (
@@ -1509,65 +2542,300 @@ const Dashboard = ({ user, team, tournament, onLogout, onUpdateTeam, onBackToTou
                 )}
               </div>
             )}
-
-            {Object.entries(SQUAD_CONFIG).map(([key, config]) => (
-              <div key={key} className="roster-section">
-                <div className="section-header">
-                  <h3>{config.icon} {config.label}</h3>
-                  <span className="slot-count">{rosterByPosition[key]?.length || 0}/{config.max}</span>
-                </div>
-                <div className="player-list">
-                  {rosterByPosition[key]?.map(player => (
-                    <div key={player.id} className="player-card">
-                      <div className="player-info">
-                        <span className="player-name">{player.name}</span>
-                        <span className="player-team">{player.team}</span>
-                      </div>
-                      <div className="player-stats">
-                        <span className="total-points">{Math.round(player.totalPoints || 0)} pts</span>
-                        <span className="avg-points">{player.avgPoints} avg</span>
-                      </div>
-                      <div className="player-actions">
-                        <button className="btn-small btn-secondary" onClick={() => handleMoveToIR(player)}>IR</button>
-                        <button className="btn-small btn-danger" onClick={() => handleDropPlayer(player)}>Drop</button>
-                      </div>
-                    </div>
-                  ))}
-                  {Array(config.max - (rosterByPosition[key]?.length || 0)).fill(null).map((_, i) => (
-                    <div key={`empty-${i}`} className="player-card empty">
-                      <span className="empty-slot">Empty Slot</span>
+            
+            {/* Slot Selection Modal */}
+            {playerToAdd && (
+              <div className="slot-selection-modal">
+                <div className="slot-modal-content">
+                  <h4>Select slot for {playerToAdd.name}</h4>
+                  <p className="player-position-info">Position: {playerToAdd.position.toUpperCase()}</p>
+                  <div className="slot-options">
+                    {getAvailableSlotsForPlayer(playerToAdd).filter(s => s !== 'bench' && s !== 'il').map(slot => (
                       <button 
-                        className="btn-small btn-primary"
-                        onClick={() => {
-                          setSelectedPosition(key === 'keepers' ? 'keeper' : key.slice(0, -1));
-                          setShowPlayerModal(true);
-                        }}
-                      >+ Add</button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
-
-            {team.ir.length > 0 && (
-              <div className="roster-section ir-section">
-                <div className="section-header">
-                  <h3>🏥 Injured Reserve</h3>
-                  <span className="slot-count">{team.ir.length}</span>
-                </div>
-                <div className="player-list">
-                  {team.ir.map(player => (
-                    <div key={player.id} className="player-card ir">
-                      <div className="player-info">
-                        <span className="player-name">{player.name}</span>
-                        <span className="player-team">{player.team}</span>
-                      </div>
-                      <button className="btn-small btn-primary" onClick={() => handleActivateFromIR(player)}>Activate</button>
-                    </div>
-                  ))}
+                        key={slot}
+                        className="slot-option-btn"
+                        onClick={() => confirmAddToSlot(slot)}
+                      >
+                        {SQUAD_CONFIG[slot].icon} {SQUAD_CONFIG[slot].label}
+                        <span className="slot-capacity">
+                          ({getSlotCount(slot)}/{SQUAD_CONFIG[slot].max})
+                        </span>
+                      </button>
+                    ))}
+                    {!isSlotFull('bench') && (
+                      <button 
+                        className="slot-option-btn bench-option"
+                        onClick={() => confirmAddToSlot('bench')}
+                      >
+                        {SQUAD_CONFIG.bench.icon} {SQUAD_CONFIG.bench.label}
+                        <span className="slot-capacity">
+                          ({getSlotCount('bench')}/{SQUAD_CONFIG.bench.max})
+                        </span>
+                      </button>
+                    )}
+                  </div>
+                  <button className="btn-secondary" onClick={() => setPlayerToAdd(null)}>Cancel</button>
                 </div>
               </div>
             )}
+
+            {/* Starters Section - Yahoo Style */}
+            <div className="roster-section-yahoo starters-section">
+              <div className="section-label">Starters</div>
+              <div className="stat-headers">
+                <span className="stat-header">RUNS</span>
+                <span className="stat-header">WKTS</span>
+                <span className="stat-header">PTS</span>
+              </div>
+              
+              {Object.entries(SQUAD_CONFIG)
+                .filter(([key, config]) => config.isPlaying)
+                .map(([slotKey, config]) => (
+                  <React.Fragment key={slotKey}>
+                    {rosterBySlot[slotKey]?.map(player => {
+                      const gameStatus = getPlayerGameStatus(player, tournament.matches, selectedDate);
+                      const lockStatus = getPlayerLockStatus(player, tournament.matches);
+                      const isLocked = lockStatus.locked || !tradingWindowStatus.open;
+                      
+                      return (
+                        <div key={player.id} className={`player-row ${gameStatus.status} ${isLocked ? 'locked' : ''}`}>
+                          <div className="slot-indicator">{slotKey === 'keepers' ? 'WK' : slotKey === 'batters' ? 'BAT' : slotKey === 'bowlers' ? 'BWL' : 'UTIL'}</div>
+                          <div className={`game-status-dot ${gameStatus.color}`}></div>
+                          <div className="player-info-yahoo">
+                            <div className="player-main">
+                              <span className="player-name-yahoo">{player.name}</span>
+                              {player.position !== slotKey.slice(0, -1) && (
+                                <span className="position-eligibility">{player.position.toUpperCase().slice(0,3)}</span>
+                              )}
+                            </div>
+                            <div className="player-sub">
+                              <span className="player-team-yahoo">{player.team}</span>
+                              <span className="player-positions">• {player.position.toUpperCase()}</span>
+                            </div>
+                            <div className={`game-info ${gameStatus.color}`}>
+                              {gameStatus.message}
+                            </div>
+                          </div>
+                          <div className="player-stats-yahoo">
+                            <span className="stat-value">{player.runs || '-'}</span>
+                            <span className="stat-value">{player.wickets || '-'}</span>
+                            <span className="stat-value points">{Math.round(player.totalPoints || 0) || '-'}</span>
+                          </div>
+                          <div className="player-proj">{player.avgPoints}</div>
+                          <div className="player-actions-yahoo">
+                            <button 
+                              className="action-btn" 
+                              onClick={() => handleMoveToBench(player)}
+                              disabled={isLocked || isSlotFull('bench')}
+                              title="Move to bench"
+                            >↓</button>
+                            <button 
+                              className="action-btn il-btn" 
+                              onClick={() => handleMoveToIL(player)}
+                              disabled={isLocked || getSlotCount('il') >= IL_SIZE}
+                              title="Move to IL"
+                            >IL</button>
+                            <button 
+                              className="action-btn danger" 
+                              onClick={() => handleDropPlayer(player)}
+                              disabled={isLocked}
+                            >✕</button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {/* Empty slots for this position */}
+                    {Array(config.max - (rosterBySlot[slotKey]?.length || 0)).fill(null).map((_, i) => (
+                      <div key={`empty-${slotKey}-${i}`} className="player-row empty-row">
+                        <div className="slot-indicator">{slotKey === 'keepers' ? 'WK' : slotKey === 'batters' ? 'BAT' : slotKey === 'bowlers' ? 'BWL' : 'UTIL'}</div>
+                        <div className="game-status-dot red"></div>
+                        <div className="player-info-yahoo">
+                          <span className="empty-slot-text">Empty {config.label} Slot</span>
+                        </div>
+                        <div className="player-stats-yahoo">
+                          <span className="stat-value">-</span>
+                          <span className="stat-value">-</span>
+                          <span className="stat-value">-</span>
+                        </div>
+                        <div className="player-proj">-</div>
+                        <div className="player-actions-yahoo">
+                          <button 
+                            className="action-btn primary"
+                            onClick={() => {
+                              setSelectedPosition(slotKey);
+                              setShowPlayerModal(true);
+                            }}
+                            disabled={!tradingWindowStatus.open && isDraftComplete}
+                          >+</button>
+                        </div>
+                      </div>
+                    ))}
+                  </React.Fragment>
+                ))}
+            </div>
+            
+            {/* Bench Section */}
+            <div className="roster-section-yahoo bench-section-yahoo">
+              <div className="section-label">Bench</div>
+              <div className="stat-headers">
+                <span className="stat-header">RUNS</span>
+                <span className="stat-header">WKTS</span>
+                <span className="stat-header">PTS</span>
+              </div>
+              
+              {rosterBySlot.bench?.map(player => {
+                const gameStatus = getPlayerGameStatus(player, tournament.matches, selectedDate);
+                const lockStatus = getPlayerLockStatus(player, tournament.matches);
+                const isLocked = lockStatus.locked || !tradingWindowStatus.open;
+                const availablePlayingSlots = getAvailableSlotsForPlayer(player).filter(s => s !== 'bench' && s !== 'il');
+                
+                return (
+                  <div key={player.id} className={`player-row bench-row ${gameStatus.status} ${isLocked ? 'locked' : ''}`}>
+                    <div className="slot-indicator bench">BN</div>
+                    <div className={`game-status-dot ${gameStatus.color}`}></div>
+                    <div className="player-info-yahoo">
+                      <div className="player-main">
+                        <span className="player-name-yahoo">{player.name}</span>
+                      </div>
+                      <div className="player-sub">
+                        <span className="player-team-yahoo">{player.team}</span>
+                        <span className="player-positions">• {player.position.toUpperCase()}</span>
+                      </div>
+                      <div className={`game-info ${gameStatus.color}`}>
+                        {gameStatus.message}
+                      </div>
+                    </div>
+                    <div className="player-stats-yahoo">
+                      <span className="stat-value">{player.runs || '-'}</span>
+                      <span className="stat-value">{player.wickets || '-'}</span>
+                      <span className="stat-value points">{Math.round(player.totalPoints || 0) || '-'}</span>
+                    </div>
+                    <div className="player-proj">{player.avgPoints}</div>
+                    <div className="player-actions-yahoo">
+                      {availablePlayingSlots.length > 0 && (
+                        <button 
+                          className="action-btn primary" 
+                          onClick={() => handleMoveToPlaying(player)}
+                          disabled={isLocked}
+                          title="Move to starters"
+                        >↑</button>
+                      )}
+                      <button 
+                        className="action-btn il-btn" 
+                        onClick={() => handleMoveToIL(player)}
+                        disabled={isLocked || getSlotCount('il') >= IL_SIZE}
+                        title="Move to IL"
+                      >IL</button>
+                      <button 
+                        className="action-btn danger" 
+                        onClick={() => handleDropPlayer(player)}
+                        disabled={isLocked}
+                      >✕</button>
+                    </div>
+                  </div>
+                );
+              })}
+              {Array(SQUAD_CONFIG.bench.max - (rosterBySlot.bench?.length || 0)).fill(null).map((_, i) => (
+                <div key={`empty-bench-${i}`} className="player-row empty-row bench-row">
+                  <div className="slot-indicator bench">BN</div>
+                  <div className="game-status-dot red"></div>
+                  <div className="player-info-yahoo">
+                    <span className="empty-slot-text">Empty Bench Slot</span>
+                  </div>
+                  <div className="player-stats-yahoo">
+                    <span className="stat-value">-</span>
+                    <span className="stat-value">-</span>
+                    <span className="stat-value">-</span>
+                  </div>
+                  <div className="player-proj">-</div>
+                  <div className="player-actions-yahoo">
+                    <button 
+                      className="action-btn primary"
+                      onClick={() => {
+                        setSelectedPosition('bench');
+                        setShowPlayerModal(true);
+                      }}
+                      disabled={!tradingWindowStatus.open && isDraftComplete}
+                    >+</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* IL Section */}
+            <div className="roster-section-yahoo il-section-yahoo">
+              <div className="section-label">IL (Injured List)</div>
+              <div className="stat-headers">
+                <span className="stat-header">RUNS</span>
+                <span className="stat-header">WKTS</span>
+                <span className="stat-header">PTS</span>
+              </div>
+              
+              {ilPlayers.map(player => {
+                const gameStatus = getPlayerGameStatus(player, tournament.matches, selectedDate);
+                const isFromOldIR = team.ir?.some(p => p.id === player.id);
+                
+                return (
+                  <div key={player.id} className={`player-row il-row ${gameStatus.status}`}>
+                    <div className="slot-indicator il">IL</div>
+                    <div className={`game-status-dot ${gameStatus.color}`}></div>
+                    <div className="player-info-yahoo">
+                      <div className="player-main">
+                        <span className="player-name-yahoo">{player.name}</span>
+                        <span className="injury-badge">INJ</span>
+                      </div>
+                      <div className="player-sub">
+                        <span className="player-team-yahoo">{player.team}</span>
+                        <span className="player-positions">• {player.position.toUpperCase()}</span>
+                      </div>
+                      <div className={`game-info ${gameStatus.color}`}>
+                        {gameStatus.message}
+                      </div>
+                    </div>
+                    <div className="player-stats-yahoo">
+                      <span className="stat-value">-</span>
+                      <span className="stat-value">-</span>
+                      <span className="stat-value">0.00</span>
+                    </div>
+                    <div className="player-proj">{player.avgPoints}</div>
+                    <div className="player-actions-yahoo">
+                      <button 
+                        className="action-btn primary" 
+                        onClick={() => isFromOldIR ? handleActivateFromIR(player) : handleActivateFromIL(player)}
+                        title="Activate from IL"
+                      >↑</button>
+                      <button 
+                        className="action-btn danger" 
+                        onClick={() => handleDropPlayer(player)}
+                        title="Drop player"
+                      >✕</button>
+                    </div>
+                  </div>
+                );
+              })}
+              {Array(IL_SIZE - ilPlayers.length).fill(null).map((_, i) => (
+                <div key={`empty-il-${i}`} className="player-row empty-row il-row">
+                  <div className="slot-indicator il">IL</div>
+                  <div className="game-status-dot red"></div>
+                  <div className="player-info-yahoo">
+                    <span className="empty-slot-text">Empty IL Slot</span>
+                  </div>
+                  <div className="player-stats-yahoo">
+                    <span className="stat-value">-</span>
+                    <span className="stat-value">-</span>
+                    <span className="stat-value">-</span>
+                  </div>
+                  <div className="player-proj">-</div>
+                  <div className="player-actions-yahoo">
+                    <button 
+                      className="action-btn"
+                      disabled
+                      title="Move injured player here"
+                    >+</button>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
@@ -1597,7 +2865,7 @@ const Dashboard = ({ user, team, tournament, onLogout, onUpdateTeam, onBackToTou
                 <option value="batter">Batters</option>
                 <option value="keeper">Keepers</option>
                 <option value="bowler">Bowlers</option>
-                <option value="flex">Flex</option>
+                <option value="allrounder">Allrounders</option>
               </select>
             </div>
             
@@ -1609,30 +2877,42 @@ const Dashboard = ({ user, team, tournament, onLogout, onUpdateTeam, onBackToTou
             </div>
             
             <div className="players-grid">
-              {(isDraftComplete ? filteredFreeAgents : allPlayersForBrowse).map(player => (
-                <div key={player.id} className="player-card-full">
-                  <div className="player-header">
-                    <span className="player-name">{player.name}</span>
-                    <span className={`position-badge ${player.position}`}>{player.position.toUpperCase()}</span>
+              {(isDraftComplete ? filteredFreeAgents : allPlayersForBrowse).map(player => {
+                const lockStatus = getPlayerLockStatus(player, tournament.matches);
+                const isLocked = isDraftComplete && (lockStatus.locked || !tradingWindowStatus.open);
+                return (
+                  <div key={player.id} className={`player-card-full ${isLocked ? 'locked' : ''}`}>
+                    <div className="player-header">
+                      <span className="player-name">
+                        {isLocked && <span className="lock-icon">🔒</span>}
+                        {player.name}
+                      </span>
+                      <span className={`position-badge ${player.position}`}>{player.position.toUpperCase()}</span>
+                    </div>
+                    <div className="player-details">
+                      <span className="player-team">{player.team}</span>
+                      <span className="player-price">${player.price}M</span>
+                      {player.droppedAt && (
+                        <span className="recently-dropped">Recently Dropped</span>
+                      )}
+                    </div>
+                    <div className="player-footer">
+                      <span className="avg-points">{player.avgPoints} avg pts</span>
+                      {isDraftComplete ? (
+                        <button 
+                          className="btn-primary btn-small"
+                          onClick={() => handleAddPlayer(player)}
+                          disabled={team.weeklyPickups >= team.weeklyPickupLimit || isLocked}
+                          title={isLocked ? lockStatus.message || 'Locked' : ''}
+                        >+ Add</button>
+                      ) : (
+                        <span className="browse-only-badge">Browse Only</span>
+                      )}
+                    </div>
+                    {isLocked && <div className="lock-overlay">{lockStatus.message || 'Locked'}</div>}
                   </div>
-                  <div className="player-details">
-                    <span className="player-team">{player.team}</span>
-                    <span className="player-price">${player.price}M</span>
-                  </div>
-                  <div className="player-footer">
-                    <span className="avg-points">{player.avgPoints} avg pts</span>
-                    {isDraftComplete ? (
-                      <button 
-                        className="btn-primary btn-small"
-                        onClick={() => handleAddPlayer(player)}
-                        disabled={team.weeklyPickups >= team.weeklyPickupLimit}
-                      >+ Add</button>
-                    ) : (
-                      <span className="browse-only-badge">Browse Only</span>
-                    )}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
@@ -2038,43 +3318,101 @@ const Dashboard = ({ user, team, tournament, onLogout, onUpdateTeam, onBackToTou
 // ============================================
 
 export default function App() {
-  const [currentPage, setCurrentPage] = useState('tournamentSelect');
+  const [currentPage, setCurrentPage] = useState('login'); // Login first!
   const [selectedTournament, setSelectedTournament] = useState(null);
   const [user, setUser] = useState(null);
   const [team, setTeam] = useState(null);
   const [isDraftComplete, setIsDraftComplete] = useState(false);
   const [isDraftOpen, setIsDraftOpen] = useState(false);
   const [allTeams, setAllTeams] = useState([]);
+  const [allUsers, setAllUsers] = useState([]);
+
+  // Load all users from localStorage
+  const loadAllUsers = () => {
+    const savedUsers = localStorage.getItem('t20fantasy_all_users');
+    if (savedUsers) {
+      setAllUsers(JSON.parse(savedUsers));
+    }
+  };
+
+  // Save user to the all users list
+  const saveUserToList = (userData) => {
+    const savedUsers = localStorage.getItem('t20fantasy_all_users');
+    let users = savedUsers ? JSON.parse(savedUsers) : [];
+    
+    // Check if user already exists
+    const existingIndex = users.findIndex(u => u.email.toLowerCase() === userData.email.toLowerCase());
+    if (existingIndex >= 0) {
+      users[existingIndex] = { ...users[existingIndex], ...userData, lastLogin: new Date().toISOString() };
+    } else {
+      users.push({ ...userData, createdAt: new Date().toISOString(), lastLogin: new Date().toISOString() });
+    }
+    
+    localStorage.setItem('t20fantasy_all_users', JSON.stringify(users));
+    setAllUsers(users);
+  };
+
+  // Delete user from the list
+  const handleDeleteUser = (userId) => {
+    const savedUsers = localStorage.getItem('t20fantasy_all_users');
+    let users = savedUsers ? JSON.parse(savedUsers) : [];
+    users = users.filter(u => u.id !== userId);
+    localStorage.setItem('t20fantasy_all_users', JSON.stringify(users));
+    setAllUsers(users);
+    
+    // Also delete their team if they have one
+    const userTeams = allTeams.filter(t => t.userId === userId);
+    userTeams.forEach(t => handleDeleteTeam(t.id));
+  };
 
   useEffect(() => {
+    loadAllUsers();
+    
+    // Load all teams
+    const savedAllTeams = localStorage.getItem('t20fantasy_all_teams');
+    if (savedAllTeams) {
+      setAllTeams(JSON.parse(savedAllTeams));
+    }
+    
     const savedUser = localStorage.getItem('t20fantasy_user');
-    const savedTeam = localStorage.getItem('t20fantasy_team');
     const savedTournament = localStorage.getItem('t20fantasy_tournament');
-    const savedDraftStatus = localStorage.getItem('t20fantasy_draft_complete');
-    const savedDraftOpen = localStorage.getItem('t20fantasy_draft_open');
     
     if (savedUser) {
       const parsedUser = JSON.parse(savedUser);
       setUser(parsedUser);
       
+      // Check if tournament is saved
       if (savedTournament) {
-        setSelectedTournament(JSON.parse(savedTournament));
-      }
-      
-      if (savedDraftOpen === 'true') {
-        setIsDraftOpen(true);
-      }
-      
-      // Admin users go to admin panel
-      if (parsedUser.isAdmin) {
-        setCurrentPage('admin');
-      } else if (savedTeam && savedDraftStatus === 'true') {
-        setTeam(JSON.parse(savedTeam));
-        setIsDraftComplete(true);
-        setCurrentPage('dashboard');
-      } else if (savedTeam) {
-        setTeam(JSON.parse(savedTeam));
-        setCurrentPage('dashboard');
+        const tournamentToUse = JSON.parse(savedTournament);
+        setSelectedTournament(tournamentToUse);
+        
+        // Get tournament-specific data
+        const tournamentKey = tournamentToUse?.id || 'default';
+        const savedTeam = localStorage.getItem(`t20fantasy_team_${tournamentKey}`);
+        const savedDraftStatus = localStorage.getItem(`t20fantasy_draft_complete_${tournamentKey}`);
+        const savedDraftOpen = localStorage.getItem(`t20fantasy_draft_open_${tournamentKey}`);
+        
+        if (savedDraftOpen === 'true') {
+          setIsDraftOpen(true);
+        }
+        
+        // Admin users go to admin panel
+        if (parsedUser.isAdmin) {
+          setCurrentPage('admin');
+        } else if (savedTeam && savedDraftStatus === 'true') {
+          setTeam(JSON.parse(savedTeam));
+          setIsDraftComplete(true);
+          setCurrentPage('dashboard');
+        } else if (savedTeam) {
+          setTeam(JSON.parse(savedTeam));
+          setCurrentPage('dashboard');
+        } else {
+          // User is logged in, has tournament but no team
+          setCurrentPage('createTeam');
+        }
+      } else {
+        // User is logged in but no tournament selected - go to tournament select
+        setCurrentPage('tournamentSelect');
       }
     }
   }, []);
@@ -2082,62 +3420,215 @@ export default function App() {
   const handleSelectTournament = (tournament) => {
     setSelectedTournament(tournament);
     localStorage.setItem('t20fantasy_tournament', JSON.stringify(tournament));
-    setCurrentPage('login');
+    
+    // Load tournament-specific data
+    const tournamentKey = tournament.id;
+    const savedTeam = localStorage.getItem(`t20fantasy_team_${tournamentKey}`);
+    const savedDraftStatus = localStorage.getItem(`t20fantasy_draft_complete_${tournamentKey}`);
+    const savedDraftOpen = localStorage.getItem(`t20fantasy_draft_open_${tournamentKey}`);
+    
+    if (savedDraftOpen === 'true') {
+      setIsDraftOpen(true);
+    } else {
+      setIsDraftOpen(false);
+    }
+    
+    // Admin goes to admin panel
+    if (user?.isAdmin) {
+      setCurrentPage('admin');
+      return;
+    }
+    
+    // Check if user has a team for this tournament
+    if (savedTeam) {
+      const parsedTeam = JSON.parse(savedTeam);
+      setTeam(parsedTeam);
+      if (savedDraftStatus === 'true') {
+        setIsDraftComplete(true);
+      } else {
+        setIsDraftComplete(false);
+      }
+      setCurrentPage('dashboard');
+    } else {
+      // No team for this tournament - create one
+      setTeam(null);
+      setIsDraftComplete(false);
+      setCurrentPage('createTeam');
+    }
+  };
+  
+  // Switch tournament (dropdown handler)
+  const handleSwitchTournament = (tournamentId) => {
+    const tournament = Object.values(TOURNAMENTS).find(t => t.id === tournamentId);
+    if (tournament) {
+      handleSelectTournament(tournament);
+    }
   };
 
   const handleLogin = (userData) => {
     setUser(userData);
     localStorage.setItem('t20fantasy_user', JSON.stringify(userData));
     
-    // Admin users go directly to admin panel
+    // Track user in all users list
+    saveUserToList(userData);
+    
+    // After login, go to tournament select (or admin panel for admins)
     if (userData.isAdmin) {
-      setCurrentPage('admin');
+      // Admin needs to select tournament too
+      const savedTournament = localStorage.getItem('t20fantasy_tournament');
+      if (savedTournament) {
+        setSelectedTournament(JSON.parse(savedTournament));
+        setCurrentPage('admin');
+      } else {
+        setCurrentPage('tournamentSelect');
+      }
+      return;
+    }
+    
+    // Check if there's a saved tournament
+    const savedTournament = localStorage.getItem('t20fantasy_tournament');
+    if (savedTournament) {
+      const tournament = JSON.parse(savedTournament);
+      setSelectedTournament(tournament);
+      
+      // Check if user has a team for this tournament
+      const tournamentKey = tournament.id;
+      const savedTeam = localStorage.getItem(`t20fantasy_team_${tournamentKey}`);
+      const savedDraftStatus = localStorage.getItem(`t20fantasy_draft_complete_${tournamentKey}`);
+      const savedDraftOpen = localStorage.getItem(`t20fantasy_draft_open_${tournamentKey}`);
+      
+      if (savedDraftOpen === 'true') {
+        setIsDraftOpen(true);
+      }
+      
+      if (savedTeam) {
+        setTeam(JSON.parse(savedTeam));
+        if (savedDraftStatus === 'true') {
+          setIsDraftComplete(true);
+        }
+        setCurrentPage('dashboard');
+      } else {
+        setCurrentPage('createTeam');
+      }
     } else {
-      setCurrentPage('createTeam');
+      // No tournament selected - go to tournament select
+      setCurrentPage('tournamentSelect');
     }
   };
 
   const handleSignup = (userData) => {
     setUser(userData);
     localStorage.setItem('t20fantasy_user', JSON.stringify(userData));
+    
+    // Track user in all users list
+    saveUserToList(userData);
+    
     setCurrentPage('createTeam');
   };
 
   const handleTeamCreated = (teamData) => {
+    const tournamentKey = selectedTournament?.id || 'default';
     setTeam(teamData);
-    localStorage.setItem('t20fantasy_team', JSON.stringify(teamData));
-    setAllTeams(prev => [...prev, teamData]);
+    localStorage.setItem(`t20fantasy_team_${tournamentKey}`, JSON.stringify(teamData));
+    
+    // Add to allTeams and persist
+    setAllTeams(prev => {
+      const updated = [...prev, teamData];
+      localStorage.setItem('t20fantasy_all_teams', JSON.stringify(updated));
+      return updated;
+    });
+    
+    // Also update user's hasTeam flag
+    const savedUsers = localStorage.getItem('t20fantasy_all_users');
+    if (savedUsers && user) {
+      const users = JSON.parse(savedUsers).map(u => 
+        u.id === user.id ? { ...u, hasTeam: true } : u
+      );
+      localStorage.setItem('t20fantasy_all_users', JSON.stringify(users));
+      setAllUsers(users);
+    }
     
     // Check if draft is open - if not, go to dashboard in browse mode
     if (isDraftOpen) {
       setIsDraftComplete(false);
-      localStorage.setItem('t20fantasy_draft_complete', 'false');
+      localStorage.setItem(`t20fantasy_draft_complete_${tournamentKey}`, 'false');
       setCurrentPage('draft');
     } else {
       // Go to dashboard but draft not complete - browse mode
       setIsDraftComplete(false);
-      localStorage.setItem('t20fantasy_draft_complete', 'false');
+      localStorage.setItem(`t20fantasy_draft_complete_${tournamentKey}`, 'false');
       setCurrentPage('dashboard');
     }
   };
 
   const handleDraftComplete = (roster) => {
+    const tournamentKey = selectedTournament?.id || 'default';
     const updatedTeam = { ...team, roster };
     setTeam(updatedTeam);
-    localStorage.setItem('t20fantasy_team', JSON.stringify(updatedTeam));
+    localStorage.setItem(`t20fantasy_team_${tournamentKey}`, JSON.stringify(updatedTeam));
     setIsDraftComplete(true);
-    localStorage.setItem('t20fantasy_draft_complete', 'true');
+    localStorage.setItem(`t20fantasy_draft_complete_${tournamentKey}`, 'true');
     setCurrentPage('dashboard');
   };
 
-  const handleUpdateTeam = (updatedTeam) => {
-    setTeam(updatedTeam);
-    localStorage.setItem('t20fantasy_team', JSON.stringify(updatedTeam));
+  const handleUpdateTeam = (teamIdOrTeam, updates = null) => {
+    const tournamentKey = selectedTournament?.id || 'default';
+    
+    // Support both: handleUpdateTeam(updatedTeam) and handleUpdateTeam(teamId, updates)
+    if (updates !== null) {
+      // Called with (teamId, updates) from admin panel
+      const teamId = teamIdOrTeam;
+      setAllTeams(prev => prev.map(t => 
+        t.id === teamId ? { ...t, ...updates } : t
+      ));
+      
+      // If it's the current user's team, update local state too
+      if (team && team.id === teamId) {
+        const updatedTeam = { ...team, ...updates };
+        setTeam(updatedTeam);
+        localStorage.setItem(`t20fantasy_team_${tournamentKey}`, JSON.stringify(updatedTeam));
+      }
+      
+      // Update allTeams in localStorage
+      const savedTeams = localStorage.getItem('t20fantasy_all_teams');
+      if (savedTeams) {
+        const teams = JSON.parse(savedTeams).map(t => 
+          t.id === teamId ? { ...t, ...updates } : t
+        );
+        localStorage.setItem('t20fantasy_all_teams', JSON.stringify(teams));
+      }
+    } else {
+      // Called with (updatedTeam) from dashboard
+      const updatedTeam = teamIdOrTeam;
+      setTeam(updatedTeam);
+      localStorage.setItem(`t20fantasy_team_${tournamentKey}`, JSON.stringify(updatedTeam));
+    }
+  };
+  
+  const handleDeleteTeam = (teamId) => {
+    // Remove from allTeams state
+    setAllTeams(prev => prev.filter(t => t.id !== teamId));
+    
+    // If it's the current user's team, clear it
+    if (team && team.id === teamId) {
+      setTeam(null);
+      const tournamentKey = selectedTournament?.id || 'default';
+      localStorage.removeItem(`t20fantasy_team_${tournamentKey}`);
+      localStorage.removeItem(`t20fantasy_draft_complete_${tournamentKey}`);
+    }
+    
+    // Update allTeams in localStorage
+    const savedTeams = localStorage.getItem('t20fantasy_all_teams');
+    if (savedTeams) {
+      const teams = JSON.parse(savedTeams).filter(t => t.id !== teamId);
+      localStorage.setItem('t20fantasy_all_teams', JSON.stringify(teams));
+    }
   };
   
   const handleStartDraft = () => {
+    const tournamentKey = selectedTournament?.id || 'default';
     setIsDraftOpen(true);
-    localStorage.setItem('t20fantasy_draft_open', 'true');
+    localStorage.setItem(`t20fantasy_draft_open_${tournamentKey}`, 'true');
   };
   
   const handleGoToDraft = () => {
@@ -2153,16 +3644,21 @@ export default function App() {
     setIsDraftComplete(false);
     setIsDraftOpen(false);
     localStorage.clear();
-    setCurrentPage('tournamentSelect');
+    setCurrentPage('login'); // Go back to login, not tournamentSelect
   };
 
   const handleBackToTournaments = () => {
+    // Keep user logged in, but reset tournament-specific state
+    const currentTournamentKey = selectedTournament?.id;
     setSelectedTournament(null);
     setTeam(null);
     setIsDraftComplete(false);
-    localStorage.removeItem('t20fantasy_team');
+    setIsDraftOpen(false);
+    
+    // Remove only the current tournament data, keep user session
     localStorage.removeItem('t20fantasy_tournament');
-    localStorage.removeItem('t20fantasy_draft_complete');
+    // Note: We keep tournament-specific team data so user can return to it
+    
     setCurrentPage('tournamentSelect');
   };
 
@@ -2171,13 +3667,16 @@ export default function App() {
   return (
     <>
       {currentPage === 'tournamentSelect' && (
-        <TournamentSelectPage onSelectTournament={handleSelectTournament} />
+        <TournamentSelectPage 
+          onSelectTournament={handleSelectTournament}
+          user={user}
+          onLogout={handleLogout}
+        />
       )}
       {currentPage === 'login' && (
         <LoginPage 
           onLogin={handleLogin} 
           onShowSignup={() => setCurrentPage('signup')}
-          tournament={selectedTournament}
         />
       )}
       {currentPage === 'signup' && (
@@ -2208,8 +3707,13 @@ export default function App() {
           tournament={selectedTournament || TOURNAMENTS.test_ind_nz}
           onLogout={handleLogout}
           onBackToTournaments={handleBackToTournaments}
+          onSwitchTournament={handleSwitchTournament}
           allTeams={allTeams}
+          allUsers={allUsers}
           onStartDraft={handleStartDraft}
+          onDeleteTeam={handleDeleteTeam}
+          onUpdateTeam={handleUpdateTeam}
+          onDeleteUser={handleDeleteUser}
         />
       )}
       {currentPage === 'dashboard' && (
@@ -2220,6 +3724,7 @@ export default function App() {
           onLogout={handleLogout}
           onUpdateTeam={handleUpdateTeam}
           onBackToTournaments={handleBackToTournaments}
+          onSwitchTournament={handleSwitchTournament}
           isDraftComplete={isDraftComplete}
           isDraftOpen={isDraftOpen}
           onGoToDraft={handleGoToDraft}

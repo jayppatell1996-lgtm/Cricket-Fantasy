@@ -718,320 +718,238 @@ If you have data in Excel/Google Sheets:
 
 **Best for:** Live data, automatic updates, real tournament rosters.
 
-This method connects to a cricket data API to automatically fetch and update player information. Several APIs are available:
+We recommend **CricketData.org** (formerly CricAPI) for T20 Fantasy apps because it:
+- Has a generous **free tier** (100 requests/day)
+- Provides **squad data**, **scorecards**, and **ball-by-ball** data
+- Offers affordable paid plans starting at **$5.99/month**
+- Works seamlessly with your **custom scoring rules**
 
-| API | Free Tier | Data Quality | Best For |
-|-----|-----------|--------------|----------|
-| [CricAPI](https://cricapi.com) | 100 req/day | Good | Basic stats |
-| [Cricbuzz (RapidAPI)](https://rapidapi.com/cricketapilive/api/cricbuzz-cricket) | 500 req/month | Excellent | Detailed data |
-| [SportMonks Cricket](https://www.sportmonks.com/cricket-api) | Limited | Professional | Production apps |
-| [ESPNcricinfo (unofficial)](https://github.com/dwillis/python-espncricinfo) | Unlimited | Good | Scraping |
+#### Quick Start Summary
 
-#### Step 1: Get API Credentials
+```bash
+# 1. Sign up at https://cricketdata.org/signup.aspx
+# 2. Add to .env:
+CRICKET_API_KEY=your_api_key_here
 
-**For CricAPI (Recommended for beginners):**
+# 3. Test your setup:
+node scripts/setup-cricket-api.js test
 
-1. Go to [https://cricapi.com](https://cricapi.com)
-2. Click "Sign Up" and create account
-3. Verify your email
-4. Go to Dashboard → API Key
-5. Copy your API key
+# 4. Test your scoring rules:
+node scripts/setup-cricket-api.js scoring
 
-**For RapidAPI (Cricbuzz):**
+# 5. Sync players:
+node scripts/sync-tournaments.js
+```
 
-1. Go to [https://rapidapi.com](https://rapidapi.com)
-2. Create account or login
-3. Search for "Cricbuzz Cricket"
-4. Subscribe to free tier
-5. Copy your `X-RapidAPI-Key`
+---
+
+#### Step 1: Get Your CricketData.org API Key
+
+1. Go to **[https://cricketdata.org/signup.aspx](https://cricketdata.org/signup.aspx)**
+2. Create a free account (email verification required)
+3. Login and go to your **Dashboard**
+4. Copy your **API Key** (looks like: `abc123-xyz789-...`)
+
+> 💡 **Free tier:** 100 requests/day is plenty for a small league. Paid plans ($5.99/mo) give you 5,000+ requests.
 
 #### Step 2: Add API Key to Environment
 
 Add to your `.env` file:
 
 ```env
-# CricAPI
-CRICKET_API_KEY=your_cricapi_key_here
-
-# OR RapidAPI
-RAPIDAPI_KEY=your_rapidapi_key_here
+# CricketData.org API Key
+CRICKET_API_KEY=your_api_key_here
 ```
 
-Add to Vercel:
-1. Go to Project Settings → Environment Variables
-2. Add `CRICKET_API_KEY` or `RAPIDAPI_KEY`
+For Vercel deployment:
+1. Go to **Project Settings → Environment Variables**
+2. Add `CRICKET_API_KEY` with your key
+3. Redeploy
 
-#### Step 3: Create Player Sync Script
+#### Step 3: Test Your API Connection
 
-Create file: `scripts/sync-players.js`
+```bash
+# Load environment variables
+export $(cat .env | xargs)
+
+# Test API connection
+node scripts/setup-cricket-api.js test
+```
+
+Expected output:
+```
+🏏 T20 Fantasy - CricketData.org Setup
+
+📡 Testing API Key...
+   Key: abc1234...xyz9
+   ✅ API Key is valid!
+   📊 Credits remaining: 95 of 100
+   🏏 Found 8 current matches
+```
+
+#### Step 4: Understand Your Custom Scoring Rules
+
+Your app uses **custom scoring rules** defined in `App.jsx`. We calculate fantasy points locally using match scorecard data from the API.
+
+**Your Scoring Rules:**
+
+| Category | Action | Points |
+|----------|--------|--------|
+| **Batting** | Per run | +1 |
+| | Strike rate 120-130 (20+ runs) | +5 |
+| | Strike rate 130-140 | +10 |
+| | Strike rate 140-150 | +15 |
+| | Strike rate 150-160 | +20 |
+| | Strike rate 160+ | +25 |
+| | Half-century (50+) | +10 |
+| | Century (100+) | +25 |
+| | Duck (out for 0) | -5 |
+| **Bowling** | Per wicket | +25 |
+| | Per maiden over | +20 |
+| | Economy 7-8 (3+ overs) | +10 |
+| | Economy 6-7 | +15 |
+| | Economy 5-6 | +20 |
+| | Economy 0-5 | +25 |
+| | 3 wickets | +10 |
+| | 5 wickets | +25 |
+| **Fielding** | Per catch | +12 |
+| | Per run out | +20 |
+| | Per stumping | +15 |
+
+To test your scoring rules:
+
+```bash
+node scripts/setup-cricket-api.js scoring
+```
+
+#### Step 5: Search for Tournament Series IDs
+
+Find your tournament's Series ID:
+
+```bash
+# Interactive search
+node scripts/setup-cricket-api.js search
+
+# Or search directly
+node scripts/sync-tournaments.js --search "India vs New Zealand"
+node scripts/sync-tournaments.js --search "T20 World Cup"
+```
+
+Example output:
+```
+🔍 Searching for: "T20 World Cup"...
+   Found 3 series:
+
+   1. ICC T20 World Cup 2026
+      ID: a1b2c3d4-e5f6-7890
+      Start: 2026-02-09
+      End: 2026-03-07
+
+   💡 Add this to your tournament config!
+```
+
+#### Step 6: Sync Players to Database
+
+Once you have Series IDs, sync players:
+
+```bash
+# Sync all tournaments (uses fallback data if API doesn't have series yet)
+node scripts/sync-tournaments.js
+
+# Sync specific tournament
+node scripts/sync-tournaments.js --tournament test_ind_nz
+node scripts/sync-tournaments.js --tournament t20_wc_2026
+```
+
+The sync script will:
+1. Search for the series on CricketData.org
+2. Fetch squad data if available
+3. Transform players to your schema
+4. Save to your Turso database
+5. Fall back to hardcoded data if series not found
+
+#### Step 7: Live Scoring During Matches
+
+To sync live match scores and calculate fantasy points:
+
+```bash
+# Sync all live matches
+node scripts/live-scoring-sync.js
+
+# Sync specific match
+node scripts/live-scoring-sync.js --match abc123
+```
+
+This script:
+1. Fetches scorecard data from CricketData.org
+2. Calculates fantasy points using YOUR scoring rules
+3. Updates player stats in the database
+4. Shows top performers
+
+#### Available Scripts
+
+| Script | Command | Purpose |
+|--------|---------|---------|
+| `setup-cricket-api.js` | `test` | Test API connection |
+| | `search` | Search for series |
+| | `scoring` | Test your scoring rules |
+| | `sync` | Sync all tournaments |
+| | `all` | Run complete setup |
+| `sync-tournaments.js` | `--tournament <id>` | Sync specific tournament |
+| | `--search "<term>"` | Search series |
+| `live-scoring-sync.js` | (none) | Sync all live matches |
+| | `--match <id>` | Sync specific match |
+
+#### API Endpoints Used
+
+The integration uses these CricketData.org endpoints:
 
 ```javascript
-import { createClient } from '@libsql/client';
+// Series/Tournament info
+GET /v1/series?apikey=KEY&search=term
+GET /v1/series_info?apikey=KEY&id=SERIES_ID
+GET /v1/series_squad?apikey=KEY&id=SERIES_ID
 
-const db = createClient({
-  url: process.env.TURSO_DATABASE_URL,
-  authToken: process.env.TURSO_AUTH_TOKEN,
-});
+// Match data
+GET /v1/currentMatches?apikey=KEY
+GET /v1/match_info?apikey=KEY&id=MATCH_ID
+GET /v1/match_scorecard?apikey=KEY&id=MATCH_ID
 
-// ============================================
-// CricAPI Implementation
-// ============================================
-
-async function fetchPlayersFromCricAPI(seriesId) {
-  const response = await fetch(
-    `https://api.cricapi.com/v1/series_squad?apikey=${process.env.CRICKET_API_KEY}&id=${seriesId}`
-  );
-  const data = await response.json();
-  
-  if (data.status !== 'success') {
-    throw new Error('Failed to fetch from CricAPI: ' + data.reason);
-  }
-  
-  return data.data;
-}
-
-// ============================================
-// RapidAPI (Cricbuzz) Implementation
-// ============================================
-
-async function fetchPlayersFromCricbuzz(seriesId) {
-  const response = await fetch(
-    `https://cricbuzz-cricket.p.rapidapi.com/series/v1/${seriesId}/squads`,
-    {
-      headers: {
-        'X-RapidAPI-Key': process.env.RAPIDAPI_KEY,
-        'X-RapidAPI-Host': 'cricbuzz-cricket.p.rapidapi.com',
-      },
-    }
-  );
-  const data = await response.json();
-  return data.squads;
-}
-
-// ============================================
-// Transform API Data to Our Schema
-// ============================================
-
-function transformPlayer(apiPlayer, teamCode, tournamentId) {
-  // Determine position based on player role
-  let position = 'flex';
-  const role = (apiPlayer.role || apiPlayer.playingRole || '').toLowerCase();
-  
-  if (role.includes('wicket') || role.includes('keeper')) {
-    position = 'keeper';
-  } else if (role.includes('bowl') || role.includes('spinner') || role.includes('pace')) {
-    position = 'bowler';
-  } else if (role.includes('bat') || role.includes('open')) {
-    position = 'batter';
-  } else if (role.includes('all')) {
-    position = 'flex';
-  }
-  
-  // Calculate price based on batting/bowling averages if available
-  const battingAvg = apiPlayer.battingAverage || apiPlayer.stats?.batting?.average || 25;
-  const bowlingAvg = apiPlayer.bowlingAverage || apiPlayer.stats?.bowling?.average || 30;
-  
-  // Simple pricing formula (customize as needed)
-  let price = 7.0; // Base price
-  if (battingAvg > 35) price += 2;
-  if (battingAvg > 45) price += 2;
-  if (bowlingAvg < 25) price += 2;
-  if (bowlingAvg < 20) price += 2;
-  if (role.includes('captain')) price += 1;
-  
-  // Estimate average fantasy points
-  let avgPoints = 25; // Base
-  avgPoints += Math.min(battingAvg / 2, 25);
-  if (position === 'bowler' || position === 'flex') {
-    avgPoints += Math.max(0, (30 - bowlingAvg));
-  }
-  
-  return {
-    id: `p_${teamCode.toLowerCase()}_${apiPlayer.id || apiPlayer.playerId || Date.now()}`,
-    name: apiPlayer.name || apiPlayer.fullName,
-    team: teamCode,
-    position: position,
-    price: Math.round(price * 2) / 2, // Round to nearest 0.5
-    avgPoints: Math.round(avgPoints),
-    totalPoints: 0,
-    tournamentId: tournamentId,
-  };
-}
-
-// ============================================
-// Save Players to Database
-// ============================================
-
-async function savePlayersToDb(players) {
-  console.log(`Saving ${players.length} players to database...`);
-  
-  for (const player of players) {
-    try {
-      // Use INSERT OR REPLACE to handle duplicates
-      await db.execute({
-        sql: `INSERT OR REPLACE INTO players 
-              (id, name, team, position, price, avg_points, total_points, tournament_id) 
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        args: [
-          player.id,
-          player.name,
-          player.team,
-          player.position,
-          player.price,
-          player.avgPoints,
-          player.totalPoints,
-          player.tournamentId,
-        ],
-      });
-      console.log(`  ✓ Saved: ${player.name} (${player.team})`);
-    } catch (error) {
-      console.error(`  ✗ Failed: ${player.name} - ${error.message}`);
-    }
-  }
-  
-  console.log('Player sync complete!');
-}
-
-// ============================================
-// Main Sync Function
-// ============================================
-
-async function syncPlayers(tournamentId, seriesIds) {
-  console.log(`\n🏏 Syncing players for tournament: ${tournamentId}`);
-  console.log('='.repeat(50));
-  
-  const allPlayers = [];
-  
-  for (const [teamCode, seriesId] of Object.entries(seriesIds)) {
-    console.log(`\nFetching ${teamCode} squad...`);
-    
-    try {
-      // Use CricAPI
-      const squadData = await fetchPlayersFromCricAPI(seriesId);
-      
-      // OR use RapidAPI
-      // const squadData = await fetchPlayersFromCricbuzz(seriesId);
-      
-      const players = squadData.map(p => transformPlayer(p, teamCode, tournamentId));
-      allPlayers.push(...players);
-      console.log(`  Found ${players.length} players`);
-      
-      // Rate limiting - wait between requests
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-    } catch (error) {
-      console.error(`  Error fetching ${teamCode}: ${error.message}`);
-    }
-  }
-  
-  // Save all players to database
-  await savePlayersToDb(allPlayers);
-  
-  // Summary
-  console.log('\n' + '='.repeat(50));
-  console.log(`Total players synced: ${allPlayers.length}`);
-  
-  const byTeam = allPlayers.reduce((acc, p) => {
-    acc[p.team] = (acc[p.team] || 0) + 1;
-    return acc;
-  }, {});
-  
-  console.log('\nPlayers by team:');
-  Object.entries(byTeam)
-    .sort((a, b) => b[1] - a[1])
-    .forEach(([team, count]) => console.log(`  ${team}: ${count}`));
-}
-
-// ============================================
-// Run Script
-// ============================================
-
-// Example: Sync T20 World Cup 2026 teams
-// You'll need to find the actual series IDs from the API
-
-const T20_WC_2026_SERIES_IDS = {
-  'IND': 'series_id_for_india',    // Get from API
-  'AUS': 'series_id_for_australia',
-  'ENG': 'series_id_for_england',
-  'PAK': 'series_id_for_pakistan',
-  // Add more teams...
-};
-
-// Uncomment to run:
-// syncPlayers('t20_wc_2026', T20_WC_2026_SERIES_IDS);
-
-export { syncPlayers, fetchPlayersFromCricAPI, transformPlayer };
+// Player data
+GET /v1/players?apikey=KEY&search=name
+GET /v1/players_info?apikey=KEY&id=PLAYER_ID
 ```
 
-#### Step 4: Create API Route for Manual Sync
+#### Handling Missing Tournament Data
 
-Create file: `api/sync-players.js`
+If CricketData.org doesn't have your tournament yet (e.g., T20 WC 2026 before announcement):
+
+1. **Sync will use fallback data** - Pre-defined player pools in `sync-tournaments.js`
+2. **Re-sync when available** - Run sync again once series is listed
+3. **Manual entry** - Use Admin Panel to add/update players
 
 ```javascript
-import { syncPlayers } from '../scripts/sync-players.js';
-
-export default async function handler(req, res) {
-  // Check for admin authorization
-  const authHeader = req.headers.authorization;
-  if (authHeader !== `Bearer ${process.env.ADMIN_SECRET}`) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-  
-  const { tournamentId, seriesIds } = req.body;
-  
-  try {
-    await syncPlayers(tournamentId, seriesIds);
-    res.json({ success: true, message: 'Player sync complete' });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+// In scripts/sync-tournaments.js, fallback data is defined:
+function getFallbackPlayers(tournamentId) {
+  if (tournamentId === 't20_wc_2026') {
+    return [
+      { name: 'Virat Kohli', team: 'IND', position: 'batter', ... },
+      // ... more players
+    ];
   }
 }
 ```
 
-#### Step 5: Set Up Automatic Nightly Sync (Vercel Cron)
+#### Rate Limiting Best Practices
 
-Create file: `vercel.json`
-
-```json
-{
-  "crons": [
-    {
-      "path": "/api/cron/sync-players",
-      "schedule": "0 2 * * *"
-    }
-  ]
-}
-```
-
-Create file: `api/cron/sync-players.js`
-
-```javascript
-import { syncPlayers } from '../../scripts/sync-players.js';
-
-export default async function handler(req, res) {
-  // Verify it's a Vercel cron request
-  if (req.headers.authorization !== `Bearer ${process.env.CRON_SECRET}`) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-  
-  try {
-    // Sync active tournaments
-    await syncPlayers('t20_wc_2026', T20_WC_SERIES_IDS);
-    
-    res.json({ success: true, timestamp: new Date().toISOString() });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-}
-
-export const config = {
-  api: {
-    bodyParser: false,
-  },
-};
-```
+| Tier | Requests/Day | Best Practice |
+|------|--------------|---------------|
+| Free | 100 | Cache responses, sync once daily |
+| Basic ($5.99) | 5,000 | Sync every 15 mins during live matches |
+| Pro ($19.99) | 15,000 | Real-time ball-by-ball updates |
 
 ---
+
 
 ### Method 4: CSV/JSON File Import
 

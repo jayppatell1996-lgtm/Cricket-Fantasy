@@ -10,7 +10,14 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
-    "db:studio": "drizzle-kit studio"
+    "db:push:turso": "drizzle-kit push:sqlite --driver turso --schema ./src/db/schema.js",
+    "db:studio": "drizzle-kit studio",
+    "api:test": "node scripts/setup-cricket-api.js test",
+    "api:search": "node scripts/setup-cricket-api.js search",
+    "sync": "node scripts/sync-tournaments.js",
+    "sync:test": "node scripts/sync-tournaments.js --tournament test_ind_nz",
+    "sync:wc": "node scripts/sync-tournaments.js --tournament t20_wc_2026",
+    "sync:ipl": "node scripts/sync-tournaments.js --tournament ipl_2026"
   },
   "dependencies": {
     "@libsql/client": "^0.4.0",
