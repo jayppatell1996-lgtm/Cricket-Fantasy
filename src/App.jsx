@@ -30,11 +30,11 @@ const TOURNAMENTS = {
     id: 't20_wc_2026',
     name: 'T20 World Cup 2026',
     shortName: 'T20 WC 2026',
-    description: 'ICC T20 World Cup - February 2026',
+    description: 'ICC T20 World Cup 2026 - India & Sri Lanka',
     startDate: '2026-02-09',
     endDate: '2026-03-07',
     status: 'upcoming',
-    teams: ['IND', 'AUS', 'ENG', 'PAK', 'NZ', 'SA', 'WI', 'SL', 'BAN', 'AFG', 'ZIM', 'IRE', 'SCO', 'NAM', 'USA', 'NEP'],
+    teams: ['IND', 'AUS', 'ENG', 'PAK', 'SA', 'NZ', 'WI', 'SL', 'BAN', 'AFG', 'IRE', 'ZIM', 'NED', 'SCO', 'NAM', 'USA', 'NEP', 'UGA', 'PNG', 'OMA'],
     isTest: false,
     draftStatus: 'pending',
     matches: [], // Will be populated from API when tournament starts
@@ -370,228 +370,22 @@ const TEST_PLAYERS_IND_NZ = [
 ];
 
 // Full player pool for T20 WC and IPL
-const FULL_PLAYER_POOL = [
-  // ============================================
-  // INDIA (15 players)
-  // ============================================
-  { id: 1, name: 'Virat Kohli', team: 'IND', position: 'batter', price: 12.5, avgPoints: 45.2, totalPoints: 0 },
-  { id: 2, name: 'Rohit Sharma', team: 'IND', position: 'batter', price: 12.0, avgPoints: 42.8, totalPoints: 0 },
-  { id: 3, name: 'Suryakumar Yadav', team: 'IND', position: 'batter', price: 11.5, avgPoints: 46.0, totalPoints: 0 },
-  { id: 4, name: 'Shubman Gill', team: 'IND', position: 'batter', price: 10.0, avgPoints: 40.0, totalPoints: 0 },
-  { id: 5, name: 'Yashasvi Jaiswal', team: 'IND', position: 'batter', price: 10.0, avgPoints: 40.5, totalPoints: 0 },
-  { id: 6, name: 'Rishabh Pant', team: 'IND', position: 'keeper', price: 10.5, avgPoints: 40.2, totalPoints: 0 },
-  { id: 7, name: 'KL Rahul', team: 'IND', position: 'keeper', price: 9.5, avgPoints: 37.0, totalPoints: 0 },
-  { id: 8, name: 'Hardik Pandya', team: 'IND', position: 'allrounder', price: 11.0, avgPoints: 42.0, totalPoints: 0 },
-  { id: 9, name: 'Ravindra Jadeja', team: 'IND', position: 'allrounder', price: 10.0, avgPoints: 38.0, totalPoints: 0 },
-  { id: 10, name: 'Axar Patel', team: 'IND', position: 'allrounder', price: 9.0, avgPoints: 35.0, totalPoints: 0 },
-  { id: 11, name: 'Jasprit Bumrah', team: 'IND', position: 'bowler', price: 12.0, avgPoints: 42.0, totalPoints: 0 },
-  { id: 12, name: 'Mohammed Shami', team: 'IND', position: 'bowler', price: 10.0, avgPoints: 36.0, totalPoints: 0 },
-  { id: 13, name: 'Arshdeep Singh', team: 'IND', position: 'bowler', price: 9.5, avgPoints: 36.0, totalPoints: 0 },
-  { id: 14, name: 'Kuldeep Yadav', team: 'IND', position: 'bowler', price: 9.0, avgPoints: 35.0, totalPoints: 0 },
-  { id: 15, name: 'Yuzvendra Chahal', team: 'IND', position: 'bowler', price: 8.5, avgPoints: 33.0, totalPoints: 0 },
-  
-  // ============================================
-  // AUSTRALIA (15 players)
-  // ============================================
-  { id: 20, name: 'David Warner', team: 'AUS', position: 'batter', price: 10.5, avgPoints: 40.0, totalPoints: 0 },
-  { id: 21, name: 'Travis Head', team: 'AUS', position: 'batter', price: 10.5, avgPoints: 42.0, totalPoints: 0 },
-  { id: 22, name: 'Steve Smith', team: 'AUS', position: 'batter', price: 10.0, avgPoints: 38.0, totalPoints: 0 },
-  { id: 23, name: 'Glenn Maxwell', team: 'AUS', position: 'allrounder', price: 10.5, avgPoints: 42.0, totalPoints: 0 },
-  { id: 24, name: 'Mitchell Marsh', team: 'AUS', position: 'allrounder', price: 9.5, avgPoints: 36.0, totalPoints: 0 },
-  { id: 25, name: 'Marcus Stoinis', team: 'AUS', position: 'allrounder', price: 9.0, avgPoints: 35.0, totalPoints: 0 },
-  { id: 26, name: 'Josh Inglis', team: 'AUS', position: 'keeper', price: 9.0, avgPoints: 34.0, totalPoints: 0 },
-  { id: 27, name: 'Matthew Wade', team: 'AUS', position: 'keeper', price: 8.5, avgPoints: 32.0, totalPoints: 0 },
-  { id: 28, name: 'Pat Cummins', team: 'AUS', position: 'bowler', price: 10.5, avgPoints: 38.0, totalPoints: 0 },
-  { id: 29, name: 'Mitchell Starc', team: 'AUS', position: 'bowler', price: 10.5, avgPoints: 38.0, totalPoints: 0 },
-  { id: 30, name: 'Josh Hazlewood', team: 'AUS', position: 'bowler', price: 9.5, avgPoints: 35.0, totalPoints: 0 },
-  { id: 31, name: 'Adam Zampa', team: 'AUS', position: 'bowler', price: 9.0, avgPoints: 35.0, totalPoints: 0 },
-  { id: 32, name: 'Nathan Ellis', team: 'AUS', position: 'bowler', price: 8.5, avgPoints: 32.0, totalPoints: 0 },
-  { id: 33, name: 'Ashton Agar', team: 'AUS', position: 'allrounder', price: 8.0, avgPoints: 30.0, totalPoints: 0 },
-  { id: 34, name: 'Tim David', team: 'AUS', position: 'batter', price: 9.5, avgPoints: 36.0, totalPoints: 0 },
-  
-  // ============================================
-  // ENGLAND (15 players)
-  // ============================================
-  { id: 40, name: 'Jos Buttler', team: 'ENG', position: 'keeper', price: 11.5, avgPoints: 48.0, totalPoints: 0 },
-  { id: 41, name: 'Phil Salt', team: 'ENG', position: 'batter', price: 10.0, avgPoints: 40.0, totalPoints: 0 },
-  { id: 42, name: 'Harry Brook', team: 'ENG', position: 'batter', price: 10.0, avgPoints: 40.0, totalPoints: 0 },
-  { id: 43, name: 'Jonny Bairstow', team: 'ENG', position: 'batter', price: 9.5, avgPoints: 38.0, totalPoints: 0 },
-  { id: 44, name: 'Ben Duckett', team: 'ENG', position: 'batter', price: 9.0, avgPoints: 36.0, totalPoints: 0 },
-  { id: 45, name: 'Liam Livingstone', team: 'ENG', position: 'allrounder', price: 9.0, avgPoints: 36.0, totalPoints: 0 },
-  { id: 46, name: 'Moeen Ali', team: 'ENG', position: 'allrounder', price: 8.5, avgPoints: 32.0, totalPoints: 0 },
-  { id: 47, name: 'Sam Curran', team: 'ENG', position: 'allrounder', price: 9.0, avgPoints: 35.0, totalPoints: 0 },
-  { id: 48, name: 'Ben Stokes', team: 'ENG', position: 'allrounder', price: 10.0, avgPoints: 38.0, totalPoints: 0 },
-  { id: 49, name: 'Jofra Archer', team: 'ENG', position: 'bowler', price: 10.0, avgPoints: 38.0, totalPoints: 0 },
-  { id: 50, name: 'Mark Wood', team: 'ENG', position: 'bowler', price: 9.5, avgPoints: 36.0, totalPoints: 0 },
-  { id: 51, name: 'Adil Rashid', team: 'ENG', position: 'bowler', price: 9.0, avgPoints: 35.0, totalPoints: 0 },
-  { id: 52, name: 'Chris Woakes', team: 'ENG', position: 'bowler', price: 8.5, avgPoints: 33.0, totalPoints: 0 },
-  { id: 53, name: 'Reece Topley', team: 'ENG', position: 'bowler', price: 8.5, avgPoints: 32.0, totalPoints: 0 },
-  { id: 54, name: 'Will Jacks', team: 'ENG', position: 'allrounder', price: 8.5, avgPoints: 34.0, totalPoints: 0 },
-  
-  // ============================================
-  // PAKISTAN (15 players)
-  // ============================================
-  { id: 60, name: 'Babar Azam', team: 'PAK', position: 'batter', price: 12.0, avgPoints: 44.0, totalPoints: 0 },
-  { id: 61, name: 'Mohammad Rizwan', team: 'PAK', position: 'keeper', price: 10.5, avgPoints: 42.0, totalPoints: 0 },
-  { id: 62, name: 'Fakhar Zaman', team: 'PAK', position: 'batter', price: 9.5, avgPoints: 36.0, totalPoints: 0 },
-  { id: 63, name: 'Saim Ayub', team: 'PAK', position: 'batter', price: 9.0, avgPoints: 35.0, totalPoints: 0 },
-  { id: 64, name: 'Iftikhar Ahmed', team: 'PAK', position: 'allrounder', price: 8.5, avgPoints: 32.0, totalPoints: 0 },
-  { id: 65, name: 'Shadab Khan', team: 'PAK', position: 'allrounder', price: 9.0, avgPoints: 35.0, totalPoints: 0 },
-  { id: 66, name: 'Imad Wasim', team: 'PAK', position: 'allrounder', price: 8.0, avgPoints: 30.0, totalPoints: 0 },
-  { id: 67, name: 'Shaheen Afridi', team: 'PAK', position: 'bowler', price: 10.5, avgPoints: 38.0, totalPoints: 0 },
-  { id: 68, name: 'Haris Rauf', team: 'PAK', position: 'bowler', price: 9.0, avgPoints: 34.0, totalPoints: 0 },
-  { id: 69, name: 'Naseem Shah', team: 'PAK', position: 'bowler', price: 9.0, avgPoints: 34.0, totalPoints: 0 },
-  { id: 70, name: 'Mohammad Nawaz', team: 'PAK', position: 'allrounder', price: 8.5, avgPoints: 32.0, totalPoints: 0 },
-  { id: 71, name: 'Usama Mir', team: 'PAK', position: 'bowler', price: 8.0, avgPoints: 30.0, totalPoints: 0 },
-  { id: 72, name: 'Azam Khan', team: 'PAK', position: 'keeper', price: 8.0, avgPoints: 30.0, totalPoints: 0 },
-  { id: 73, name: 'Mohammad Hasnain', team: 'PAK', position: 'bowler', price: 8.0, avgPoints: 30.0, totalPoints: 0 },
-  { id: 74, name: 'Abrar Ahmed', team: 'PAK', position: 'bowler', price: 8.5, avgPoints: 32.0, totalPoints: 0 },
-  
-  // ============================================
-  // SOUTH AFRICA (15 players)
-  // ============================================
-  { id: 80, name: 'Quinton de Kock', team: 'SA', position: 'keeper', price: 10.5, avgPoints: 42.0, totalPoints: 0 },
-  { id: 81, name: 'Aiden Markram', team: 'SA', position: 'batter', price: 9.5, avgPoints: 36.0, totalPoints: 0 },
-  { id: 82, name: 'Heinrich Klaasen', team: 'SA', position: 'keeper', price: 10.0, avgPoints: 40.0, totalPoints: 0 },
-  { id: 83, name: 'David Miller', team: 'SA', position: 'batter', price: 9.5, avgPoints: 38.0, totalPoints: 0 },
-  { id: 84, name: 'Tristan Stubbs', team: 'SA', position: 'batter', price: 8.5, avgPoints: 32.0, totalPoints: 0 },
-  { id: 85, name: 'Reeza Hendricks', team: 'SA', position: 'batter', price: 9.0, avgPoints: 35.0, totalPoints: 0 },
-  { id: 86, name: 'Marco Jansen', team: 'SA', position: 'allrounder', price: 9.0, avgPoints: 35.0, totalPoints: 0 },
-  { id: 87, name: 'Wiaan Mulder', team: 'SA', position: 'allrounder', price: 8.0, avgPoints: 30.0, totalPoints: 0 },
-  { id: 88, name: 'Kagiso Rabada', team: 'SA', position: 'bowler', price: 10.0, avgPoints: 38.0, totalPoints: 0 },
-  { id: 89, name: 'Anrich Nortje', team: 'SA', position: 'bowler', price: 9.5, avgPoints: 36.0, totalPoints: 0 },
-  { id: 90, name: 'Lungi Ngidi', team: 'SA', position: 'bowler', price: 9.0, avgPoints: 34.0, totalPoints: 0 },
-  { id: 91, name: 'Tabraiz Shamsi', team: 'SA', position: 'bowler', price: 8.5, avgPoints: 32.0, totalPoints: 0 },
-  { id: 92, name: 'Keshav Maharaj', team: 'SA', position: 'bowler', price: 8.5, avgPoints: 32.0, totalPoints: 0 },
-  { id: 93, name: 'Gerald Coetzee', team: 'SA', position: 'bowler', price: 8.5, avgPoints: 33.0, totalPoints: 0 },
-  { id: 94, name: 'Ryan Rickelton', team: 'SA', position: 'batter', price: 8.5, avgPoints: 32.0, totalPoints: 0 },
-  
-  // ============================================
-  // NEW ZEALAND (15 players)
-  // ============================================
-  { id: 100, name: 'Kane Williamson', team: 'NZ', position: 'batter', price: 10.0, avgPoints: 38.0, totalPoints: 0 },
-  { id: 101, name: 'Devon Conway', team: 'NZ', position: 'batter', price: 10.0, avgPoints: 40.0, totalPoints: 0 },
-  { id: 102, name: 'Finn Allen', team: 'NZ', position: 'batter', price: 9.5, avgPoints: 38.0, totalPoints: 0 },
-  { id: 103, name: 'Glenn Phillips', team: 'NZ', position: 'batter', price: 10.0, avgPoints: 40.0, totalPoints: 0 },
-  { id: 104, name: 'Daryl Mitchell', team: 'NZ', position: 'allrounder', price: 9.5, avgPoints: 36.0, totalPoints: 0 },
-  { id: 105, name: 'Mark Chapman', team: 'NZ', position: 'batter', price: 8.5, avgPoints: 32.0, totalPoints: 0 },
-  { id: 106, name: 'Tom Latham', team: 'NZ', position: 'keeper', price: 8.5, avgPoints: 32.0, totalPoints: 0 },
-  { id: 107, name: 'Mitchell Santner', team: 'NZ', position: 'allrounder', price: 9.0, avgPoints: 34.0, totalPoints: 0 },
-  { id: 108, name: 'Rachin Ravindra', team: 'NZ', position: 'allrounder', price: 9.0, avgPoints: 35.0, totalPoints: 0 },
-  { id: 109, name: 'Trent Boult', team: 'NZ', position: 'bowler', price: 10.0, avgPoints: 36.0, totalPoints: 0 },
-  { id: 110, name: 'Tim Southee', team: 'NZ', position: 'bowler', price: 9.0, avgPoints: 33.0, totalPoints: 0 },
-  { id: 111, name: 'Lockie Ferguson', team: 'NZ', position: 'bowler', price: 10.0, avgPoints: 38.0, totalPoints: 0 },
-  { id: 112, name: 'Matt Henry', team: 'NZ', position: 'bowler', price: 8.5, avgPoints: 32.0, totalPoints: 0 },
-  { id: 113, name: 'Ish Sodhi', team: 'NZ', position: 'bowler', price: 8.5, avgPoints: 32.0, totalPoints: 0 },
-  { id: 114, name: 'Michael Bracewell', team: 'NZ', position: 'allrounder', price: 8.5, avgPoints: 33.0, totalPoints: 0 },
-  
-  // ============================================
-  // WEST INDIES (12 players)
-  // ============================================
-  { id: 120, name: 'Nicholas Pooran', team: 'WI', position: 'keeper', price: 10.0, avgPoints: 40.0, totalPoints: 0 },
-  { id: 121, name: 'Shai Hope', team: 'WI', position: 'batter', price: 9.0, avgPoints: 35.0, totalPoints: 0 },
-  { id: 122, name: 'Shimron Hetmyer', team: 'WI', position: 'batter', price: 9.0, avgPoints: 36.0, totalPoints: 0 },
-  { id: 123, name: 'Brandon King', team: 'WI', position: 'batter', price: 8.5, avgPoints: 33.0, totalPoints: 0 },
-  { id: 124, name: 'Rovman Powell', team: 'WI', position: 'batter', price: 8.5, avgPoints: 33.0, totalPoints: 0 },
-  { id: 125, name: 'Andre Russell', team: 'WI', position: 'allrounder', price: 11.0, avgPoints: 42.0, totalPoints: 0 },
-  { id: 126, name: 'Sunil Narine', team: 'WI', position: 'allrounder', price: 10.0, avgPoints: 38.0, totalPoints: 0 },
-  { id: 127, name: 'Jason Holder', team: 'WI', position: 'allrounder', price: 9.0, avgPoints: 34.0, totalPoints: 0 },
-  { id: 128, name: 'Alzarri Joseph', team: 'WI', position: 'bowler', price: 8.5, avgPoints: 32.0, totalPoints: 0 },
-  { id: 129, name: 'Akeal Hosein', team: 'WI', position: 'bowler', price: 8.5, avgPoints: 32.0, totalPoints: 0 },
-  { id: 130, name: 'Obed McCoy', team: 'WI', position: 'bowler', price: 8.0, avgPoints: 30.0, totalPoints: 0 },
-  { id: 131, name: 'Romario Shepherd', team: 'WI', position: 'allrounder', price: 8.0, avgPoints: 30.0, totalPoints: 0 },
-  
-  // ============================================
-  // SRI LANKA (12 players)
-  // ============================================
-  { id: 140, name: 'Pathum Nissanka', team: 'SL', position: 'batter', price: 9.5, avgPoints: 38.0, totalPoints: 0 },
-  { id: 141, name: 'Kusal Mendis', team: 'SL', position: 'keeper', price: 9.5, avgPoints: 38.0, totalPoints: 0 },
-  { id: 142, name: 'Charith Asalanka', team: 'SL', position: 'batter', price: 9.0, avgPoints: 35.0, totalPoints: 0 },
-  { id: 143, name: 'Kusal Perera', team: 'SL', position: 'batter', price: 8.5, avgPoints: 33.0, totalPoints: 0 },
-  { id: 144, name: 'Dhananjaya de Silva', team: 'SL', position: 'allrounder', price: 8.5, avgPoints: 32.0, totalPoints: 0 },
-  { id: 145, name: 'Wanindu Hasaranga', team: 'SL', position: 'allrounder', price: 10.0, avgPoints: 38.0, totalPoints: 0 },
-  { id: 146, name: 'Dasun Shanaka', team: 'SL', position: 'allrounder', price: 8.0, avgPoints: 30.0, totalPoints: 0 },
-  { id: 147, name: 'Maheesh Theekshana', team: 'SL', position: 'bowler', price: 9.0, avgPoints: 35.0, totalPoints: 0 },
-  { id: 148, name: 'Dushmantha Chameera', team: 'SL', position: 'bowler', price: 8.5, avgPoints: 32.0, totalPoints: 0 },
-  { id: 149, name: 'Matheesha Pathirana', team: 'SL', position: 'bowler', price: 9.0, avgPoints: 35.0, totalPoints: 0 },
-  { id: 150, name: 'Dilshan Madushanka', team: 'SL', position: 'bowler', price: 8.0, avgPoints: 30.0, totalPoints: 0 },
-  { id: 151, name: 'Dunith Wellalage', team: 'SL', position: 'allrounder', price: 8.0, avgPoints: 30.0, totalPoints: 0 },
-  
-  // ============================================
-  // BANGLADESH (12 players)
-  // ============================================
-  { id: 160, name: 'Litton Das', team: 'BAN', position: 'keeper', price: 9.0, avgPoints: 36.0, totalPoints: 0 },
-  { id: 161, name: 'Najmul Hossain Shanto', team: 'BAN', position: 'batter', price: 8.5, avgPoints: 33.0, totalPoints: 0 },
-  { id: 162, name: 'Towhid Hridoy', team: 'BAN', position: 'batter', price: 8.5, avgPoints: 33.0, totalPoints: 0 },
-  { id: 163, name: 'Shakib Al Hasan', team: 'BAN', position: 'allrounder', price: 9.5, avgPoints: 36.0, totalPoints: 0 },
-  { id: 164, name: 'Mahmudullah', team: 'BAN', position: 'allrounder', price: 8.0, avgPoints: 30.0, totalPoints: 0 },
-  { id: 165, name: 'Mehidy Hasan Miraz', team: 'BAN', position: 'allrounder', price: 8.5, avgPoints: 32.0, totalPoints: 0 },
-  { id: 166, name: 'Mustafizur Rahman', team: 'BAN', position: 'bowler', price: 8.5, avgPoints: 32.0, totalPoints: 0 },
-  { id: 167, name: 'Taskin Ahmed', team: 'BAN', position: 'bowler', price: 8.5, avgPoints: 32.0, totalPoints: 0 },
-  { id: 168, name: 'Shoriful Islam', team: 'BAN', position: 'bowler', price: 8.0, avgPoints: 30.0, totalPoints: 0 },
-  { id: 169, name: 'Rishad Hossain', team: 'BAN', position: 'bowler', price: 8.0, avgPoints: 30.0, totalPoints: 0 },
-  { id: 170, name: 'Tanzid Hasan', team: 'BAN', position: 'batter', price: 8.0, avgPoints: 30.0, totalPoints: 0 },
-  { id: 171, name: 'Jaker Ali', team: 'BAN', position: 'keeper', price: 7.5, avgPoints: 28.0, totalPoints: 0 },
-  
-  // ============================================
-  // AFGHANISTAN (12 players)
-  // ============================================
-  { id: 180, name: 'Rahmanullah Gurbaz', team: 'AFG', position: 'keeper', price: 9.5, avgPoints: 38.0, totalPoints: 0 },
-  { id: 181, name: 'Ibrahim Zadran', team: 'AFG', position: 'batter', price: 8.5, avgPoints: 32.0, totalPoints: 0 },
-  { id: 182, name: 'Hazratullah Zazai', team: 'AFG', position: 'batter', price: 8.0, avgPoints: 30.0, totalPoints: 0 },
-  { id: 183, name: 'Najibullah Zadran', team: 'AFG', position: 'batter', price: 8.5, avgPoints: 33.0, totalPoints: 0 },
-  { id: 184, name: 'Mohammad Nabi', team: 'AFG', position: 'allrounder', price: 9.0, avgPoints: 34.0, totalPoints: 0 },
-  { id: 185, name: 'Gulbadin Naib', team: 'AFG', position: 'allrounder', price: 8.0, avgPoints: 30.0, totalPoints: 0 },
-  { id: 186, name: 'Rashid Khan', team: 'AFG', position: 'bowler', price: 11.0, avgPoints: 40.0, totalPoints: 0 },
-  { id: 187, name: 'Mujeeb Ur Rahman', team: 'AFG', position: 'bowler', price: 8.5, avgPoints: 32.0, totalPoints: 0 },
-  { id: 188, name: 'Naveen-ul-Haq', team: 'AFG', position: 'bowler', price: 8.5, avgPoints: 32.0, totalPoints: 0 },
-  { id: 189, name: 'Fazalhaq Farooqi', team: 'AFG', position: 'bowler', price: 9.0, avgPoints: 35.0, totalPoints: 0 },
-  { id: 190, name: 'Azmatullah Omarzai', team: 'AFG', position: 'allrounder', price: 8.5, avgPoints: 33.0, totalPoints: 0 },
-  { id: 191, name: 'Noor Ahmad', team: 'AFG', position: 'bowler', price: 8.0, avgPoints: 30.0, totalPoints: 0 },
-  
-  // ============================================
-  // SCOTLAND / IRELAND / NETHERLANDS / USA (Associates - 8 each)
-  // ============================================
-  // IRELAND
-  { id: 200, name: 'Paul Stirling', team: 'IRE', position: 'batter', price: 9.0, avgPoints: 35.0, totalPoints: 0 },
-  { id: 201, name: 'Andy Balbirnie', team: 'IRE', position: 'batter', price: 8.0, avgPoints: 30.0, totalPoints: 0 },
-  { id: 202, name: 'Harry Tector', team: 'IRE', position: 'batter', price: 8.5, avgPoints: 33.0, totalPoints: 0 },
-  { id: 203, name: 'Lorcan Tucker', team: 'IRE', position: 'keeper', price: 8.0, avgPoints: 30.0, totalPoints: 0 },
-  { id: 204, name: 'George Dockrell', team: 'IRE', position: 'allrounder', price: 7.5, avgPoints: 28.0, totalPoints: 0 },
-  { id: 205, name: 'Curtis Campher', team: 'IRE', position: 'allrounder', price: 8.0, avgPoints: 30.0, totalPoints: 0 },
-  { id: 206, name: 'Barry McCarthy', team: 'IRE', position: 'bowler', price: 7.5, avgPoints: 28.0, totalPoints: 0 },
-  { id: 207, name: 'Josh Little', team: 'IRE', position: 'bowler', price: 8.0, avgPoints: 30.0, totalPoints: 0 },
-  
-  // USA
-  { id: 210, name: 'Aaron Jones', team: 'USA', position: 'batter', price: 8.0, avgPoints: 32.0, totalPoints: 0 },
-  { id: 211, name: 'Steven Taylor', team: 'USA', position: 'batter', price: 7.5, avgPoints: 28.0, totalPoints: 0 },
-  { id: 212, name: 'Monank Patel', team: 'USA', position: 'keeper', price: 7.5, avgPoints: 28.0, totalPoints: 0 },
-  { id: 213, name: 'Andries Gous', team: 'USA', position: 'batter', price: 7.5, avgPoints: 28.0, totalPoints: 0 },
-  { id: 214, name: 'Corey Anderson', team: 'USA', position: 'allrounder', price: 8.0, avgPoints: 30.0, totalPoints: 0 },
-  { id: 215, name: 'Nitish Kumar', team: 'USA', position: 'allrounder', price: 7.0, avgPoints: 26.0, totalPoints: 0 },
-  { id: 216, name: 'Saurabh Netravalkar', team: 'USA', position: 'bowler', price: 8.0, avgPoints: 30.0, totalPoints: 0 },
-  { id: 217, name: 'Ali Khan', team: 'USA', position: 'bowler', price: 7.5, avgPoints: 28.0, totalPoints: 0 },
-  
-  // NETHERLANDS
-  { id: 220, name: 'Max ODowd', team: 'NED', position: 'batter', price: 8.0, avgPoints: 32.0, totalPoints: 0 },
-  { id: 221, name: 'Vikramjit Singh', team: 'NED', position: 'batter', price: 7.5, avgPoints: 28.0, totalPoints: 0 },
-  { id: 222, name: 'Colin Ackermann', team: 'NED', position: 'allrounder', price: 8.0, avgPoints: 30.0, totalPoints: 0 },
-  { id: 223, name: 'Scott Edwards', team: 'NED', position: 'keeper', price: 8.0, avgPoints: 30.0, totalPoints: 0 },
-  { id: 224, name: 'Bas de Leede', team: 'NED', position: 'allrounder', price: 8.5, avgPoints: 33.0, totalPoints: 0 },
-  { id: 225, name: 'Teja Nidamanuru', team: 'NED', position: 'batter', price: 7.5, avgPoints: 28.0, totalPoints: 0 },
-  { id: 226, name: 'Paul van Meekeren', team: 'NED', position: 'bowler', price: 7.5, avgPoints: 28.0, totalPoints: 0 },
-  { id: 227, name: 'Logan van Beek', team: 'NED', position: 'bowler', price: 7.5, avgPoints: 28.0, totalPoints: 0 },
-  
-  // SCOTLAND
-  { id: 230, name: 'George Munsey', team: 'SCO', position: 'batter', price: 8.0, avgPoints: 32.0, totalPoints: 0 },
-  { id: 231, name: 'Michael Jones', team: 'SCO', position: 'batter', price: 7.5, avgPoints: 28.0, totalPoints: 0 },
-  { id: 232, name: 'Richie Berrington', team: 'SCO', position: 'batter', price: 8.0, avgPoints: 30.0, totalPoints: 0 },
-  { id: 233, name: 'Matthew Cross', team: 'SCO', position: 'keeper', price: 7.5, avgPoints: 28.0, totalPoints: 0 },
-  { id: 234, name: 'Chris Greaves', team: 'SCO', position: 'allrounder', price: 7.5, avgPoints: 28.0, totalPoints: 0 },
-  { id: 235, name: 'Mark Watt', team: 'SCO', position: 'bowler', price: 7.5, avgPoints: 28.0, totalPoints: 0 },
-  { id: 236, name: 'Brad Wheal', team: 'SCO', position: 'bowler', price: 7.5, avgPoints: 28.0, totalPoints: 0 },
-  { id: 237, name: 'Safyaan Sharif', team: 'SCO', position: 'bowler', price: 7.5, avgPoints: 28.0, totalPoints: 0 },
-];
+// Players are loaded from API - no hardcoded fallback
+// Use /api/players?tournament=xxx to fetch players
+const FULL_PLAYER_POOL = []; // Empty - will be fetched from API
+
+// Helper to fetch players from API
+const fetchPlayersFromApi = async (tournamentId) => {
+  try {
+    const response = await fetch(`/api/players?tournament=${tournamentId}`);
+    if (!response.ok) throw new Error('Failed to fetch players');
+    const data = await response.json();
+    return data.players || [];
+  } catch (error) {
+    console.error('Error fetching players:', error);
+    return [];
+  }
+};
 
 // ============================================
 // UTILITY FUNCTIONS
@@ -701,6 +495,36 @@ const generateSnakeDraftOrder = (teams, totalRounds) => {
 
 // Tournament Selection Page
 const TournamentSelectPage = ({ onSelectTournament, user, onLogout }) => {
+  // Check which tournaments user already has teams for
+  const getUserTeamStatus = (tournamentId) => {
+    // Check all possible storage locations
+    const userSpecificTeam = localStorage.getItem(`t20fantasy_team_${tournamentId}_${user?.id}`);
+    if (userSpecificTeam) return true;
+    
+    const oldFormatTeam = localStorage.getItem(`t20fantasy_team_${tournamentId}`);
+    if (oldFormatTeam) {
+      const parsed = JSON.parse(oldFormatTeam);
+      if (!parsed.userId || parsed.userId === user?.id || 
+          parsed.owner?.toLowerCase() === user?.name?.toLowerCase()) {
+        return true;
+      }
+    }
+    
+    const savedAllTeams = localStorage.getItem('t20fantasy_all_teams');
+    if (savedAllTeams) {
+      const teams = JSON.parse(savedAllTeams);
+      const hasTeam = teams.some(t => 
+        t.tournamentId === tournamentId && 
+        (t.userId === user?.id || 
+         t.userEmail?.toLowerCase() === user?.email?.toLowerCase() ||
+         t.owner?.toLowerCase() === user?.name?.toLowerCase())
+      );
+      if (hasTeam) return true;
+    }
+    
+    return false;
+  };
+
   return (
     <div className="tournament-select-page">
       <div className="tournament-container">
@@ -717,29 +541,33 @@ const TournamentSelectPage = ({ onSelectTournament, user, onLogout }) => {
         </div>
         
         <div className="tournament-list">
-          {Object.values(TOURNAMENTS).map(tournament => (
-            <div 
-              key={tournament.id} 
-              className={`tournament-card ${tournament.isTest ? 'test-tournament' : ''}`}
-              onClick={() => onSelectTournament(tournament)}
-            >
-              <div className="tournament-badge">
-                {tournament.isTest ? '🧪 TEST' : tournament.status === 'upcoming' ? '📅 UPCOMING' : '🔴 LIVE'}
+          {Object.values(TOURNAMENTS).map(tournament => {
+            const hasTeam = getUserTeamStatus(tournament.id);
+            return (
+              <div 
+                key={tournament.id} 
+                className={`tournament-card ${tournament.isTest ? 'test-tournament' : ''} ${hasTeam ? 'has-team' : ''}`}
+                onClick={() => onSelectTournament(tournament)}
+              >
+                <div className="tournament-badge">
+                  {tournament.isTest ? '🧪 TEST' : tournament.status === 'upcoming' ? '📅 UPCOMING' : '🔴 LIVE'}
+                </div>
+                {hasTeam && <div className="team-exists-badge">✓ Team Created</div>}
+                <h3>{tournament.name}</h3>
+                <p className="tournament-desc">{tournament.description}</p>
+                <div className="tournament-dates">
+                  {new Date(tournament.startDate).toLocaleDateString()} - {new Date(tournament.endDate).toLocaleDateString()}
+                </div>
+                <div className="tournament-teams">
+                  {tournament.teams.slice(0, 6).join(' • ')}
+                  {tournament.teams.length > 6 && ` +${tournament.teams.length - 6} more`}
+                </div>
+                <button className="btn-primary btn-small">
+                  {hasTeam ? 'Continue' : tournament.isTest ? 'Start Test Mode' : 'Enter & Register'}
+                </button>
               </div>
-              <h3>{tournament.name}</h3>
-              <p className="tournament-desc">{tournament.description}</p>
-              <div className="tournament-dates">
-                {new Date(tournament.startDate).toLocaleDateString()} - {new Date(tournament.endDate).toLocaleDateString()}
-              </div>
-              <div className="tournament-teams">
-                {tournament.teams.slice(0, 6).join(' • ')}
-                {tournament.teams.length > 6 && ` +${tournament.teams.length - 6} more`}
-              </div>
-              <button className="btn-primary btn-small">
-                {tournament.isTest ? 'Start Test Mode' : 'Enter Tournament'}
-              </button>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>
@@ -4178,7 +4006,20 @@ export default function App() {
     const tournamentKey = selectedTournament?.id || 'default';
     const updatedTeam = { ...team, roster };
     setTeam(updatedTeam);
+    
+    // Save to user-specific key (primary)
+    localStorage.setItem(`t20fantasy_team_${tournamentKey}_${user?.id}`, JSON.stringify(updatedTeam));
+    // Also save to old format for backward compatibility
     localStorage.setItem(`t20fantasy_team_${tournamentKey}`, JSON.stringify(updatedTeam));
+    
+    // Update allTeams
+    setAllTeams(prev => {
+      const filtered = prev.filter(t => t.id !== updatedTeam.id);
+      const updated = [...filtered, updatedTeam];
+      localStorage.setItem('t20fantasy_all_teams', JSON.stringify(updated));
+      return updated;
+    });
+    
     setIsDraftComplete(true);
     localStorage.setItem(`t20fantasy_draft_complete_${tournamentKey}`, 'true');
     setCurrentPage('dashboard');

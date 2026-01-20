@@ -1,49 +1,49 @@
 /**
- * Vercel API Route: Sync Tournament Players
- * ==========================================
- * POST /api/sync/players
+ * Sync Players from CricketData.org API
+ * ======================================
+ * GET/POST /api/sync/players?tournament=ipl_2026
  * 
- * Syncs players from CricketData.org to Turso database.
- * Protected by CRON_SECRET for automated calls.
+ * API Endpoints Used (api.cricapi.com/v1):
+ *   /series              → Find tournament by name
+ *   /series_info?id=X    → Get match list for series
+ *   /match_squad?id=X    → Get player squads for a match
+ *   /matches             → Get current/upcoming matches
  * 
- * Query params:
- *   ?tournament=test_ind_nz  (optional, syncs specific tournament)
+ * NO FALLBACK - API is the only data source.
  */
 
 import { createClient } from '@libsql/client';
 
-const CRICKET_API_BASE = 'https://api.cricapi.com/v1';
+const API_BASE = 'https://api.cricapi.com/v1';
 
-// Database connection - with error handling
+// Database
 let db = null;
 let dbError = null;
 
 try {
-  if (!process.env.TURSO_DATABASE_URL || !process.env.TURSO_AUTH_TOKEN) {
-    dbError = 'Missing TURSO_DATABASE_URL or TURSO_AUTH_TOKEN environment variables';
-  } else {
+  if (process.env.TURSO_DATABASE_URL && process.env.TURSO_AUTH_TOKEN) {
     db = createClient({
       url: process.env.TURSO_DATABASE_URL,
       authToken: process.env.TURSO_AUTH_TOKEN,
     });
+  } else {
+    dbError = 'Missing TURSO_DATABASE_URL or TURSO_AUTH_TOKEN';
   }
-} catch (error) {
-  dbError = `Database connection error: ${error.message}`;
+} catch (e) {
+  dbError = e.message;
 }
 
-// Tournament configurations with correct Series IDs
+// Tournament configs
 const TOURNAMENTS = {
   test_ind_nz: {
     id: 'test_ind_nz',
     name: 'India vs NZ T20 Series',
     shortName: 'IND vs NZ T20',
     type: 't20',
-    matchFormat: 't20', // Ensures only T20 format matches/squads
     startDate: '2026-01-15',
     endDate: '2026-01-25',
-    teams: ['IND', 'NZ'],
-    seriesId: null, // Will search for active IND vs NZ T20 series
-    searchTerms: ['india', 'zealand', 't20'], // For dynamic series search
+    teamCodes: ['IND', 'NZ'],
+    searchTerms: ['india', 'new zealand', 't20', 'ind vs nz', 'nz vs ind'],
     isTest: true,
   },
   t20_wc_2026: {
@@ -51,11 +51,10 @@ const TOURNAMENTS = {
     name: 'T20 World Cup 2026',
     shortName: 'T20 WC 2026',
     type: 't20',
-    matchFormat: 't20',
     startDate: '2026-02-09',
     endDate: '2026-03-07',
-    teams: ['IND', 'AUS', 'ENG', 'PAK', 'NZ', 'SA', 'WI', 'SL', 'BAN', 'AFG', 'ZIM', 'IRE', 'SCO', 'NAM', 'USA', 'NEP'],
-    seriesId: '0cdf6736-ad9b-4e95-a647-5ee3a99c5510', // Men's T20 WC 2026
+    teamCodes: ['IND', 'AUS', 'ENG', 'PAK', 'SA', 'NZ', 'WI', 'SL', 'BAN', 'AFG', 'IRE', 'ZIM', 'NED', 'SCO', 'NAM', 'USA', 'NEP', 'UGA', 'PNG', 'OMA'],
+    searchTerms: ['t20 world cup', 'icc t20', 'world cup t20', 't20 wc'],
     isTest: false,
   },
   ipl_2026: {
@@ -63,432 +62,241 @@ const TOURNAMENTS = {
     name: 'IPL 2026',
     shortName: 'IPL 2026',
     type: 't20',
-    matchFormat: 't20',
     startDate: '2026-03-22',
     endDate: '2026-05-26',
-    teams: ['CSK', 'MI', 'RCB', 'KKR', 'DC', 'PBKS', 'RR', 'SRH', 'GT', 'LSG'],
-    seriesId: '87c62aac-bc3c-4738-ab93-19da0690488f', // IPL 2026
+    teamCodes: ['CSK', 'MI', 'RCB', 'KKR', 'DC', 'PBKS', 'RR', 'SRH', 'GT', 'LSG'],
+    searchTerms: ['indian premier league', 'ipl 2026', 'ipl 2025', 'ipl'],
     isTest: false,
   },
 };
 
-// T20 Squad Fallback Players (only T20 specialists and regulars)
-const FALLBACK_PLAYERS = {
-  test_ind_nz: [
-    // India T20 Squad (based on typical T20I selections)
-    { name: 'Suryakumar Yadav', team: 'IND', position: 'batter', price: 12.0, avgPoints: 45 }, // T20I Captain
-    { name: 'Shubman Gill', team: 'IND', position: 'batter', price: 10.5, avgPoints: 40 },
-    { name: 'Yashasvi Jaiswal', team: 'IND', position: 'batter', price: 10.0, avgPoints: 38 },
-    { name: 'Tilak Varma', team: 'IND', position: 'batter', price: 9.5, avgPoints: 36 },
-    { name: 'Rinku Singh', team: 'IND', position: 'batter', price: 9.0, avgPoints: 35 },
-    { name: 'Sanju Samson', team: 'IND', position: 'keeper', price: 10.0, avgPoints: 38 },
-    { name: 'Rishabh Pant', team: 'IND', position: 'keeper', price: 10.5, avgPoints: 40 },
-    { name: 'Hardik Pandya', team: 'IND', position: 'allrounder', price: 11.0, avgPoints: 42 },
-    { name: 'Axar Patel', team: 'IND', position: 'allrounder', price: 9.5, avgPoints: 36 },
-    { name: 'Washington Sundar', team: 'IND', position: 'allrounder', price: 8.5, avgPoints: 32 },
-    { name: 'Arshdeep Singh', team: 'IND', position: 'bowler', price: 10.0, avgPoints: 38 },
-    { name: 'Mohammed Siraj', team: 'IND', position: 'bowler', price: 9.0, avgPoints: 34 },
-    { name: 'Ravi Bishnoi', team: 'IND', position: 'bowler', price: 9.0, avgPoints: 35 },
-    { name: 'Varun Chakravarthy', team: 'IND', position: 'bowler', price: 8.5, avgPoints: 33 },
-    { name: 'Mayank Yadav', team: 'IND', position: 'bowler', price: 8.0, avgPoints: 30 },
-    // New Zealand T20 Squad
-    { name: 'Mitchell Santner', team: 'NZ', position: 'allrounder', price: 9.5, avgPoints: 36 }, // T20I Captain
-    { name: 'Devon Conway', team: 'NZ', position: 'batter', price: 10.0, avgPoints: 38 },
-    { name: 'Finn Allen', team: 'NZ', position: 'batter', price: 9.5, avgPoints: 37 },
-    { name: 'Glenn Phillips', team: 'NZ', position: 'batter', price: 10.0, avgPoints: 40 },
-    { name: 'Daryl Mitchell', team: 'NZ', position: 'batter', price: 9.5, avgPoints: 36 },
-    { name: 'Mark Chapman', team: 'NZ', position: 'batter', price: 8.5, avgPoints: 32 },
-    { name: 'Tim Seifert', team: 'NZ', position: 'keeper', price: 8.5, avgPoints: 32 },
-    { name: 'Rachin Ravindra', team: 'NZ', position: 'allrounder', price: 9.5, avgPoints: 36 },
-    { name: 'Michael Bracewell', team: 'NZ', position: 'allrounder', price: 8.5, avgPoints: 32 },
-    { name: 'Lockie Ferguson', team: 'NZ', position: 'bowler', price: 10.0, avgPoints: 38 },
-    { name: 'Trent Boult', team: 'NZ', position: 'bowler', price: 9.5, avgPoints: 35 },
-    { name: 'Tim Southee', team: 'NZ', position: 'bowler', price: 9.0, avgPoints: 33 },
-    { name: 'Matt Henry', team: 'NZ', position: 'bowler', price: 8.5, avgPoints: 32 },
-    { name: 'Ish Sodhi', team: 'NZ', position: 'bowler', price: 8.5, avgPoints: 31 },
-    { name: 'Adam Milne', team: 'NZ', position: 'bowler', price: 8.0, avgPoints: 30 },
-  ],
-  t20_wc_2026: [
-    // INDIA
-    { name: 'Rohit Sharma', team: 'IND', position: 'batter', price: 12.0, avgPoints: 42 },
-    { name: 'Virat Kohli', team: 'IND', position: 'batter', price: 12.5, avgPoints: 45 },
-    { name: 'Suryakumar Yadav', team: 'IND', position: 'batter', price: 11.5, avgPoints: 46 },
-    { name: 'Shubman Gill', team: 'IND', position: 'batter', price: 10.5, avgPoints: 40 },
-    { name: 'Rishabh Pant', team: 'IND', position: 'keeper', price: 10.5, avgPoints: 40 },
-    { name: 'Hardik Pandya', team: 'IND', position: 'allrounder', price: 11.0, avgPoints: 42 },
-    { name: 'Ravindra Jadeja', team: 'IND', position: 'allrounder', price: 10.0, avgPoints: 38 },
-    { name: 'Jasprit Bumrah', team: 'IND', position: 'bowler', price: 12.0, avgPoints: 42 },
-    { name: 'Arshdeep Singh', team: 'IND', position: 'bowler', price: 9.5, avgPoints: 36 },
-    { name: 'Kuldeep Yadav', team: 'IND', position: 'bowler', price: 9.0, avgPoints: 35 },
-    // AUSTRALIA
-    { name: 'David Warner', team: 'AUS', position: 'batter', price: 10.5, avgPoints: 40 },
-    { name: 'Travis Head', team: 'AUS', position: 'batter', price: 10.5, avgPoints: 42 },
-    { name: 'Glenn Maxwell', team: 'AUS', position: 'allrounder', price: 10.5, avgPoints: 42 },
-    { name: 'Mitchell Marsh', team: 'AUS', position: 'allrounder', price: 9.5, avgPoints: 36 },
-    { name: 'Marcus Stoinis', team: 'AUS', position: 'allrounder', price: 9.0, avgPoints: 35 },
-    { name: 'Josh Inglis', team: 'AUS', position: 'keeper', price: 9.0, avgPoints: 34 },
-    { name: 'Pat Cummins', team: 'AUS', position: 'bowler', price: 10.5, avgPoints: 38 },
-    { name: 'Mitchell Starc', team: 'AUS', position: 'bowler', price: 10.5, avgPoints: 38 },
-    { name: 'Adam Zampa', team: 'AUS', position: 'bowler', price: 9.0, avgPoints: 35 },
-    { name: 'Josh Hazlewood', team: 'AUS', position: 'bowler', price: 9.5, avgPoints: 35 },
-    // ENGLAND
-    { name: 'Jos Buttler', team: 'ENG', position: 'keeper', price: 11.5, avgPoints: 48 },
-    { name: 'Phil Salt', team: 'ENG', position: 'batter', price: 10.0, avgPoints: 40 },
-    { name: 'Harry Brook', team: 'ENG', position: 'batter', price: 10.0, avgPoints: 40 },
-    { name: 'Jonny Bairstow', team: 'ENG', position: 'batter', price: 9.5, avgPoints: 38 },
-    { name: 'Liam Livingstone', team: 'ENG', position: 'allrounder', price: 9.0, avgPoints: 36 },
-    { name: 'Moeen Ali', team: 'ENG', position: 'allrounder', price: 8.5, avgPoints: 32 },
-    { name: 'Sam Curran', team: 'ENG', position: 'allrounder', price: 9.0, avgPoints: 35 },
-    { name: 'Jofra Archer', team: 'ENG', position: 'bowler', price: 10.0, avgPoints: 38 },
-    { name: 'Mark Wood', team: 'ENG', position: 'bowler', price: 9.5, avgPoints: 36 },
-    { name: 'Adil Rashid', team: 'ENG', position: 'bowler', price: 9.0, avgPoints: 35 },
-    // PAKISTAN
-    { name: 'Babar Azam', team: 'PAK', position: 'batter', price: 12.0, avgPoints: 44 },
-    { name: 'Mohammad Rizwan', team: 'PAK', position: 'keeper', price: 10.5, avgPoints: 42 },
-    { name: 'Fakhar Zaman', team: 'PAK', position: 'batter', price: 9.5, avgPoints: 36 },
-    { name: 'Shadab Khan', team: 'PAK', position: 'allrounder', price: 9.0, avgPoints: 35 },
-    { name: 'Shaheen Afridi', team: 'PAK', position: 'bowler', price: 10.5, avgPoints: 38 },
-    { name: 'Haris Rauf', team: 'PAK', position: 'bowler', price: 9.0, avgPoints: 34 },
-    { name: 'Naseem Shah', team: 'PAK', position: 'bowler', price: 9.0, avgPoints: 34 },
-    // SOUTH AFRICA
-    { name: 'Quinton de Kock', team: 'SA', position: 'keeper', price: 10.5, avgPoints: 42 },
-    { name: 'Aiden Markram', team: 'SA', position: 'batter', price: 9.5, avgPoints: 36 },
-    { name: 'Heinrich Klaasen', team: 'SA', position: 'keeper', price: 10.0, avgPoints: 40 },
-    { name: 'David Miller', team: 'SA', position: 'batter', price: 9.5, avgPoints: 38 },
-    { name: 'Tristan Stubbs', team: 'SA', position: 'batter', price: 8.5, avgPoints: 32 },
-    { name: 'Kagiso Rabada', team: 'SA', position: 'bowler', price: 10.0, avgPoints: 38 },
-    { name: 'Anrich Nortje', team: 'SA', position: 'bowler', price: 9.5, avgPoints: 36 },
-    { name: 'Tabraiz Shamsi', team: 'SA', position: 'bowler', price: 8.5, avgPoints: 32 },
-    // NEW ZEALAND
-    { name: 'Devon Conway', team: 'NZ', position: 'batter', price: 10.0, avgPoints: 40 },
-    { name: 'Finn Allen', team: 'NZ', position: 'batter', price: 9.5, avgPoints: 38 },
-    { name: 'Kane Williamson', team: 'NZ', position: 'batter', price: 10.0, avgPoints: 38 },
-    { name: 'Glenn Phillips', team: 'NZ', position: 'batter', price: 10.0, avgPoints: 40 },
-    { name: 'Daryl Mitchell', team: 'NZ', position: 'allrounder', price: 9.5, avgPoints: 36 },
-    { name: 'Mitchell Santner', team: 'NZ', position: 'allrounder', price: 9.0, avgPoints: 34 },
-    { name: 'Trent Boult', team: 'NZ', position: 'bowler', price: 10.0, avgPoints: 36 },
-    { name: 'Lockie Ferguson', team: 'NZ', position: 'bowler', price: 10.0, avgPoints: 38 },
-    { name: 'Tim Southee', team: 'NZ', position: 'bowler', price: 9.0, avgPoints: 33 },
-    // WEST INDIES
-    { name: 'Nicholas Pooran', team: 'WI', position: 'keeper', price: 10.0, avgPoints: 40 },
-    { name: 'Shai Hope', team: 'WI', position: 'batter', price: 9.0, avgPoints: 35 },
-    { name: 'Shimron Hetmyer', team: 'WI', position: 'batter', price: 9.0, avgPoints: 36 },
-    { name: 'Andre Russell', team: 'WI', position: 'allrounder', price: 11.0, avgPoints: 42 },
-    { name: 'Sunil Narine', team: 'WI', position: 'allrounder', price: 10.0, avgPoints: 38 },
-    { name: 'Alzarri Joseph', team: 'WI', position: 'bowler', price: 8.5, avgPoints: 32 },
-    { name: 'Akeal Hosein', team: 'WI', position: 'bowler', price: 8.5, avgPoints: 32 },
-    // SRI LANKA
-    { name: 'Pathum Nissanka', team: 'SL', position: 'batter', price: 9.5, avgPoints: 38 },
-    { name: 'Kusal Mendis', team: 'SL', position: 'keeper', price: 9.0, avgPoints: 36 },
-    { name: 'Charith Asalanka', team: 'SL', position: 'batter', price: 8.5, avgPoints: 34 },
-    { name: 'Wanindu Hasaranga', team: 'SL', position: 'allrounder', price: 10.0, avgPoints: 38 },
-    { name: 'Maheesh Theekshana', team: 'SL', position: 'bowler', price: 9.0, avgPoints: 35 },
-    // BANGLADESH
-    { name: 'Litton Das', team: 'BAN', position: 'keeper', price: 9.0, avgPoints: 36 },
-    { name: 'Shakib Al Hasan', team: 'BAN', position: 'allrounder', price: 9.5, avgPoints: 36 },
-    { name: 'Mustafizur Rahman', team: 'BAN', position: 'bowler', price: 8.5, avgPoints: 32 },
-    { name: 'Taskin Ahmed', team: 'BAN', position: 'bowler', price: 8.5, avgPoints: 32 },
-    // AFGHANISTAN
-    { name: 'Rashid Khan', team: 'AFG', position: 'bowler', price: 11.0, avgPoints: 40 },
-    { name: 'Mohammad Nabi', team: 'AFG', position: 'allrounder', price: 9.0, avgPoints: 34 },
-    { name: 'Rahmanullah Gurbaz', team: 'AFG', position: 'keeper', price: 9.5, avgPoints: 38 },
-    { name: 'Ibrahim Zadran', team: 'AFG', position: 'batter', price: 8.5, avgPoints: 32 },
-    { name: 'Naveen-ul-Haq', team: 'AFG', position: 'bowler', price: 8.5, avgPoints: 32 },
-    { name: 'Fazalhaq Farooqi', team: 'AFG', position: 'bowler', price: 8.5, avgPoints: 34 },
-  ],
-  ipl_2026: [
-    // CSK
-    { name: 'MS Dhoni', team: 'CSK', position: 'keeper', price: 10.0, avgPoints: 35 },
-    { name: 'Ruturaj Gaikwad', team: 'CSK', position: 'batter', price: 10.5, avgPoints: 40 },
-    { name: 'Devon Conway', team: 'CSK', position: 'batter', price: 10.0, avgPoints: 38 },
-    { name: 'Shivam Dube', team: 'CSK', position: 'flex', price: 9.5, avgPoints: 36 },
-    { name: 'Ravindra Jadeja', team: 'CSK', position: 'flex', price: 10.5, avgPoints: 38 },
-    { name: 'Deepak Chahar', team: 'CSK', position: 'bowler', price: 9.0, avgPoints: 32 },
-    // MI
-    { name: 'Rohit Sharma', team: 'MI', position: 'batter', price: 11.5, avgPoints: 42 },
-    { name: 'Ishan Kishan', team: 'MI', position: 'keeper', price: 10.0, avgPoints: 38 },
-    { name: 'Suryakumar Yadav', team: 'MI', position: 'batter', price: 11.0, avgPoints: 44 },
-    { name: 'Hardik Pandya', team: 'MI', position: 'flex', price: 11.0, avgPoints: 40 },
-    { name: 'Jasprit Bumrah', team: 'MI', position: 'bowler', price: 12.0, avgPoints: 42 },
-    { name: 'Tim David', team: 'MI', position: 'batter', price: 9.5, avgPoints: 35 },
-    // RCB
-    { name: 'Virat Kohli', team: 'RCB', position: 'batter', price: 12.5, avgPoints: 45 },
-    { name: 'Faf du Plessis', team: 'RCB', position: 'batter', price: 10.5, avgPoints: 40 },
-    { name: 'Glenn Maxwell', team: 'RCB', position: 'flex', price: 10.5, avgPoints: 38 },
-    { name: 'Dinesh Karthik', team: 'RCB', position: 'keeper', price: 9.0, avgPoints: 34 },
-    { name: 'Mohammed Siraj', team: 'RCB', position: 'bowler', price: 9.5, avgPoints: 34 },
-    { name: 'Wanindu Hasaranga', team: 'RCB', position: 'flex', price: 10.0, avgPoints: 36 },
-    // KKR
-    { name: 'Shreyas Iyer', team: 'KKR', position: 'batter', price: 10.5, avgPoints: 38 },
-    { name: 'Venkatesh Iyer', team: 'KKR', position: 'flex', price: 9.5, avgPoints: 36 },
-    { name: 'Nitish Rana', team: 'KKR', position: 'batter', price: 9.0, avgPoints: 34 },
-    { name: 'Andre Russell', team: 'KKR', position: 'flex', price: 11.5, avgPoints: 42 },
-    { name: 'Sunil Narine', team: 'KKR', position: 'flex', price: 10.5, avgPoints: 38 },
-    { name: 'Varun Chakravarthy', team: 'KKR', position: 'bowler', price: 9.0, avgPoints: 34 },
-    // DC
-    { name: 'David Warner', team: 'DC', position: 'batter', price: 11.0, avgPoints: 42 },
-    { name: 'Rishabh Pant', team: 'DC', position: 'keeper', price: 11.0, avgPoints: 40 },
-    { name: 'Axar Patel', team: 'DC', position: 'flex', price: 9.5, avgPoints: 35 },
-    { name: 'Mitchell Marsh', team: 'DC', position: 'flex', price: 10.0, avgPoints: 36 },
-    { name: 'Anrich Nortje', team: 'DC', position: 'bowler', price: 9.5, avgPoints: 34 },
-    { name: 'Kuldeep Yadav', team: 'DC', position: 'bowler', price: 9.0, avgPoints: 33 },
-    // PBKS
-    { name: 'Shikhar Dhawan', team: 'PBKS', position: 'batter', price: 10.0, avgPoints: 38 },
-    { name: 'Jonny Bairstow', team: 'PBKS', position: 'keeper', price: 10.5, avgPoints: 40 },
-    { name: 'Liam Livingstone', team: 'PBKS', position: 'flex', price: 10.0, avgPoints: 36 },
-    { name: 'Sam Curran', team: 'PBKS', position: 'flex', price: 10.5, avgPoints: 38 },
-    { name: 'Kagiso Rabada', team: 'PBKS', position: 'bowler', price: 10.5, avgPoints: 36 },
-    { name: 'Arshdeep Singh', team: 'PBKS', position: 'bowler', price: 9.0, avgPoints: 32 },
-    // RR
-    { name: 'Jos Buttler', team: 'RR', position: 'keeper', price: 12.0, avgPoints: 44 },
-    { name: 'Sanju Samson', team: 'RR', position: 'keeper', price: 10.5, avgPoints: 40 },
-    { name: 'Yashasvi Jaiswal', team: 'RR', position: 'batter', price: 10.5, avgPoints: 42 },
-    { name: 'Shimron Hetmyer', team: 'RR', position: 'batter', price: 9.5, avgPoints: 35 },
-    { name: 'Ravichandran Ashwin', team: 'RR', position: 'bowler', price: 9.0, avgPoints: 32 },
-    { name: 'Trent Boult', team: 'RR', position: 'bowler', price: 10.0, avgPoints: 35 },
-    // SRH
-    { name: 'Aiden Markram', team: 'SRH', position: 'batter', price: 9.5, avgPoints: 36 },
-    { name: 'Abhishek Sharma', team: 'SRH', position: 'batter', price: 9.0, avgPoints: 34 },
-    { name: 'Heinrich Klaasen', team: 'SRH', position: 'keeper', price: 10.5, avgPoints: 40 },
-    { name: 'Travis Head', team: 'SRH', position: 'batter', price: 10.5, avgPoints: 42 },
-    { name: 'Pat Cummins', team: 'SRH', position: 'bowler', price: 10.5, avgPoints: 36 },
-    { name: 'Bhuvneshwar Kumar', team: 'SRH', position: 'bowler', price: 9.0, avgPoints: 32 },
-    // GT
-    { name: 'Shubman Gill', team: 'GT', position: 'batter', price: 11.0, avgPoints: 42 },
-    { name: 'Wriddhiman Saha', team: 'GT', position: 'keeper', price: 8.5, avgPoints: 32 },
-    { name: 'Vijay Shankar', team: 'GT', position: 'flex', price: 8.5, avgPoints: 30 },
-    { name: 'Rashid Khan', team: 'GT', position: 'bowler', price: 11.0, avgPoints: 40 },
-    { name: 'Mohammed Shami', team: 'GT', position: 'bowler', price: 10.0, avgPoints: 36 },
-    { name: 'Noor Ahmad', team: 'GT', position: 'bowler', price: 8.5, avgPoints: 30 },
-    // LSG
-    { name: 'KL Rahul', team: 'LSG', position: 'keeper', price: 11.0, avgPoints: 42 },
-    { name: 'Quinton de Kock', team: 'LSG', position: 'keeper', price: 10.5, avgPoints: 40 },
-    { name: 'Kyle Mayers', team: 'LSG', position: 'flex', price: 9.0, avgPoints: 34 },
-    { name: 'Marcus Stoinis', team: 'LSG', position: 'flex', price: 10.0, avgPoints: 36 },
-    { name: 'Mark Wood', team: 'LSG', position: 'bowler', price: 9.5, avgPoints: 34 },
-    { name: 'Ravi Bishnoi', team: 'LSG', position: 'bowler', price: 9.0, avgPoints: 33 },
-  ],
+// Team name → code mapping
+const TEAM_CODES = {
+  'india': 'IND', 'australia': 'AUS', 'england': 'ENG', 'pakistan': 'PAK',
+  'south africa': 'SA', 'new zealand': 'NZ', 'west indies': 'WI', 'sri lanka': 'SL',
+  'bangladesh': 'BAN', 'afghanistan': 'AFG', 'ireland': 'IRE', 'zimbabwe': 'ZIM',
+  'netherlands': 'NED', 'scotland': 'SCO', 'namibia': 'NAM', 'usa': 'USA',
+  'nepal': 'NEP', 'uganda': 'UGA', 'papua new guinea': 'PNG', 'oman': 'OMA',
+  'chennai super kings': 'CSK', 'mumbai indians': 'MI', 'royal challengers bangalore': 'RCB',
+  'royal challengers bengaluru': 'RCB', 'kolkata knight riders': 'KKR', 'delhi capitals': 'DC',
+  'punjab kings': 'PBKS', 'rajasthan royals': 'RR', 'sunrisers hyderabad': 'SRH',
+  'gujarat titans': 'GT', 'lucknow super giants': 'LSG',
+  'csk': 'CSK', 'mi': 'MI', 'rcb': 'RCB', 'kkr': 'KKR', 'dc': 'DC',
+  'pbks': 'PBKS', 'rr': 'RR', 'srh': 'SRH', 'gt': 'GT', 'lsg': 'LSG',
 };
 
-// ============================================
-// HELPER FUNCTIONS
-// ============================================
-
-async function cricketApiRequest(endpoint, params = {}) {
+// API request helper
+async function apiRequest(endpoint, params = {}) {
   const apiKey = process.env.CRICKET_API_KEY;
-  if (!apiKey) throw new Error('CRICKET_API_KEY not configured');
+  if (!apiKey) throw new Error('CRICKET_API_KEY required - get it from https://cricketdata.org');
   
-  const url = new URL(`${CRICKET_API_BASE}/${endpoint}`);
-  url.searchParams.append('apikey', apiKey);
-  Object.entries(params).forEach(([k, v]) => v && url.searchParams.append(k, v));
+  const url = new URL(`${API_BASE}/${endpoint}`);
+  url.searchParams.set('apikey', apiKey);
+  url.searchParams.set('offset', '0');
+  Object.entries(params).forEach(([k, v]) => v && url.searchParams.set(k, v));
   
-  const response = await fetch(url.toString());
-  const data = await response.json();
+  console.log(`🌐 ${endpoint}`, params);
+  const res = await fetch(url);
+  const data = await res.json();
   
   if (data.status !== 'success') {
-    throw new Error(data.reason || 'API request failed');
+    throw new Error(data.reason || data.message || `${endpoint} failed`);
   }
-  
-  return data;
+  return data.data || [];
 }
 
-// Search for T20 series dynamically
-async function findT20Series(searchTerms) {
-  try {
-    const data = await cricketApiRequest('series');
-    
-    if (!data.data || data.data.length === 0) {
-      return null;
-    }
-    
-    // Filter for T20 series matching search terms
-    const t20Series = data.data.filter(series => {
-      const name = (series.name || '').toLowerCase();
-      const matchType = (series.matchType || '').toLowerCase();
-      
-      // Must be T20 format
-      if (!name.includes('t20') && matchType !== 't20') {
-        return false;
-      }
-      
-      // Must match all search terms
-      return searchTerms.every(term => name.includes(term.toLowerCase()));
-    });
-    
-    // Return the most recent matching series
-    if (t20Series.length > 0) {
-      // Sort by start date descending
-      t20Series.sort((a, b) => new Date(b.startDate) - new Date(a.startDate));
-      return t20Series[0];
-    }
-    
-    return null;
-  } catch (error) {
-    console.error('Error searching for T20 series:', error.message);
-    return null;
+// Get team code from name
+function getTeamCode(name) {
+  if (!name) return 'UNK';
+  const n = name.toLowerCase().trim();
+  if (TEAM_CODES[n]) return TEAM_CODES[n];
+  for (const [k, v] of Object.entries(TEAM_CODES)) {
+    if (n.includes(k) || k.includes(n)) return v;
   }
+  return name.substring(0, 3).toUpperCase();
 }
 
-function transformPlayer(apiPlayer, teamCode, tournamentId) {
-  let position = 'allrounder'; // Default to allrounder
-  const role = (apiPlayer.role || apiPlayer.battingStyle || '').toLowerCase();
-  const bowlStyle = (apiPlayer.bowlingStyle || '').toLowerCase();
-  
-  if (role.includes('wicket') || role.includes('keeper')) {
-    position = 'keeper';
-  } else if (role.includes('allrounder') || role.includes('all-rounder')) {
-    position = 'allrounder';
-  } else if (bowlStyle && !role.includes('bat')) {
-    position = 'bowler';
-  } else if (role.includes('bat') || role.includes('opening')) {
-    position = 'batter';
-  }
-  
-  // Price based on reputation
+// Determine player position from API data
+function getPosition(player) {
+  const role = (player.role || player.playingRole || '').toLowerCase();
+  if (role.includes('keeper') || role.includes('wk')) return 'keeper';
+  if (role.includes('allrounder') || role.includes('all-rounder')) return 'allrounder';
+  if (role.includes('bowl')) return 'bowler';
+  return 'batter';
+}
+
+// Calculate price based on role
+function getPrice(position, playerName) {
+  const stars = ['virat kohli', 'rohit sharma', 'jasprit bumrah', 'babar azam', 'jos buttler', 
+    'pat cummins', 'rashid khan', 'suryakumar yadav', 'ms dhoni', 'hardik pandya'];
   let price = 8.0;
-  const starPlayers = ['suryakumar yadav', 'hardik pandya', 'jasprit bumrah', 'glenn phillips', 'lockie ferguson', 'trent boult'];
-  if (starPlayers.includes(apiPlayer.name?.toLowerCase())) price += 3.0;
-  if (position === 'keeper') price += 1.0;
+  if (stars.some(s => playerName.toLowerCase().includes(s))) price += 3.5;
   if (position === 'allrounder') price += 1.5;
-  
-  return {
-    id: apiPlayer.id || `p_${teamCode.toLowerCase()}_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
-    name: apiPlayer.name,
-    team: teamCode,
-    position,
-    price: Math.round(price * 2) / 2,
-    avgPoints: position === 'bowler' ? 35 : position === 'allrounder' ? 38 : position === 'keeper' ? 36 : 32,
-    totalPoints: 0,
-    tournamentId,
-  };
+  if (position === 'keeper') price += 1.0;
+  return Math.round(price * 2) / 2;
 }
 
-async function ensureTournamentExists(tournamentId) {
-  const config = TOURNAMENTS[tournamentId];
-  if (!config) return false;
-  
-  try {
-    const existing = await db.execute({
-      sql: `SELECT id FROM tournaments WHERE id = ?`,
-      args: [tournamentId],
-    });
-    
-    if (existing.rows.length > 0) return true;
-    
-    await db.execute({
-      sql: `INSERT INTO tournaments (id, name, short_name, type, start_date, end_date, teams, is_test, is_active)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)`,
-      args: [
-        config.id,
-        config.name,
-        config.shortName,
-        config.type,
-        config.startDate,
-        config.endDate,
-        JSON.stringify(config.teams),
-        config.isTest ? 1 : 0,
-      ],
-    });
-    
-    return true;
-  } catch (error) {
-    console.error('Error ensuring tournament:', error);
-    return false;
-  }
-}
+// ============================================
+// MAIN API FETCHING
+// ============================================
 
-async function syncTournamentPlayers(tournamentId) {
-  const config = TOURNAMENTS[tournamentId];
-  if (!config) throw new Error(`Unknown tournament: ${tournamentId}`);
+async function fetchPlayers(config) {
+  const players = new Map();
   
-  // Ensure tournament exists first
-  await ensureTournamentExists(tournamentId);
+  console.log(`\n${'='.repeat(50)}`);
+  console.log(`🏆 ${config.name}`);
+  console.log(`${'='.repeat(50)}`);
   
-  let players = [];
-  let seriesId = config.seriesId;
-  let seriesInfo = null;
+  // Step 1: GET /series - find matching tournament
+  console.log(`\n📡 Step 1: GET /series`);
+  const allSeries = await apiRequest('series');
   
-  // If no series ID, try to find T20 series dynamically
-  if (!seriesId && config.searchTerms) {
-    seriesInfo = await findT20Series(config.searchTerms);
-    if (seriesInfo) {
-      seriesId = seriesInfo.id;
-      console.log(`Found T20 series: ${seriesInfo.name} (${seriesId})`);
-    }
-  }
+  const matchingSeries = allSeries.filter(s => {
+    const name = (s.name || '').toLowerCase();
+    return config.searchTerms.some(term => name.includes(term.toLowerCase()));
+  });
   
-  // Try to fetch from API if we have a series ID
-  if (seriesId) {
+  console.log(`   Found ${matchingSeries.length} matching series`);
+  matchingSeries.slice(0, 3).forEach(s => console.log(`   - ${s.name} (${s.id})`));
+  
+  // Step 2: GET /series_info - get match list
+  for (const series of matchingSeries.slice(0, 3)) {
+    console.log(`\n📡 Step 2: GET /series_info?id=${series.id}`);
+    
     try {
-      const data = await cricketApiRequest('series_squad', { id: seriesId });
+      const info = await apiRequest('series_info', { id: series.id });
+      const matches = info.matchList || info.matches || [];
+      console.log(`   Matches: ${matches.length}`);
       
-      if (data.data && data.data.length > 0) {
-        for (const team of data.data) {
-          const teamCode = team.teamName?.substring(0, 3).toUpperCase() || 'UNK';
+      // Step 3: GET /match_squad for each match
+      for (const match of matches.slice(0, 10)) {
+        const matchId = match.id || match.matchId;
+        if (!matchId) continue;
+        
+        console.log(`\n📡 Step 3: GET /match_squad?id=${matchId}`);
+        console.log(`   Match: ${match.name || matchId}`);
+        
+        try {
+          const squads = await apiRequest('match_squad', { id: matchId });
           
-          // Skip women's teams
-          if (team.teamName?.toLowerCase().includes('women')) continue;
-          
-          // Only include teams that are part of this tournament
-          const normalizedTeamName = team.teamName?.toLowerCase() || '';
-          const isValidTeam = config.teams.some(t => 
-            normalizedTeamName.includes(t.toLowerCase()) || 
-            t.toLowerCase().includes(teamCode.toLowerCase())
-          );
-          
-          if (!isValidTeam && config.teams.length <= 2) {
-            // For bilateral series, be strict about team matching
-            continue;
-          }
-          
-          if (team.players) {
-            for (const player of team.players) {
-              players.push(transformPlayer(player, teamCode, tournamentId));
+          for (const team of squads) {
+            const teamCode = getTeamCode(team.teamName);
+            console.log(`   ${team.teamName} (${teamCode}): ${team.players?.length || 0} players`);
+            
+            for (const p of (team.players || [])) {
+              const key = p.id || `${p.name}_${teamCode}`;
+              if (!players.has(key)) {
+                const pos = getPosition(p);
+                players.set(key, {
+                  id: p.id || `p_${teamCode}_${players.size}`,
+                  name: p.name,
+                  team: teamCode,
+                  position: pos,
+                  price: getPrice(pos, p.name),
+                  avgPoints: pos === 'bowler' ? 35 : pos === 'allrounder' ? 38 : 32,
+                  totalPoints: 0,
+                  tournamentId: config.id,
+                });
+              }
             }
           }
+        } catch (e) {
+          console.log(`   ⚠️ Squad error: ${e.message}`);
         }
+        
+        await new Promise(r => setTimeout(r, 300)); // Rate limit
       }
-    } catch (error) {
-      console.error('API fetch failed:', error.message);
+      
+      if (players.size >= 100) break;
+    } catch (e) {
+      console.log(`   ⚠️ Series error: ${e.message}`);
     }
   }
   
-  // Use fallback if no API data
-  if (players.length === 0) {
-    const fallback = FALLBACK_PLAYERS[tournamentId] || [];
-    players = fallback.map((p, i) => ({
-      id: `p_${p.team.toLowerCase()}_${tournamentId}_${i}`,
-      ...p,
-      totalPoints: 0,
-      tournamentId,
-    }));
+  // Alternative: GET /matches if we don't have enough players
+  if (players.size < 20) {
+    console.log(`\n📡 Alternative: GET /matches`);
+    try {
+      const matches = await apiRequest('matches');
+      const relevant = matches.filter(m => {
+        const name = (m.name || '').toLowerCase();
+        return config.searchTerms.some(t => name.includes(t.toLowerCase()));
+      });
+      
+      console.log(`   Relevant matches: ${relevant.length}`);
+      
+      for (const match of relevant.slice(0, 10)) {
+        if (!match.id) continue;
+        try {
+          const squads = await apiRequest('match_squad', { id: match.id });
+          for (const team of squads) {
+            const teamCode = getTeamCode(team.teamName);
+            for (const p of (team.players || [])) {
+              const key = p.id || `${p.name}_${teamCode}`;
+              if (!players.has(key)) {
+                const pos = getPosition(p);
+                players.set(key, {
+                  id: p.id || `p_${teamCode}_${players.size}`,
+                  name: p.name,
+                  team: teamCode,
+                  position: pos,
+                  price: getPrice(pos, p.name),
+                  avgPoints: pos === 'bowler' ? 35 : pos === 'allrounder' ? 38 : 32,
+                  totalPoints: 0,
+                  tournamentId: config.id,
+                });
+              }
+            }
+          }
+        } catch (e) {
+          console.log(`   ⚠️ ${e.message}`);
+        }
+        await new Promise(r => setTimeout(r, 300));
+      }
+    } catch (e) {
+      console.log(`   ⚠️ Matches error: ${e.message}`);
+    }
   }
   
-  // Save to database
-  let saved = 0;
-  let failed = 0;
+  console.log(`\n✅ Total players: ${players.size}`);
+  return Array.from(players.values());
+}
+
+// Save to database
+async function savePlayers(players, tournamentId) {
+  let saved = 0, failed = 0;
   
-  for (const player of players) {
+  for (const p of players) {
     try {
       await db.execute({
         sql: `INSERT OR REPLACE INTO players (id, name, team, position, price, avg_points, total_points, tournament_id)
               VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        args: [player.id, player.name, player.team, player.position, player.price, player.avgPoints, player.totalPoints, player.tournamentId],
+        args: [p.id, p.name, p.team, p.position, p.price, p.avgPoints, p.totalPoints, tournamentId],
       });
       saved++;
-    } catch (error) {
+    } catch (e) {
       failed++;
     }
   }
   
-  return { 
-    tournament: tournamentId, 
-    total: players.length, 
-    saved, 
-    failed,
-    source: seriesId ? 'api' : 'fallback',
-    seriesName: seriesInfo?.name || null,
-  };
+  return { saved, failed };
+}
+
+// Ensure tournament exists
+async function ensureTournament(config) {
+  try {
+    const existing = await db.execute({ sql: `SELECT id FROM tournaments WHERE id = ?`, args: [config.id] });
+    if (existing.rows.length > 0) return;
+    
+    await db.execute({
+      sql: `INSERT INTO tournaments (id, name, short_name, type, start_date, end_date, teams, is_test, is_active)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+      args: [config.id, config.name, config.shortName, config.type, config.startDate, config.endDate, 
+             JSON.stringify(config.teamCodes), config.isTest ? 1 : 0],
+    });
+  } catch (e) {
+    console.log(`Tournament error: ${e.message}`);
+  }
 }
 
 // ============================================
@@ -496,72 +304,79 @@ async function syncTournamentPlayers(tournamentId) {
 // ============================================
 
 export default async function handler(req, res) {
-  // CORS headers for browser requests
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
+  if (req.method === 'OPTIONS') return res.status(200).end();
   
-  // Check for database configuration errors
-  if (dbError) {
+  // Validate requirements
+  if (!process.env.CRICKET_API_KEY) {
     return res.status(500).json({ 
-      error: dbError,
-      help: 'Make sure TURSO_DATABASE_URL and TURSO_AUTH_TOKEN are set in Vercel Environment Variables, then run "npm run db:push" locally to create tables.',
+      error: 'CRICKET_API_KEY is required',
+      help: 'Get your API key from https://cricketdata.org and add to Vercel env vars',
     });
   }
   
-  // Authorization check - only required for automated cron jobs
-  // Manual sync from browser is allowed without auth
-  const authHeader = req.headers.authorization;
-  const cronSecret = process.env.CRON_SECRET;
-  const isVercelCron = req.headers['x-vercel-cron']; // Vercel cron header
-  
-  // Only enforce auth for automated cron requests, not manual browser requests
-  if (isVercelCron && cronSecret && authHeader !== `Bearer ${cronSecret}`) {
-    return res.status(401).json({ error: 'Unauthorized cron request' });
+  if (dbError || !db) {
+    return res.status(500).json({ error: dbError || 'Database not configured' });
   }
   
   try {
-    // Test database connection first
-    try {
-      await db.execute('SELECT 1');
-    } catch (connError) {
-      return res.status(500).json({ 
-        error: `Database connection failed: ${connError.message}`,
-        help: 'Check TURSO_DATABASE_URL and TURSO_AUTH_TOKEN in Vercel Environment Variables. Make sure you ran "npm run db:push" to create the tables.',
-      });
-    }
+    await db.execute('SELECT 1');
     
     const { tournament } = req.query;
     const results = [];
     
-    if (tournament) {
-      // Sync specific tournament
-      const result = await syncTournamentPlayers(tournament);
-      results.push(result);
-    } else {
-      // Sync all tournaments
-      for (const tid of Object.keys(TOURNAMENTS)) {
-        const result = await syncTournamentPlayers(tid);
-        results.push(result);
-        // Rate limiting
-        await new Promise(r => setTimeout(r, 500));
+    const tournamentsToSync = tournament ? [tournament] : Object.keys(TOURNAMENTS);
+    
+    for (const tid of tournamentsToSync) {
+      const config = TOURNAMENTS[tid];
+      if (!config) {
+        results.push({ tournament: tid, error: 'Unknown tournament' });
+        continue;
       }
+      
+      try {
+        await ensureTournament(config);
+        const players = await fetchPlayers(config);
+        
+        if (players.length === 0) {
+          results.push({
+            tournament: tid,
+            name: config.name,
+            players: 0,
+            saved: 0,
+            message: 'No players found - tournament may not be active yet',
+          });
+          continue;
+        }
+        
+        const { saved, failed } = await savePlayers(players, tid);
+        results.push({
+          tournament: tid,
+          name: config.name,
+          players: players.length,
+          saved,
+          failed,
+          teams: [...new Set(players.map(p => p.team))],
+        });
+      } catch (e) {
+        results.push({ tournament: tid, error: e.message });
+      }
+      
+      await new Promise(r => setTimeout(r, 1000));
     }
     
     res.status(200).json({
       success: true,
+      source: 'CricketData.org API',
       timestamp: new Date().toISOString(),
       results,
+      totalSaved: results.reduce((s, r) => s + (r.saved || 0), 0),
     });
     
-  } catch (error) {
-    console.error('Sync error:', error);
-    res.status(500).json({ 
-      error: error.message,
-      stack: process.env.NODE_ENV !== 'production' ? error.stack : undefined,
-    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 }
