@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 
 // ============================================
 // T20 FANTASY CRICKET - COMPLETE APPLICATION
@@ -325,54 +325,9 @@ const checkWeeklyReset = (team) => {
 };
 
 // Test Players for India vs NZ
-const TEST_PLAYERS_IND_NZ = [
-  // INDIA T20I SQUAD (15 players)
-  // Batters
-  { id: 't1', name: 'Suryakumar Yadav', team: 'IND', position: 'batter', price: 12.0, avgPoints: 46.5, totalPoints: 0 },
-  { id: 't2', name: 'Yashasvi Jaiswal', team: 'IND', position: 'batter', price: 10.5, avgPoints: 42.0, totalPoints: 0 },
-  { id: 't3', name: 'Shubman Gill', team: 'IND', position: 'batter', price: 10.0, avgPoints: 38.5, totalPoints: 0 },
-  { id: 't4', name: 'Tilak Varma', team: 'IND', position: 'batter', price: 9.0, avgPoints: 35.0, totalPoints: 0 },
-  { id: 't5', name: 'Rinku Singh', team: 'IND', position: 'batter', price: 8.5, avgPoints: 34.0, totalPoints: 0 },
-  // Keepers
-  { id: 't6', name: 'Sanju Samson', team: 'IND', position: 'keeper', price: 10.0, avgPoints: 40.0, totalPoints: 0 },
-  { id: 't7', name: 'Rishabh Pant', team: 'IND', position: 'keeper', price: 10.5, avgPoints: 40.2, totalPoints: 0 },
-  // Allrounders
-  { id: 't8', name: 'Hardik Pandya', team: 'IND', position: 'allrounder', price: 11.0, avgPoints: 42.0, totalPoints: 0 },
-  { id: 't9', name: 'Axar Patel', team: 'IND', position: 'allrounder', price: 9.0, avgPoints: 35.0, totalPoints: 0 },
-  { id: 't10', name: 'Washington Sundar', team: 'IND', position: 'allrounder', price: 8.0, avgPoints: 30.0, totalPoints: 0 },
-  // Bowlers
-  { id: 't11', name: 'Arshdeep Singh', team: 'IND', position: 'bowler', price: 9.5, avgPoints: 36.0, totalPoints: 0 },
-  { id: 't12', name: 'Mohammed Siraj', team: 'IND', position: 'bowler', price: 9.0, avgPoints: 34.0, totalPoints: 0 },
-  { id: 't13', name: 'Ravi Bishnoi', team: 'IND', position: 'bowler', price: 8.5, avgPoints: 33.0, totalPoints: 0 },
-  { id: 't14', name: 'Varun Chakravarthy', team: 'IND', position: 'bowler', price: 8.0, avgPoints: 32.0, totalPoints: 0 },
-  { id: 't15', name: 'Mayank Yadav', team: 'IND', position: 'bowler', price: 7.5, avgPoints: 28.0, totalPoints: 0 },
-  
-  // NEW ZEALAND T20I SQUAD (15 players)
-  // Batters
-  { id: 't16', name: 'Devon Conway', team: 'NZ', position: 'batter', price: 10.5, avgPoints: 40.0, totalPoints: 0 },
-  { id: 't17', name: 'Finn Allen', team: 'NZ', position: 'batter', price: 9.5, avgPoints: 38.0, totalPoints: 0 },
-  { id: 't18', name: 'Glenn Phillips', team: 'NZ', position: 'batter', price: 10.0, avgPoints: 39.0, totalPoints: 0 },
-  { id: 't19', name: 'Daryl Mitchell', team: 'NZ', position: 'batter', price: 9.5, avgPoints: 37.0, totalPoints: 0 },
-  { id: 't20', name: 'Mark Chapman', team: 'NZ', position: 'batter', price: 8.5, avgPoints: 33.0, totalPoints: 0 },
-  // Keepers
-  { id: 't21', name: 'Tim Seifert', team: 'NZ', position: 'keeper', price: 8.0, avgPoints: 32.0, totalPoints: 0 },
-  { id: 't22', name: 'Dane Cleaver', team: 'NZ', position: 'keeper', price: 7.5, avgPoints: 28.0, totalPoints: 0 },
-  // Allrounders
-  { id: 't23', name: 'Mitchell Santner', team: 'NZ', position: 'allrounder', price: 9.5, avgPoints: 36.0, totalPoints: 0 },
-  { id: 't24', name: 'Rachin Ravindra', team: 'NZ', position: 'allrounder', price: 9.5, avgPoints: 36.0, totalPoints: 0 },
-  { id: 't25', name: 'Michael Bracewell', team: 'NZ', position: 'allrounder', price: 8.5, avgPoints: 32.0, totalPoints: 0 },
-  // Bowlers
-  { id: 't26', name: 'Lockie Ferguson', team: 'NZ', position: 'bowler', price: 10.0, avgPoints: 38.0, totalPoints: 0 },
-  { id: 't27', name: 'Trent Boult', team: 'NZ', position: 'bowler', price: 10.0, avgPoints: 36.0, totalPoints: 0 },
-  { id: 't28', name: 'Tim Southee', team: 'NZ', position: 'bowler', price: 9.0, avgPoints: 33.0, totalPoints: 0 },
-  { id: 't29', name: 'Ish Sodhi', team: 'NZ', position: 'bowler', price: 8.0, avgPoints: 30.0, totalPoints: 0 },
-  { id: 't30', name: 'Matt Henry', team: 'NZ', position: 'bowler', price: 8.5, avgPoints: 31.0, totalPoints: 0 },
-];
-
-// Full player pool for T20 WC and IPL
-// Players are loaded from API - no hardcoded fallback
-// Use /api/players?tournament=xxx to fetch players
-const FULL_PLAYER_POOL = []; // Empty - will be fetched from API
+// No hardcoded player data - all players come from API/database
+const TEST_PLAYERS_IND_NZ = []; // Empty - fetched from API
+const FULL_PLAYER_POOL = []; // Empty - fetched from API
 
 // Helper to fetch players from API
 const fetchPlayersFromApi = async (tournamentId) => {
@@ -733,6 +688,22 @@ const LoginPage = ({ onLogin, onShowSignup }) => {
           <div className="admin-hint">
             <small>Admin? Use admin@t20fantasy.com</small>
           </div>
+          
+          <div className="reset-data-link" style={{ marginTop: '20px', textAlign: 'center' }}>
+            <button 
+              type="button"
+              className="btn-link" 
+              style={{ fontSize: '12px', color: '#888' }}
+              onClick={() => {
+                if (confirm('This will clear all local data (teams, draft status, etc). Are you sure?')) {
+                  localStorage.clear();
+                  window.location.reload();
+                }
+              }}
+            >
+              Having issues? Reset app data
+            </button>
+          </div>
         </form>
       </div>
     </div>
@@ -954,7 +925,7 @@ const TeamCreationPage = ({ user, tournament, onTeamCreated }) => {
 };
 
 // Snake Draft Component
-const SnakeDraftPage = ({ team, tournament, players, onDraftComplete, onUpdateTeam }) => {
+const SnakeDraftPage = ({ team, tournament, players, allTeams, onDraftComplete, onUpdateTeam }) => {
   const [availablePlayers, setAvailablePlayers] = useState([...players]);
   const [draftOrder, setDraftOrder] = useState([]);
   const [currentPick, setCurrentPick] = useState(0);
@@ -963,20 +934,52 @@ const SnakeDraftPage = ({ team, tournament, players, onDraftComplete, onUpdateTe
   const [searchQuery, setSearchQuery] = useState('');
   const [draftStarted, setDraftStarted] = useState(false);
 
-  // Mock other teams for draft
-  const initialTeams = [
-    { id: team.id, name: team.name, isUser: true, roster: [] },
-    { id: 'cpu1', name: 'Cricket Kings', isUser: false, roster: [] },
-    { id: 'cpu2', name: 'Boundary Bashers', isUser: false, roster: [] },
-    { id: 'cpu3', name: 'Wicket Warriors', isUser: false, roster: [] },
-  ];
+  // Get all registered teams for this tournament (real users only, no CPU)
+  const tournamentTeams = useMemo(() => {
+    // Filter allTeams to only include teams for this tournament
+    const registeredTeams = (allTeams || [])
+      .filter(t => t.tournamentId === tournament?.id)
+      .map(t => ({
+        id: t.id,
+        name: t.name,
+        owner: t.owner,
+        isUser: t.id === team?.id, // Mark current user's team
+        roster: t.roster || []
+      }));
+    
+    // Make sure current user's team is included
+    const hasUserTeam = registeredTeams.some(t => t.id === team?.id);
+    if (!hasUserTeam && team) {
+      registeredTeams.unshift({
+        id: team.id,
+        name: team.name,
+        owner: team.owner,
+        isUser: true,
+        roster: []
+      });
+    }
+    
+    // Shuffle the teams for random draft order
+    const shuffled = [...registeredTeams].sort(() => Math.random() - 0.5);
+    return shuffled;
+  }, [allTeams, tournament?.id, team]);
 
-  const [teams, setTeams] = useState(initialTeams);
+  const [teams, setTeams] = useState([]);
+  
+  // Initialize teams when tournamentTeams changes
+  useEffect(() => {
+    if (tournamentTeams.length > 0) {
+      // Reset rosters for draft
+      setTeams(tournamentTeams.map(t => ({ ...t, roster: [] })));
+    }
+  }, [tournamentTeams]);
 
   useEffect(() => {
-    const order = generateSnakeDraftOrder(initialTeams, TOTAL_ROSTER_SIZE);
-    setDraftOrder(order);
-  }, []);
+    if (teams.length > 0) {
+      const order = generateSnakeDraftOrder(teams, TOTAL_ROSTER_SIZE);
+      setDraftOrder(order);
+    }
+  }, [teams]);
 
   const currentDraftPick = draftOrder[currentPick];
   const isUsersTurn = currentDraftPick?.teamId === team.id;
@@ -1039,7 +1042,7 @@ const SnakeDraftPage = ({ team, tournament, players, onDraftComplete, onUpdateTe
     setCurrentPick(prev => prev + 1);
   }, [teams, availablePlayers, currentPick, draftOrder, currentDraftPick, team.id, onDraftComplete]);
 
-  // CPU auto-draft
+  // Auto-draft for other teams (they draft automatically when it's their turn)
   useEffect(() => {
     if (!draftStarted || currentPick >= draftOrder.length) return;
     
@@ -1047,19 +1050,24 @@ const SnakeDraftPage = ({ team, tournament, players, onDraftComplete, onUpdateTe
     if (currentPickData?.teamId === team.id) return; // User's turn
     
     const timer = setTimeout(() => {
-      const cpuTeam = teams.find(t => t.id === currentPickData.teamId);
-      if (!cpuTeam) return;
+      const otherTeam = teams.find(t => t.id === currentPickData.teamId);
+      if (!otherTeam) return;
       
       // Find best available player for needed position
       const neededPositions = Object.entries(SQUAD_CONFIG)
         .filter(([key, config]) => {
           const pos = key === 'keepers' ? 'keeper' : key.slice(0, -1);
-          return getRosterCount(cpuTeam.roster, pos) < config.max;
+          return getRosterCount(otherTeam.roster, pos) < config.max;
         })
         .map(([key]) => key === 'keepers' ? 'keeper' : key.slice(0, -1));
 
       const eligiblePlayers = availablePlayers.filter(p => neededPositions.includes(p.position));
-      const bestPlayer = eligiblePlayers.sort((a, b) => b.avgPoints - a.avgPoints)[0];
+      // Sort by totalPoints (descending), then by name as tiebreaker
+      const bestPlayer = eligiblePlayers.sort((a, b) => {
+        const pointsDiff = (b.totalPoints || 0) - (a.totalPoints || 0);
+        if (pointsDiff !== 0) return pointsDiff;
+        return a.name.localeCompare(b.name); // Alphabetical as tiebreaker
+      })[0];
 
       if (bestPlayer) {
         executePick(currentPickData.teamId, bestPlayer);
@@ -1082,22 +1090,28 @@ const SnakeDraftPage = ({ team, tournament, players, onDraftComplete, onUpdateTe
 
   const userTeam = teams.find(t => t.id === team.id);
 
-  if (draftOrder.length === 0) {
+  if (draftOrder.length === 0 || teams.length === 0) {
     return <div className="draft-page"><div className="loading">Generating draft order...</div></div>;
   }
 
   if (!draftStarted) {
+    const otherTeamsCount = teams.filter(t => !t.isUser).length;
     return (
       <div className="draft-page">
         <div className="draft-intro">
           <div className="draft-intro-content">
             <h1>🐍 Snake Draft</h1>
-            <p>You'll be drafting against 3 CPU teams in snake draft format.</p>
+            <p>
+              {otherTeamsCount > 0 
+                ? `You'll be drafting against ${otherTeamsCount} other team${otherTeamsCount > 1 ? 's' : ''} in snake draft format.`
+                : `You're the only registered team! Other players need to register before the draft can begin.`
+              }
+            </p>
             
             <div className="draft-order-preview">
               <h3>Draft Order</h3>
               <div className="team-order">
-                {initialTeams.map((t, i) => (
+                {teams.map((t, i) => (
                   <div key={t.id} className={`order-item ${t.isUser ? 'user' : ''}`}>
                     <span className="order-num">{i + 1}</span>
                     <span className="order-name">{t.name}</span>
@@ -1109,14 +1123,18 @@ const SnakeDraftPage = ({ team, tournament, players, onDraftComplete, onUpdateTe
             
             <div className="snake-explanation">
               <h4>How Snake Draft Works</h4>
-              <p>Round 1: 1 → 2 → 3 → 4</p>
-              <p>Round 2: 4 → 3 → 2 → 1</p>
-              <p>Round 3: 1 → 2 → 3 → 4</p>
+              <p>Round 1: 1 → 2 → 3 → {teams.length}</p>
+              <p>Round 2: {teams.length} → {teams.length - 1} → ... → 1</p>
+              <p>Round 3: 1 → 2 → 3 → {teams.length}</p>
               <p>...and so on</p>
             </div>
             
-            <button className="btn-primary btn-large" onClick={startDraft}>
-              Start Draft
+            <button 
+              className="btn-primary btn-large" 
+              onClick={startDraft}
+              disabled={teams.length < 2}
+            >
+              {teams.length < 2 ? 'Waiting for more teams...' : 'Start Draft'}
             </button>
           </div>
         </div>
@@ -1210,7 +1228,7 @@ const SnakeDraftPage = ({ team, tournament, players, onDraftComplete, onUpdateTe
                   </div>
                   <div className="player-details">
                     <span className="player-team">{player.team}</span>
-                    <span className="player-avg">{player.avgPoints} avg pts</span>
+                    <span className="player-avg">{player.totalPoints || 0} pts</span>
                   </div>
                   {isUsersTurn && canDraft && <button className="btn-draft">Draft</button>}
                   {isUsersTurn && !canDraft && <span className="position-full">Position Full</span>}
@@ -1228,7 +1246,7 @@ const SnakeDraftPage = ({ team, tournament, players, onDraftComplete, onUpdateTe
 const AdminPanel = ({ user, tournament, onUpdateTournament, onLogout, onBackToTournaments, onSwitchTournament, allTeams, allUsers, onStartDraft, onDeleteTeam, onUpdateTeam, onDeleteUser }) => {
   const [activeTab, setActiveTab] = useState('overview');
   const [newPlayerForm, setNewPlayerForm] = useState({
-    name: '', team: '', position: 'batter', price: 8.0, avgPoints: 30
+    name: '', team: '', position: 'batter'
   });
   const [players, setPlayers] = useState([]);
   const [playersLoading, setPlayersLoading] = useState(false);
@@ -1431,13 +1449,14 @@ const AdminPanel = ({ user, tournament, onUpdateTournament, onLogout, onBackToTo
     if (!newPlayerForm.name || !newPlayerForm.team) return;
     const newPlayer = {
       id: `p${Date.now()}`,
-      ...newPlayerForm,
-      price: parseFloat(newPlayerForm.price),
-      avgPoints: parseFloat(newPlayerForm.avgPoints),
+      name: newPlayerForm.name,
+      team: newPlayerForm.team,
+      position: newPlayerForm.position,
       totalPoints: 0,
+      matchesPlayed: 0,
     };
     setPlayers([...players, newPlayer]);
-    setNewPlayerForm({ name: '', team: '', position: 'batter', price: 8.0, avgPoints: 30 });
+    setNewPlayerForm({ name: '', team: '', position: 'batter' });
   };
   
   const handleRemovePlayer = (playerId) => {
@@ -1736,19 +1755,6 @@ const AdminPanel = ({ user, tournament, onUpdateTournament, onLogout, onBackToTo
                   <option value="bowler">Bowler</option>
                   <option value="allrounder">Allrounder</option>
                 </select>
-                <input
-                  type="number"
-                  placeholder="Price"
-                  step="0.5"
-                  value={newPlayerForm.price}
-                  onChange={(e) => setNewPlayerForm({...newPlayerForm, price: e.target.value})}
-                />
-                <input
-                  type="number"
-                  placeholder="Avg Points"
-                  value={newPlayerForm.avgPoints}
-                  onChange={(e) => setNewPlayerForm({...newPlayerForm, avgPoints: e.target.value})}
-                />
                 <button className="btn-primary" onClick={handleAddPlayer}>Add</button>
               </div>
             </div>
@@ -1766,7 +1772,7 @@ const AdminPanel = ({ user, tournament, onUpdateTournament, onLogout, onBackToTo
                 </div>
               ) : players.length === 0 ? (
                 <div className="empty-message" style={{ padding: '20px', textAlign: 'center', color: '#888' }}>
-                  No players found. Go to Sync tab and click "Sync Players Now" to fetch from API.
+                  No players found. Go to Sync tab to add players.
                 </div>
               ) : (
                 <div className="player-table">
@@ -1774,8 +1780,9 @@ const AdminPanel = ({ user, tournament, onUpdateTournament, onLogout, onBackToTo
                     <span>Name</span>
                     <span>Team</span>
                     <span>Position</span>
-                    <span>Price</span>
-                    <span>Avg Pts</span>
+                    <span>Total Pts</span>
+                    <span>Games</span>
+                    <span>Avg</span>
                     <span>Actions</span>
                   </div>
                   {players.map(player => (
@@ -1783,8 +1790,9 @@ const AdminPanel = ({ user, tournament, onUpdateTournament, onLogout, onBackToTo
                       <span>{player.name}</span>
                       <span>{player.team}</span>
                       <span className={`position-badge ${player.position}`}>{player.position.toUpperCase()}</span>
-                      <span>${player.price}M</span>
-                      <span>{player.avgPoints}</span>
+                      <span>{player.totalPoints || 0}</span>
+                      <span>{player.matchesPlayed || 0}</span>
+                      <span>{player.matchesPlayed > 0 ? Math.round((player.totalPoints || 0) / player.matchesPlayed) : '-'}</span>
                       <button className="btn-small btn-danger" onClick={() => handleRemovePlayer(player.id)}>
                         🗑️
                       </button>
@@ -1798,7 +1806,27 @@ const AdminPanel = ({ user, tournament, onUpdateTournament, onLogout, onBackToTo
         
         {activeTab === 'teams' && (
           <div className="admin-teams">
-            <h3>🏏 Registered Fantasy Teams ({allTeams?.length || 0})</h3>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+              <h3 style={{ margin: 0 }}>🏏 Registered Fantasy Teams ({allTeams?.length || 0})</h3>
+              {allTeams && allTeams.length > 0 && (
+                <button 
+                  className="btn-small btn-danger"
+                  onClick={() => {
+                    if (confirm(`Delete ALL ${allTeams.length} teams? This cannot be undone.`)) {
+                      // Clear all teams
+                      localStorage.setItem('t20fantasy_all_teams', '[]');
+                      // Also clear individual team keys
+                      Object.keys(localStorage)
+                        .filter(k => k.startsWith('t20fantasy_team_'))
+                        .forEach(k => localStorage.removeItem(k));
+                      window.location.reload();
+                    }
+                  }}
+                >
+                  🗑️ Clear All Teams
+                </button>
+              )}
+            </div>
             {allTeams && allTeams.length > 0 ? (
               <div className="teams-list-admin">
                 {allTeams.map((t, i) => (
@@ -3059,7 +3087,7 @@ const Dashboard = ({ user, team, tournament, onLogout, onUpdateTeam, onBackToTou
                             <span className="stat-value">{player.wickets || '-'}</span>
                             <span className="stat-value points">{Math.round(player.totalPoints || 0) || '-'}</span>
                           </div>
-                          <div className="player-proj">{player.avgPoints}</div>
+                          <div className="player-proj">{player.matchesPlayed || 0} gms</div>
                           <div className="player-actions-yahoo">
                             <button 
                               className="action-btn" 
@@ -3148,7 +3176,7 @@ const Dashboard = ({ user, team, tournament, onLogout, onUpdateTeam, onBackToTou
                       <span className="stat-value">{player.wickets || '-'}</span>
                       <span className="stat-value points">{Math.round(player.totalPoints || 0) || '-'}</span>
                     </div>
-                    <div className="player-proj">{player.avgPoints}</div>
+                    <div className="player-proj">{player.matchesPlayed || 0} gms</div>
                     <div className="player-actions-yahoo">
                       {availablePlayingSlots.length > 0 && (
                         <button 
@@ -3235,7 +3263,7 @@ const Dashboard = ({ user, team, tournament, onLogout, onUpdateTeam, onBackToTou
                       <span className="stat-value">-</span>
                       <span className="stat-value">0.00</span>
                     </div>
-                    <div className="player-proj">{player.avgPoints}</div>
+                    <div className="player-proj">{player.matchesPlayed || 0} gms</div>
                     <div className="player-actions-yahoo">
                       <button 
                         className="action-btn primary" 
@@ -3359,13 +3387,12 @@ const Dashboard = ({ user, team, tournament, onLogout, onUpdateTeam, onBackToTou
                     </div>
                     <div className="player-details">
                       <span className="player-team">{player.team}</span>
-                      <span className="player-price">${player.price}M</span>
                       {player.droppedAt && (
                         <span className="recently-dropped">Recently Dropped</span>
                       )}
                     </div>
                     <div className="player-footer">
-                      <span className="avg-points">{player.avgPoints} avg pts</span>
+                      <span className="avg-points">{player.totalPoints || 0} pts ({player.matchesPlayed || 0} gms)</span>
                       {isDraftComplete ? (
                         <button 
                           className="btn-primary btn-small"
@@ -3812,7 +3839,7 @@ const Dashboard = ({ user, team, tournament, onLogout, onUpdateTeam, onBackToTou
                         <span className="player-name">{player.name}</span>
                         <span className="player-team">{player.team}</span>
                       </div>
-                      <span className="avg-points">{player.avgPoints} avg</span>
+                      <span className="avg-points">{player.totalPoints || 0} pts</span>
                     </div>
                   ))}
               </div>
@@ -4405,6 +4432,7 @@ export default function App() {
           team={team}
           tournament={selectedTournament}
           players={playerPool}
+          allTeams={allTeams}
           onDraftComplete={handleDraftComplete}
           onUpdateTeam={handleUpdateTeam}
         />

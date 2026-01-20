@@ -41,14 +41,14 @@ export default async function handler(req, res) {
     let result;
     if (tournament) {
       result = await db.execute({
-        sql: `SELECT id, name, team, position, price, avg_points as avgPoints, total_points as totalPoints, tournament_id as tournamentId
-              FROM players WHERE tournament_id = ? ORDER BY price DESC, name ASC`,
+        sql: `SELECT id, name, team, position, total_points as totalPoints, matches_played as matchesPlayed, tournament_id as tournamentId
+              FROM players WHERE tournament_id = ? ORDER BY total_points DESC, name ASC`,
         args: [tournament],
       });
     } else {
       result = await db.execute({
-        sql: `SELECT id, name, team, position, price, avg_points as avgPoints, total_points as totalPoints, tournament_id as tournamentId
-              FROM players ORDER BY tournament_id, price DESC, name ASC`,
+        sql: `SELECT id, name, team, position, total_points as totalPoints, matches_played as matchesPlayed, tournament_id as tournamentId
+              FROM players ORDER BY tournament_id, total_points DESC, name ASC`,
         args: [],
       });
     }
@@ -58,9 +58,8 @@ export default async function handler(req, res) {
       name: row.name,
       team: row.team,
       position: row.position,
-      price: row.price,
-      avgPoints: row.avgPoints,
       totalPoints: row.totalPoints || 0,
+      matchesPlayed: row.matchesPlayed || 0,
       tournamentId: row.tournamentId,
     }));
     

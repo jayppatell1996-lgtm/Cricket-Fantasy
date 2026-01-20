@@ -97,9 +97,9 @@ async function addPlayers(players, tournamentId) {
     try {
       const id = p.id || `p_${p.team}_${tournamentId}_${saved}_${Date.now()}`;
       await db.execute({
-        sql: `INSERT OR REPLACE INTO players (id, name, team, position, price, avg_points, total_points, tournament_id)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        args: [id, p.name, p.team, p.position, p.price || 8.0, p.avgPoints || 30, p.totalPoints || 0, tournamentId],
+        sql: `INSERT OR REPLACE INTO players (id, name, team, position, price, avg_points, total_points, matches_played, tournament_id)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [id, p.name, p.team, p.position, 0, 0, 0, 0, tournamentId],
       });
       saved++;
     } catch (e) {
@@ -203,10 +203,14 @@ export default async function handler(req, res) {
             tournament: 'test_ind_nz',
             clearFirst: true,
             players: [
-              { name: 'Virat Kohli', team: 'IND', position: 'batter', price: 12.5, avgPoints: 45 },
-              { name: 'Rohit Sharma', team: 'IND', position: 'batter', price: 12.0, avgPoints: 42 },
+              { name: 'Virat Kohli', team: 'IND', position: 'batter' },
+              { name: 'Rohit Sharma', team: 'IND', position: 'batter' },
+              { name: 'Jasprit Bumrah', team: 'IND', position: 'bowler' },
+              { name: 'Rishabh Pant', team: 'IND', position: 'keeper' },
+              { name: 'Hardik Pandya', team: 'IND', position: 'allrounder' },
             ]
-          }
+          },
+          positions: ['batter', 'keeper', 'bowler', 'allrounder']
         });
       }
       
