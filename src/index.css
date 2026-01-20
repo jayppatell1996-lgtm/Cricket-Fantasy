@@ -160,6 +160,37 @@ button {
   line-height: 1;
 }
 
+.btn-logout {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-xs) var(--spacing-md);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-logout:hover {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: #ef4444;
+}
+
+.btn-logout .logout-icon {
+  font-size: 1rem;
+}
+
+.btn-logout .logout-text {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.btn-logout:hover .logout-text {
+  color: #ef4444;
+}
+
 .btn-close {
   background: none;
   color: var(--text-muted);
@@ -1123,6 +1154,15 @@ button {
 
 .test-action-card h4 { font-size: 1rem; margin-bottom: var(--spacing-sm); }
 .test-action-card p { font-size: 0.875rem; color: var(--text-secondary); margin-bottom: var(--spacing-md); }
+
+.test-buttons-row {
+  display: flex;
+  gap: var(--spacing-sm);
+}
+
+.test-buttons-row button {
+  flex: 1;
+}
 
 .api-status {
   margin-top: var(--spacing-md);

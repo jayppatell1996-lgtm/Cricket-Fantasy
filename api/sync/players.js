@@ -25,19 +25,22 @@ const TOURNAMENTS = {
   test_ind_nz: {
     id: 'test_ind_nz',
     name: 'India vs NZ T20 Series',
-    shortName: 'IND vs NZ',
-    type: 'test',
+    shortName: 'IND vs NZ T20',
+    type: 't20',
+    matchFormat: 't20', // Ensures only T20 format matches/squads
     startDate: '2026-01-15',
     endDate: '2026-01-25',
     teams: ['IND', 'NZ'],
-    seriesId: null, // No API series yet
+    seriesId: null, // Will search for active IND vs NZ T20 series
+    searchTerms: ['india', 'zealand', 't20'], // For dynamic series search
     isTest: true,
   },
   t20_wc_2026: {
     id: 't20_wc_2026',
     name: 'T20 World Cup 2026',
     shortName: 'T20 WC 2026',
-    type: 'worldcup',
+    type: 't20',
+    matchFormat: 't20',
     startDate: '2026-02-09',
     endDate: '2026-03-07',
     teams: ['IND', 'AUS', 'ENG', 'PAK', 'NZ', 'SA', 'WI', 'SL', 'BAN', 'AFG', 'ZIM', 'IRE', 'SCO', 'NAM', 'USA', 'NEP'],
@@ -48,7 +51,8 @@ const TOURNAMENTS = {
     id: 'ipl_2026',
     name: 'IPL 2026',
     shortName: 'IPL 2026',
-    type: 'league',
+    type: 't20',
+    matchFormat: 't20',
     startDate: '2026-03-22',
     endDate: '2026-05-26',
     teams: ['CSK', 'MI', 'RCB', 'KKR', 'DC', 'PBKS', 'RR', 'SRH', 'GT', 'LSG'],
@@ -57,38 +61,41 @@ const TOURNAMENTS = {
   },
 };
 
-// Fallback player data
+// T20 Squad Fallback Players (only T20 specialists and regulars)
 const FALLBACK_PLAYERS = {
   test_ind_nz: [
-    { name: 'Rohit Sharma', team: 'IND', position: 'batter', price: 12.0, avgPoints: 42 },
-    { name: 'Virat Kohli', team: 'IND', position: 'batter', price: 12.5, avgPoints: 45 },
-    { name: 'Suryakumar Yadav', team: 'IND', position: 'batter', price: 11.0, avgPoints: 44 },
-    { name: 'Shubman Gill', team: 'IND', position: 'batter', price: 10.0, avgPoints: 38 },
-    { name: 'Yashasvi Jaiswal', team: 'IND', position: 'batter', price: 10.0, avgPoints: 40 },
+    // India T20 Squad (based on typical T20I selections)
+    { name: 'Suryakumar Yadav', team: 'IND', position: 'batter', price: 12.0, avgPoints: 45 }, // T20I Captain
+    { name: 'Shubman Gill', team: 'IND', position: 'batter', price: 10.5, avgPoints: 40 },
+    { name: 'Yashasvi Jaiswal', team: 'IND', position: 'batter', price: 10.0, avgPoints: 38 },
+    { name: 'Tilak Varma', team: 'IND', position: 'batter', price: 9.5, avgPoints: 36 },
+    { name: 'Rinku Singh', team: 'IND', position: 'batter', price: 9.0, avgPoints: 35 },
+    { name: 'Sanju Samson', team: 'IND', position: 'keeper', price: 10.0, avgPoints: 38 },
     { name: 'Rishabh Pant', team: 'IND', position: 'keeper', price: 10.5, avgPoints: 40 },
-    { name: 'KL Rahul', team: 'IND', position: 'keeper', price: 9.5, avgPoints: 36 },
-    { name: 'Hardik Pandya', team: 'IND', position: 'flex', price: 10.5, avgPoints: 38 },
-    { name: 'Ravindra Jadeja', team: 'IND', position: 'flex', price: 10.0, avgPoints: 36 },
-    { name: 'Axar Patel', team: 'IND', position: 'flex', price: 9.0, avgPoints: 34 },
-    { name: 'Jasprit Bumrah', team: 'IND', position: 'bowler', price: 11.5, avgPoints: 40 },
-    { name: 'Mohammed Shami', team: 'IND', position: 'bowler', price: 9.5, avgPoints: 34 },
-    { name: 'Mohammed Siraj', team: 'IND', position: 'bowler', price: 9.0, avgPoints: 32 },
-    { name: 'Kuldeep Yadav', team: 'IND', position: 'bowler', price: 8.5, avgPoints: 32 },
-    { name: 'Arshdeep Singh', team: 'IND', position: 'bowler', price: 8.5, avgPoints: 30 },
-    { name: 'Kane Williamson', team: 'NZ', position: 'batter', price: 11.0, avgPoints: 40 },
+    { name: 'Hardik Pandya', team: 'IND', position: 'allrounder', price: 11.0, avgPoints: 42 },
+    { name: 'Axar Patel', team: 'IND', position: 'allrounder', price: 9.5, avgPoints: 36 },
+    { name: 'Washington Sundar', team: 'IND', position: 'allrounder', price: 8.5, avgPoints: 32 },
+    { name: 'Arshdeep Singh', team: 'IND', position: 'bowler', price: 10.0, avgPoints: 38 },
+    { name: 'Mohammed Siraj', team: 'IND', position: 'bowler', price: 9.0, avgPoints: 34 },
+    { name: 'Ravi Bishnoi', team: 'IND', position: 'bowler', price: 9.0, avgPoints: 35 },
+    { name: 'Varun Chakravarthy', team: 'IND', position: 'bowler', price: 8.5, avgPoints: 33 },
+    { name: 'Mayank Yadav', team: 'IND', position: 'bowler', price: 8.0, avgPoints: 30 },
+    // New Zealand T20 Squad
+    { name: 'Mitchell Santner', team: 'NZ', position: 'allrounder', price: 9.5, avgPoints: 36 }, // T20I Captain
     { name: 'Devon Conway', team: 'NZ', position: 'batter', price: 10.0, avgPoints: 38 },
-    { name: 'Finn Allen', team: 'NZ', position: 'batter', price: 9.0, avgPoints: 35 },
-    { name: 'Glenn Phillips', team: 'NZ', position: 'batter', price: 9.5, avgPoints: 36 },
-    { name: 'Daryl Mitchell', team: 'NZ', position: 'batter', price: 9.0, avgPoints: 35 },
-    { name: 'Tom Latham', team: 'NZ', position: 'keeper', price: 8.5, avgPoints: 32 },
-    { name: 'Mark Chapman', team: 'NZ', position: 'batter', price: 8.0, avgPoints: 30 },
-    { name: 'Rachin Ravindra', team: 'NZ', position: 'flex', price: 9.0, avgPoints: 34 },
-    { name: 'Mitchell Santner', team: 'NZ', position: 'flex', price: 8.5, avgPoints: 31 },
-    { name: 'Trent Boult', team: 'NZ', position: 'bowler', price: 10.0, avgPoints: 35 },
+    { name: 'Finn Allen', team: 'NZ', position: 'batter', price: 9.5, avgPoints: 37 },
+    { name: 'Glenn Phillips', team: 'NZ', position: 'batter', price: 10.0, avgPoints: 40 },
+    { name: 'Daryl Mitchell', team: 'NZ', position: 'batter', price: 9.5, avgPoints: 36 },
+    { name: 'Mark Chapman', team: 'NZ', position: 'batter', price: 8.5, avgPoints: 32 },
+    { name: 'Tim Seifert', team: 'NZ', position: 'keeper', price: 8.5, avgPoints: 32 },
+    { name: 'Rachin Ravindra', team: 'NZ', position: 'allrounder', price: 9.5, avgPoints: 36 },
+    { name: 'Michael Bracewell', team: 'NZ', position: 'allrounder', price: 8.5, avgPoints: 32 },
+    { name: 'Lockie Ferguson', team: 'NZ', position: 'bowler', price: 10.0, avgPoints: 38 },
+    { name: 'Trent Boult', team: 'NZ', position: 'bowler', price: 9.5, avgPoints: 35 },
     { name: 'Tim Southee', team: 'NZ', position: 'bowler', price: 9.0, avgPoints: 33 },
-    { name: 'Lockie Ferguson', team: 'NZ', position: 'bowler', price: 8.5, avgPoints: 32 },
-    { name: 'Matt Henry', team: 'NZ', position: 'bowler', price: 8.0, avgPoints: 30 },
-    { name: 'Ish Sodhi', team: 'NZ', position: 'bowler', price: 8.0, avgPoints: 28 },
+    { name: 'Matt Henry', team: 'NZ', position: 'bowler', price: 8.5, avgPoints: 32 },
+    { name: 'Ish Sodhi', team: 'NZ', position: 'bowler', price: 8.5, avgPoints: 31 },
+    { name: 'Adam Milne', team: 'NZ', position: 'bowler', price: 8.0, avgPoints: 30 },
   ],
   t20_wc_2026: [], // Will be fetched from API
   ipl_2026: [
@@ -187,13 +194,52 @@ async function cricketApiRequest(endpoint, params = {}) {
   return data;
 }
 
+// Search for T20 series dynamically
+async function findT20Series(searchTerms) {
+  try {
+    const data = await cricketApiRequest('series');
+    
+    if (!data.data || data.data.length === 0) {
+      return null;
+    }
+    
+    // Filter for T20 series matching search terms
+    const t20Series = data.data.filter(series => {
+      const name = (series.name || '').toLowerCase();
+      const matchType = (series.matchType || '').toLowerCase();
+      
+      // Must be T20 format
+      if (!name.includes('t20') && matchType !== 't20') {
+        return false;
+      }
+      
+      // Must match all search terms
+      return searchTerms.every(term => name.includes(term.toLowerCase()));
+    });
+    
+    // Return the most recent matching series
+    if (t20Series.length > 0) {
+      // Sort by start date descending
+      t20Series.sort((a, b) => new Date(b.startDate) - new Date(a.startDate));
+      return t20Series[0];
+    }
+    
+    return null;
+  } catch (error) {
+    console.error('Error searching for T20 series:', error.message);
+    return null;
+  }
+}
+
 function transformPlayer(apiPlayer, teamCode, tournamentId) {
-  let position = 'flex';
+  let position = 'allrounder'; // Default to allrounder
   const role = (apiPlayer.role || apiPlayer.battingStyle || '').toLowerCase();
   const bowlStyle = (apiPlayer.bowlingStyle || '').toLowerCase();
   
   if (role.includes('wicket') || role.includes('keeper')) {
     position = 'keeper';
+  } else if (role.includes('allrounder') || role.includes('all-rounder')) {
+    position = 'allrounder';
   } else if (bowlStyle && !role.includes('bat')) {
     position = 'bowler';
   } else if (role.includes('bat') || role.includes('opening')) {
@@ -202,10 +248,10 @@ function transformPlayer(apiPlayer, teamCode, tournamentId) {
   
   // Price based on reputation
   let price = 8.0;
-  const starPlayers = ['virat kohli', 'rohit sharma', 'jasprit bumrah', 'babar azam', 'jos buttler', 'pat cummins'];
-  if (starPlayers.includes(apiPlayer.name?.toLowerCase())) price += 3.5;
+  const starPlayers = ['suryakumar yadav', 'hardik pandya', 'jasprit bumrah', 'glenn phillips', 'lockie ferguson', 'trent boult'];
+  if (starPlayers.includes(apiPlayer.name?.toLowerCase())) price += 3.0;
   if (position === 'keeper') price += 1.0;
-  if (position === 'flex') price += 1.5;
+  if (position === 'allrounder') price += 1.5;
   
   return {
     id: apiPlayer.id || `p_${teamCode.toLowerCase()}_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
@@ -213,7 +259,7 @@ function transformPlayer(apiPlayer, teamCode, tournamentId) {
     team: teamCode,
     position,
     price: Math.round(price * 2) / 2,
-    avgPoints: position === 'bowler' ? 35 : position === 'flex' ? 40 : 30,
+    avgPoints: position === 'bowler' ? 35 : position === 'allrounder' ? 38 : position === 'keeper' ? 36 : 32,
     totalPoints: 0,
     tournamentId,
   };
@@ -261,11 +307,22 @@ async function syncTournamentPlayers(tournamentId) {
   await ensureTournamentExists(tournamentId);
   
   let players = [];
+  let seriesId = config.seriesId;
+  let seriesInfo = null;
+  
+  // If no series ID, try to find T20 series dynamically
+  if (!seriesId && config.searchTerms) {
+    seriesInfo = await findT20Series(config.searchTerms);
+    if (seriesInfo) {
+      seriesId = seriesInfo.id;
+      console.log(`Found T20 series: ${seriesInfo.name} (${seriesId})`);
+    }
+  }
   
   // Try to fetch from API if we have a series ID
-  if (config.seriesId) {
+  if (seriesId) {
     try {
-      const data = await cricketApiRequest('series_squad', { id: config.seriesId });
+      const data = await cricketApiRequest('series_squad', { id: seriesId });
       
       if (data.data && data.data.length > 0) {
         for (const team of data.data) {
@@ -273,6 +330,18 @@ async function syncTournamentPlayers(tournamentId) {
           
           // Skip women's teams
           if (team.teamName?.toLowerCase().includes('women')) continue;
+          
+          // Only include teams that are part of this tournament
+          const normalizedTeamName = team.teamName?.toLowerCase() || '';
+          const isValidTeam = config.teams.some(t => 
+            normalizedTeamName.includes(t.toLowerCase()) || 
+            t.toLowerCase().includes(teamCode.toLowerCase())
+          );
+          
+          if (!isValidTeam && config.teams.length <= 2) {
+            // For bilateral series, be strict about team matching
+            continue;
+          }
           
           if (team.players) {
             for (const player of team.players) {
@@ -314,7 +383,14 @@ async function syncTournamentPlayers(tournamentId) {
     }
   }
   
-  return { tournament: tournamentId, total: players.length, saved, failed };
+  return { 
+    tournament: tournamentId, 
+    total: players.length, 
+    saved, 
+    failed,
+    source: seriesId ? 'api' : 'fallback',
+    seriesName: seriesInfo?.name || null,
+  };
 }
 
 // ============================================

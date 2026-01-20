@@ -9,9 +9,9 @@ import React, { useState, useEffect, useCallback } from 'react';
 const TOURNAMENTS = {
   test_ind_nz: {
     id: 'test_ind_nz',
-    name: 'India vs NZ T20 Series',
-    shortName: 'IND vs NZ',
-    description: 'Test tournament to verify app functionality',
+    name: 'India vs NZ T20 Series 2026',
+    shortName: 'IND vs NZ T20',
+    description: 'T20 International Series - Test Mode (5-match T20I series)',
     startDate: '2026-01-15',
     endDate: '2026-01-25',
     status: 'test',
@@ -295,45 +295,47 @@ const IL_SIZE = 2;
 
 // Test Players for India vs NZ
 const TEST_PLAYERS_IND_NZ = [
-  // India - Batters
-  { id: 't1', name: 'Virat Kohli', team: 'IND', position: 'batter', price: 12.5, avgPoints: 45.2, totalPoints: 0 },
-  { id: 't2', name: 'Rohit Sharma', team: 'IND', position: 'batter', price: 12.0, avgPoints: 42.8, totalPoints: 0 },
-  { id: 't3', name: 'Suryakumar Yadav', team: 'IND', position: 'batter', price: 11.0, avgPoints: 44.1, totalPoints: 0 },
-  { id: 't4', name: 'Shubman Gill', team: 'IND', position: 'batter', price: 10.0, avgPoints: 38.5, totalPoints: 0 },
-  { id: 't25', name: 'Yashasvi Jaiswal', team: 'IND', position: 'batter', price: 10.0, avgPoints: 40.0, totalPoints: 0 },
-  // India - Keepers
-  { id: 't5', name: 'Rishabh Pant', team: 'IND', position: 'keeper', price: 10.5, avgPoints: 40.2, totalPoints: 0 },
-  { id: 't6', name: 'KL Rahul', team: 'IND', position: 'keeper', price: 9.5, avgPoints: 36.8, totalPoints: 0 },
-  // India - Bowlers
-  { id: 't7', name: 'Jasprit Bumrah', team: 'IND', position: 'bowler', price: 11.0, avgPoints: 38.2, totalPoints: 0 },
-  { id: 't8', name: 'Mohammed Shami', team: 'IND', position: 'bowler', price: 9.5, avgPoints: 34.5, totalPoints: 0 },
-  { id: 't11', name: 'Yuzvendra Chahal', team: 'IND', position: 'bowler', price: 8.5, avgPoints: 32.1, totalPoints: 0 },
-  { id: 't12', name: 'Kuldeep Yadav', team: 'IND', position: 'bowler', price: 8.0, avgPoints: 30.5, totalPoints: 0 },
-  { id: 't26', name: 'Arshdeep Singh', team: 'IND', position: 'bowler', price: 8.5, avgPoints: 31.0, totalPoints: 0 },
-  // India - Allrounders (can go in batter/bowler/flex)
-  { id: 't9', name: 'Ravindra Jadeja', team: 'IND', position: 'allrounder', price: 10.0, avgPoints: 36.2, totalPoints: 0 },
-  { id: 't10', name: 'Hardik Pandya', team: 'IND', position: 'allrounder', price: 9.5, avgPoints: 35.8, totalPoints: 0 },
-  { id: 't27', name: 'Axar Patel', team: 'IND', position: 'allrounder', price: 8.5, avgPoints: 32.0, totalPoints: 0 },
+  // INDIA T20I SQUAD (15 players)
+  // Batters
+  { id: 't1', name: 'Suryakumar Yadav', team: 'IND', position: 'batter', price: 12.0, avgPoints: 46.5, totalPoints: 0 },
+  { id: 't2', name: 'Yashasvi Jaiswal', team: 'IND', position: 'batter', price: 10.5, avgPoints: 42.0, totalPoints: 0 },
+  { id: 't3', name: 'Shubman Gill', team: 'IND', position: 'batter', price: 10.0, avgPoints: 38.5, totalPoints: 0 },
+  { id: 't4', name: 'Tilak Varma', team: 'IND', position: 'batter', price: 9.0, avgPoints: 35.0, totalPoints: 0 },
+  { id: 't5', name: 'Rinku Singh', team: 'IND', position: 'batter', price: 8.5, avgPoints: 34.0, totalPoints: 0 },
+  // Keepers
+  { id: 't6', name: 'Sanju Samson', team: 'IND', position: 'keeper', price: 10.0, avgPoints: 40.0, totalPoints: 0 },
+  { id: 't7', name: 'Rishabh Pant', team: 'IND', position: 'keeper', price: 10.5, avgPoints: 40.2, totalPoints: 0 },
+  // Allrounders
+  { id: 't8', name: 'Hardik Pandya', team: 'IND', position: 'allrounder', price: 11.0, avgPoints: 42.0, totalPoints: 0 },
+  { id: 't9', name: 'Axar Patel', team: 'IND', position: 'allrounder', price: 9.0, avgPoints: 35.0, totalPoints: 0 },
+  { id: 't10', name: 'Washington Sundar', team: 'IND', position: 'allrounder', price: 8.0, avgPoints: 30.0, totalPoints: 0 },
+  // Bowlers
+  { id: 't11', name: 'Arshdeep Singh', team: 'IND', position: 'bowler', price: 9.5, avgPoints: 36.0, totalPoints: 0 },
+  { id: 't12', name: 'Mohammed Siraj', team: 'IND', position: 'bowler', price: 9.0, avgPoints: 34.0, totalPoints: 0 },
+  { id: 't13', name: 'Ravi Bishnoi', team: 'IND', position: 'bowler', price: 8.5, avgPoints: 33.0, totalPoints: 0 },
+  { id: 't14', name: 'Varun Chakravarthy', team: 'IND', position: 'bowler', price: 8.0, avgPoints: 32.0, totalPoints: 0 },
+  { id: 't15', name: 'Mayank Yadav', team: 'IND', position: 'bowler', price: 7.5, avgPoints: 28.0, totalPoints: 0 },
   
-  // New Zealand - Batters
-  { id: 't13', name: 'Kane Williamson', team: 'NZ', position: 'batter', price: 11.0, avgPoints: 40.5, totalPoints: 0 },
-  { id: 't14', name: 'Devon Conway', team: 'NZ', position: 'batter', price: 10.0, avgPoints: 38.2, totalPoints: 0 },
-  { id: 't15', name: 'Glenn Phillips', team: 'NZ', position: 'batter', price: 9.5, avgPoints: 36.8, totalPoints: 0 },
-  { id: 't16', name: 'Daryl Mitchell', team: 'NZ', position: 'batter', price: 9.0, avgPoints: 35.2, totalPoints: 0 },
-  { id: 't28', name: 'Finn Allen', team: 'NZ', position: 'batter', price: 8.5, avgPoints: 34.0, totalPoints: 0 },
-  // New Zealand - Keepers
-  { id: 't17', name: 'Tom Latham', team: 'NZ', position: 'keeper', price: 8.5, avgPoints: 32.5, totalPoints: 0 },
-  { id: 't18', name: 'Tom Blundell', team: 'NZ', position: 'keeper', price: 7.5, avgPoints: 28.2, totalPoints: 0 },
-  // New Zealand - Bowlers
-  { id: 't19', name: 'Trent Boult', team: 'NZ', position: 'bowler', price: 10.0, avgPoints: 35.8, totalPoints: 0 },
-  { id: 't20', name: 'Tim Southee', team: 'NZ', position: 'bowler', price: 9.0, avgPoints: 33.2, totalPoints: 0 },
-  { id: 't21', name: 'Matt Henry', team: 'NZ', position: 'bowler', price: 8.0, avgPoints: 30.5, totalPoints: 0 },
-  { id: 't24', name: 'Lockie Ferguson', team: 'NZ', position: 'bowler', price: 8.5, avgPoints: 32.8, totalPoints: 0 },
-  { id: 't29', name: 'Ish Sodhi', team: 'NZ', position: 'bowler', price: 7.5, avgPoints: 28.0, totalPoints: 0 },
-  // New Zealand - Allrounders
-  { id: 't22', name: 'Mitchell Santner', team: 'NZ', position: 'allrounder', price: 8.5, avgPoints: 31.8, totalPoints: 0 },
-  { id: 't23', name: 'Rachin Ravindra', team: 'NZ', position: 'allrounder', price: 9.0, avgPoints: 34.5, totalPoints: 0 },
-  { id: 't30', name: 'Michael Bracewell', team: 'NZ', position: 'allrounder', price: 8.0, avgPoints: 30.0, totalPoints: 0 },
+  // NEW ZEALAND T20I SQUAD (15 players)
+  // Batters
+  { id: 't16', name: 'Devon Conway', team: 'NZ', position: 'batter', price: 10.5, avgPoints: 40.0, totalPoints: 0 },
+  { id: 't17', name: 'Finn Allen', team: 'NZ', position: 'batter', price: 9.5, avgPoints: 38.0, totalPoints: 0 },
+  { id: 't18', name: 'Glenn Phillips', team: 'NZ', position: 'batter', price: 10.0, avgPoints: 39.0, totalPoints: 0 },
+  { id: 't19', name: 'Daryl Mitchell', team: 'NZ', position: 'batter', price: 9.5, avgPoints: 37.0, totalPoints: 0 },
+  { id: 't20', name: 'Mark Chapman', team: 'NZ', position: 'batter', price: 8.5, avgPoints: 33.0, totalPoints: 0 },
+  // Keepers
+  { id: 't21', name: 'Tim Seifert', team: 'NZ', position: 'keeper', price: 8.0, avgPoints: 32.0, totalPoints: 0 },
+  { id: 't22', name: 'Dane Cleaver', team: 'NZ', position: 'keeper', price: 7.5, avgPoints: 28.0, totalPoints: 0 },
+  // Allrounders
+  { id: 't23', name: 'Mitchell Santner', team: 'NZ', position: 'allrounder', price: 9.5, avgPoints: 36.0, totalPoints: 0 },
+  { id: 't24', name: 'Rachin Ravindra', team: 'NZ', position: 'allrounder', price: 9.5, avgPoints: 36.0, totalPoints: 0 },
+  { id: 't25', name: 'Michael Bracewell', team: 'NZ', position: 'allrounder', price: 8.5, avgPoints: 32.0, totalPoints: 0 },
+  // Bowlers
+  { id: 't26', name: 'Lockie Ferguson', team: 'NZ', position: 'bowler', price: 10.0, avgPoints: 38.0, totalPoints: 0 },
+  { id: 't27', name: 'Trent Boult', team: 'NZ', position: 'bowler', price: 10.0, avgPoints: 36.0, totalPoints: 0 },
+  { id: 't28', name: 'Tim Southee', team: 'NZ', position: 'bowler', price: 9.0, avgPoints: 33.0, totalPoints: 0 },
+  { id: 't29', name: 'Ish Sodhi', team: 'NZ', position: 'bowler', price: 8.0, avgPoints: 30.0, totalPoints: 0 },
+  { id: 't30', name: 'Matt Henry', team: 'NZ', position: 'bowler', price: 8.5, avgPoints: 31.0, totalPoints: 0 },
 ];
 
 // Full player pool for T20 WC and IPL
@@ -1312,7 +1314,10 @@ const AdminPanel = ({ user, tournament, onUpdateTournament, onLogout, onBackToTo
         </div>
         <div className="header-right">
           <button className="btn-icon" onClick={onBackToTournaments} title="All Tournaments">🏆</button>
-          <button className="btn-icon" onClick={onLogout} title="Logout">🚪</button>
+          <button className="btn-logout" onClick={onLogout} title="Logout">
+            <span className="logout-icon">🚪</span>
+            <span className="logout-text">Logout</span>
+          </button>
         </div>
       </header>
       
@@ -1953,6 +1958,14 @@ const Dashboard = ({ user, team, tournament, onLogout, onUpdateTeam, onBackToTou
   
   const playerPool = tournament.isTest ? TEST_PLAYERS_IND_NZ : FULL_PLAYER_POOL;
   
+  // Get API base URL for test mode API calls
+  const getApiBaseUrl = () => {
+    if (typeof window !== 'undefined' && window.location.origin) {
+      return window.location.origin;
+    }
+    return '';
+  };
+  
   // Date navigation helpers
   const goToPreviousDay = () => {
     const newDate = new Date(selectedDate);
@@ -2120,7 +2133,7 @@ const Dashboard = ({ user, team, tournament, onLogout, onUpdateTeam, onBackToTou
     return matchesSearch && matchesPosition;
   });
 
-  // Test Mode: Simulate API Data Pull
+  // Test Mode: Simulate API Data Pull (works even without roster)
   const simulateApiPull = async () => {
     setIsFetchingData(true);
     setApiTestStatus({ status: 'connecting', message: 'Connecting to API...' });
@@ -2134,9 +2147,16 @@ const Dashboard = ({ user, team, tournament, onLogout, onUpdateTeam, onBackToTou
     await new Promise(resolve => setTimeout(resolve, 1000));
     setApiTestStatus({ status: 'processing', message: 'Processing player stats...' });
     
+    // If roster is empty, show simulated sample data
+    const playersToProcess = team.roster.length > 0 ? team.roster : [
+      { name: 'Sample Player 1', position: 'batter' },
+      { name: 'Sample Player 2', position: 'bowler' },
+      { name: 'Sample Player 3', position: 'allrounder' },
+    ];
+    
     // Simulate live updates coming in one by one
-    for (let i = 0; i < Math.min(team.roster.length, 5); i++) {
-      const player = team.roster[i];
+    for (let i = 0; i < Math.min(playersToProcess.length, 5); i++) {
+      const player = playersToProcess[i];
       const stats = generateTestStats(player);
       const points = calculateFantasyPoints(stats);
       
@@ -2152,8 +2172,89 @@ const Dashboard = ({ user, team, tournament, onLogout, onUpdateTeam, onBackToTou
     setApiTestStatus({ status: 'success', message: '✓ Data pull successful!' });
     setIsFetchingData(false);
     
-    // Auto-clear after 3 seconds
-    setTimeout(() => setApiTestStatus(null), 3000);
+    // Auto-clear after 5 seconds
+    setTimeout(() => setApiTestStatus(null), 5000);
+  };
+  
+  // Test Mode: Real API Pull (calls actual endpoint)
+  const realApiPull = async () => {
+    setIsFetchingData(true);
+    setApiTestStatus({ status: 'connecting', message: 'Connecting to live API...' });
+    setLiveScoreUpdates([]);
+    
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/api/sync/live-scores`);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      const data = await response.json();
+      
+      if (data.success) {
+        setApiTestStatus({ 
+          status: 'success', 
+          message: `✓ Real API pull successful! ${data.results?.length || 0} matches processed` 
+        });
+        
+        // Show results
+        if (data.results && data.results.length > 0) {
+          data.results.forEach((result, i) => {
+            setTimeout(() => {
+              setLiveScoreUpdates(prev => [...prev, {
+                player: result.matchName || `Match ${i + 1}`,
+                points: result.playersProcessed || result.updated || 0,
+                timestamp: new Date().toLocaleTimeString(),
+              }]);
+            }, i * 300);
+          });
+        } else {
+          setLiveScoreUpdates([{
+            player: 'No live matches',
+            points: 0,
+            timestamp: new Date().toLocaleTimeString(),
+          }]);
+        }
+      } else {
+        setApiTestStatus({ status: 'error', message: `❌ Error: ${data.error}` });
+      }
+    } catch (error) {
+      setApiTestStatus({ status: 'error', message: `❌ Connection failed: ${error.message}` });
+    } finally {
+      setIsFetchingData(false);
+      setTimeout(() => setApiTestStatus(null), 10000);
+    }
+  };
+  
+  // Test Mode: Real API Player Sync
+  const realPlayerSync = async () => {
+    setIsFetchingData(true);
+    setApiTestStatus({ status: 'connecting', message: 'Syncing players from API...' });
+    
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/api/sync/players?tournament=${tournament.id}`);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      const data = await response.json();
+      
+      if (data.success) {
+        const result = data.results?.[0] || {};
+        setApiTestStatus({ 
+          status: 'success', 
+          message: `✓ Player sync successful! ${result.saved || 0} players saved (Source: ${result.source || 'unknown'})${result.seriesName ? ` - ${result.seriesName}` : ''}` 
+        });
+      } else {
+        setApiTestStatus({ status: 'error', message: `❌ Error: ${data.error}` });
+      }
+    } catch (error) {
+      setApiTestStatus({ status: 'error', message: `❌ Connection failed: ${error.message}` });
+    } finally {
+      setIsFetchingData(false);
+      setTimeout(() => setApiTestStatus(null), 10000);
+    }
   };
 
   // Test Mode: Simulate Database Connection
@@ -2522,7 +2623,10 @@ const Dashboard = ({ user, team, tournament, onLogout, onUpdateTeam, onBackToTou
             <span className="points-label">Total Pts</span>
           </div>
           <button className="btn-icon" onClick={onBackToTournaments} title="All Tournaments">🏆</button>
-          <button className="btn-icon" onClick={onLogout} title="Logout">🚪</button>
+          <button className="btn-logout" onClick={onLogout} title="Logout">
+            <span className="logout-icon">🚪</span>
+            <span className="logout-text">Logout</span>
+          </button>
         </div>
       </header>
 
@@ -3119,18 +3223,42 @@ const Dashboard = ({ user, team, tournament, onLogout, onUpdateTeam, onBackToTou
               {/* API Pull Test */}
               <div className="test-action-card">
                 <h4>🔄 Test Data Pull</h4>
-                <p>Simulate fetching live data from an API</p>
-                <button 
-                  className="btn-secondary"
-                  onClick={simulateApiPull}
-                  disabled={isFetchingData || team.roster.length === 0}
-                >
-                  {isFetchingData ? (
-                    <><span className="spinner"></span> Fetching...</>
-                  ) : (
-                    '📡 Simulate API Pull'
-                  )}
-                </button>
+                <p>Test API connectivity and data fetching</p>
+                <div className="test-buttons-row">
+                  <button 
+                    className="btn-secondary"
+                    onClick={simulateApiPull}
+                    disabled={isFetchingData}
+                  >
+                    {isFetchingData ? (
+                      <><span className="spinner"></span> Fetching...</>
+                    ) : (
+                      '🎭 Simulate Pull'
+                    )}
+                  </button>
+                  <button 
+                    className="btn-primary"
+                    onClick={realApiPull}
+                    disabled={isFetchingData}
+                  >
+                    {isFetchingData ? (
+                      <><span className="spinner"></span> Fetching...</>
+                    ) : (
+                      '📡 Live Scores API'
+                    )}
+                  </button>
+                  <button 
+                    className="btn-primary"
+                    onClick={realPlayerSync}
+                    disabled={isFetchingData}
+                  >
+                    {isFetchingData ? (
+                      <><span className="spinner"></span> Syncing...</>
+                    ) : (
+                      '👥 Sync Players API'
+                    )}
+                  </button>
+                </div>
                 
                 {apiTestStatus && (
                   <div className={`api-status ${apiTestStatus.status}`}>
@@ -3532,48 +3660,11 @@ export default function App() {
     // Track user in all users list
     saveUserToList(userData);
     
-    // After login, go to tournament select (or admin panel for admins)
-    if (userData.isAdmin) {
-      // Admin needs to select tournament too
-      const savedTournament = localStorage.getItem('t20fantasy_tournament');
-      if (savedTournament) {
-        setSelectedTournament(JSON.parse(savedTournament));
-        setCurrentPage('admin');
-      } else {
-        setCurrentPage('tournamentSelect');
-      }
-      return;
-    }
-    
-    // Check if there's a saved tournament
-    const savedTournament = localStorage.getItem('t20fantasy_tournament');
-    if (savedTournament) {
-      const tournament = JSON.parse(savedTournament);
-      setSelectedTournament(tournament);
-      
-      // Check if user has a team for this tournament
-      const tournamentKey = tournament.id;
-      const savedTeam = localStorage.getItem(`t20fantasy_team_${tournamentKey}`);
-      const savedDraftStatus = localStorage.getItem(`t20fantasy_draft_complete_${tournamentKey}`);
-      const savedDraftOpen = localStorage.getItem(`t20fantasy_draft_open_${tournamentKey}`);
-      
-      if (savedDraftOpen === 'true') {
-        setIsDraftOpen(true);
-      }
-      
-      if (savedTeam) {
-        setTeam(JSON.parse(savedTeam));
-        if (savedDraftStatus === 'true') {
-          setIsDraftComplete(true);
-        }
-        setCurrentPage('dashboard');
-      } else {
-        setCurrentPage('createTeam');
-      }
-    } else {
-      // No tournament selected - go to tournament select
-      setCurrentPage('tournamentSelect');
-    }
+    // After login, ALWAYS go to tournament select first
+    // Clear the saved tournament so user can choose
+    localStorage.removeItem('t20fantasy_tournament');
+    setSelectedTournament(null);
+    setCurrentPage('tournamentSelect');
   };
 
   const handleSignup = (userData) => {
@@ -3583,7 +3674,10 @@ export default function App() {
     // Track user in all users list
     saveUserToList(userData);
     
-    setCurrentPage('createTeam');
+    // After signup, ALWAYS go to tournament select first
+    localStorage.removeItem('t20fantasy_tournament');
+    setSelectedTournament(null);
+    setCurrentPage('tournamentSelect');
   };
 
   const handleTeamCreated = (teamData) => {
