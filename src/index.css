@@ -703,6 +703,77 @@ button {
 .roster-slot-status span:last-child { font-family: 'JetBrains Mono', monospace; color: var(--text-muted); }
 .roster-slot-status span.full { color: var(--success); }
 
+/* Draft Position Counts */
+.position-counts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-md);
+  padding-bottom: var(--spacing-md);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.position-count-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  background: var(--bg-input);
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+}
+
+.position-count-item span:first-child {
+  color: var(--text-secondary);
+}
+
+.position-count-item span:last-child {
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--accent);
+}
+
+/* Drafted Players List */
+.drafted-players-list {
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.drafted-players-list h4 {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  margin-bottom: var(--spacing-sm);
+}
+
+.drafted-player-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--spacing-xs) 0;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  font-size: 0.8125rem;
+}
+
+.drafted-player-name {
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 140px;
+}
+
+.position-badge.small {
+  font-size: 0.625rem;
+  padding: 2px 4px;
+}
+
+.no-players {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-style: italic;
+}
+
 .draft-log {
   flex: 1;
   padding: var(--spacing-md);

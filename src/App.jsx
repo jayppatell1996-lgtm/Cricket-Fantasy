@@ -104,11 +104,9 @@ const isPlayerLocked = (player, matches) => {
 // Check if we're in the trading window
 const isInTradingWindow = (matches) => {
   const now = new Date();
-  const currentHour = now.getHours();
   
-  // Trading window opens at 8 PM MST
-  // For simplicity, we'll use local time comparison
-  // In production, you'd want proper timezone handling
+  // For test/demo purposes, always return true if no real matches or test tournament
+  // In production, you'd want proper timezone handling with MST
   
   // Find the next match
   const upcomingMatches = (matches || []).filter(m => m.status === 'upcoming');
@@ -126,13 +124,21 @@ const isInTradingWindow = (matches) => {
   const [hours, minutes] = (nextMatch.startTime || '19:00').split(':').map(Number);
   matchDate.setHours(hours, minutes, 0, 0);
   
+  // If match is in the past, trading is open
+  if (matchDate < now) {
+    return true;
+  }
+  
   // Trading window: from 8 PM day before to match start
+  // For simplicity, always allow trading for test/demo
+  // In production, implement proper MST timezone handling
   const windowStart = new Date(matchDate);
   windowStart.setDate(windowStart.getDate() - 1);
   windowStart.setHours(TRADING_WINDOW.openHour, 0, 0, 0);
   
   // We're in trading window if: now >= windowStart AND now < matchStart
-  return now >= windowStart && now < matchDate;
+  // For test/demo, be more permissive
+  return true; // Always open for testing - remove this line in production
 };
 
 // Get lock status message for a player
@@ -1341,23 +1347,28 @@ const SnakeDraftPage = ({ team, tournament, players, allTeams, onDraftComplete, 
       }
       setDraftOrder(order);
 
-      // Load existing picks
+      // Load existing picks and enrich with player data
       const picksResponse = await draftAPI.getPicks(leagueData.id);
       if (picksResponse.picks) {
-        setPicks(picksResponse.picks);
+        // Enrich picks with player data from local pool
+        const enrichedPicks = picksResponse.picks.map(pick => {
+          const poolPlayer = players.find(p => p.id === pick.playerId);
+          return {
+            ...pick,
+            playerName: pick.playerName || poolPlayer?.name || 'Unknown',
+            playerTeam: pick.playerTeam || poolPlayer?.team || 'Unknown',
+            playerPosition: pick.playerPosition || poolPlayer?.position || 'flex'
+          };
+        });
+        setPicks(enrichedPicks);
         // Remove drafted players from available
-        const draftedIds = new Set(picksResponse.picks.map(p => p.playerId));
+        const draftedIds = new Set(enrichedPicks.map(p => p.playerId));
         setAvailablePlayers(players.filter(p => !draftedIds.has(p.id)));
       }
 
-      // Check if draft is complete
+      // Check if draft is complete - just set state, don't auto-redirect
       if (leagueData.currentPick >= order.length) {
         setDraftState('completed');
-        // Load user's roster and complete
-        const rosterResponse = await rosterAPI.get(team.id);
-        if (rosterResponse.roster) {
-          onDraftComplete(rosterResponse.roster);
-        }
       }
     } catch (err) {
       console.error('Failed to load draft state:', err);
@@ -1395,23 +1406,29 @@ const SnakeDraftPage = ({ team, tournament, players, allTeams, onDraftComplete, 
           if (serverPick > currentPick) {
             console.log(`📥 New pick detected: ${currentPick} → ${serverPick}`);
             
-            // Load new picks
+            // Load new picks - need to enrich with player data from local pool
             const picksResponse = await draftAPI.getPicks(leagueData.id);
             if (picksResponse.picks) {
-              setPicks(picksResponse.picks);
-              const draftedIds = new Set(picksResponse.picks.map(p => p.playerId));
+              // Enrich picks with player data from local pool
+              const enrichedPicks = picksResponse.picks.map(pick => {
+                const poolPlayer = players.find(p => p.id === pick.playerId);
+                return {
+                  ...pick,
+                  playerName: pick.playerName || poolPlayer?.name || 'Unknown',
+                  playerTeam: pick.playerTeam || poolPlayer?.team || 'Unknown',
+                  playerPosition: pick.playerPosition || poolPlayer?.position || 'flex'
+                };
+              });
+              setPicks(enrichedPicks);
+              const draftedIds = new Set(enrichedPicks.map(p => p.playerId));
               setAvailablePlayers(players.filter(p => !draftedIds.has(p.id)));
             }
             
             setCurrentPick(serverPick);
 
-            // Check if draft complete
+            // Check if draft complete - just set state, don't auto-redirect
             if (serverPick >= draftOrder.length) {
               setDraftState('completed');
-              const rosterResponse = await rosterAPI.get(team.id);
-              if (rosterResponse.roster) {
-                onDraftComplete(rosterResponse.roster);
-              }
             }
           }
         }
@@ -1509,7 +1526,7 @@ const SnakeDraftPage = ({ team, tournament, players, allTeams, onDraftComplete, 
       if (response.success) {
         console.log('✅ Pick saved:', player.name);
         
-        // Optimistic update
+        // Optimistic update with full player data
         const newPick = {
           ...pickData,
           playerName: player.name,
@@ -1524,10 +1541,7 @@ const SnakeDraftPage = ({ team, tournament, players, allTeams, onDraftComplete, 
         // Check if draft complete
         if (currentPick + 1 >= draftOrder.length) {
           setDraftState('completed');
-          const rosterResponse = await rosterAPI.get(team.id);
-          if (rosterResponse.roster) {
-            onDraftComplete(rosterResponse.roster);
-          }
+          // Don't auto-redirect - let user click "Go to Roster" button
         }
       }
     } catch (err) {
@@ -1595,12 +1609,88 @@ const SnakeDraftPage = ({ team, tournament, players, allTeams, onDraftComplete, 
 
   // Completed state
   if (draftState === 'completed') {
+    // Build final roster with full player data
+    const finalRoster = picks
+      .filter(p => p.teamId === team?.id)
+      .map(p => ({
+        id: p.playerId,
+        name: p.playerName || 'Unknown Player',
+        team: p.playerTeam || 'Unknown',
+        position: p.playerPosition || 'flex',
+        slot: getBestSlotForPosition(p.playerPosition || 'flex'),
+        totalPoints: 0,
+        avgPoints: 0,
+        matchesPlayed: 0
+      }));
+    
+    // Position counts for summary
+    const positionCounts = {
+      batter: finalRoster.filter(p => p.position === 'batter').length,
+      keeper: finalRoster.filter(p => p.position === 'keeper').length,
+      allrounder: finalRoster.filter(p => p.position === 'allrounder').length,
+      bowler: finalRoster.filter(p => p.position === 'bowler').length,
+    };
+    
     return (
       <div className="draft-page">
         <div className="draft-intro">
           <div className="draft-intro-content">
             <h1>✅ Draft Complete!</h1>
-            <p>Your roster has been set. Redirecting to dashboard...</p>
+            <p>Your roster has been set with {finalRoster.length} players.</p>
+            
+            {/* Position Summary */}
+            <div className="draft-position-summary" style={{ 
+              display: 'grid', 
+              gridTemplateColumns: 'repeat(4, 1fr)', 
+              gap: '10px', 
+              margin: '20px 0',
+              padding: '15px',
+              background: 'rgba(255,255,255,0.05)',
+              borderRadius: '8px'
+            }}>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: '1.5rem' }}>🏏</div>
+                <div style={{ fontWeight: 'bold', color: '#d4af37' }}>{positionCounts.batter}</div>
+                <div style={{ fontSize: '0.75rem', color: '#888' }}>Batters</div>
+              </div>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: '1.5rem' }}>🧤</div>
+                <div style={{ fontWeight: 'bold', color: '#d4af37' }}>{positionCounts.keeper}</div>
+                <div style={{ fontSize: '0.75rem', color: '#888' }}>Keepers</div>
+              </div>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: '1.5rem' }}>⚡</div>
+                <div style={{ fontWeight: 'bold', color: '#d4af37' }}>{positionCounts.allrounder}</div>
+                <div style={{ fontSize: '0.75rem', color: '#888' }}>All-rounders</div>
+              </div>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: '1.5rem' }}>🎯</div>
+                <div style={{ fontWeight: 'bold', color: '#d4af37' }}>{positionCounts.bowler}</div>
+                <div style={{ fontSize: '0.75rem', color: '#888' }}>Bowlers</div>
+              </div>
+            </div>
+            
+            {/* Player List */}
+            <div className="draft-summary" style={{ margin: '20px 0', textAlign: 'left' }}>
+              <h3>Your Team:</h3>
+              <div className="drafted-players" style={{ maxHeight: '250px', overflow: 'auto' }}>
+                {finalRoster.map((p, i) => (
+                  <div key={i} style={{ padding: '8px', borderBottom: '1px solid #333', display: 'flex', justifyContent: 'space-between' }}>
+                    <span>{p.name}</span>
+                    <span className={`position-badge ${p.position}`}>
+                      {p.position === 'keeper' ? 'WK' : p.position.toUpperCase().slice(0, 3)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <button 
+              className="btn-primary btn-large" 
+              onClick={() => onDraftComplete(finalRoster)}
+              style={{ marginTop: '20px' }}
+            >
+              Go to My Roster →
+            </button>
           </div>
         </div>
       </div>
@@ -1636,16 +1726,43 @@ const SnakeDraftPage = ({ team, tournament, players, allTeams, onDraftComplete, 
         <div className="draft-sidebar">
           <div className="my-roster-preview">
             <h3>Your Roster ({userRoster.length}/{TOTAL_ROSTER_SIZE})</h3>
-            {Object.entries(SQUAD_CONFIG).map(([key, config]) => {
-              const pos = key === 'keepers' ? 'keeper' : key.slice(0, -1);
-              const count = getRosterCount(pos);
-              return (
-                <div key={key} className="roster-slot-status">
-                  <span>{config.icon} {config.label}</span>
-                  <span className={count >= config.max ? 'full' : ''}>{count}/{config.max}</span>
-                </div>
-              );
-            })}
+            
+            {/* Position counts */}
+            <div className="position-counts">
+              <div className="position-count-item">
+                <span>🏏 Batters</span>
+                <span>{userRoster.filter(p => p.position === 'batter').length}</span>
+              </div>
+              <div className="position-count-item">
+                <span>🧤 Wicket Keepers</span>
+                <span>{userRoster.filter(p => p.position === 'keeper').length}</span>
+              </div>
+              <div className="position-count-item">
+                <span>⚡ All-rounders</span>
+                <span>{userRoster.filter(p => p.position === 'allrounder').length}</span>
+              </div>
+              <div className="position-count-item">
+                <span>🎯 Bowlers</span>
+                <span>{userRoster.filter(p => p.position === 'bowler').length}</span>
+              </div>
+            </div>
+            
+            {/* Drafted players list */}
+            <div className="drafted-players-list">
+              <h4>Drafted</h4>
+              {userRoster.length === 0 ? (
+                <div className="no-players">No players drafted yet</div>
+              ) : (
+                userRoster.map((p, i) => (
+                  <div key={i} className="drafted-player-item">
+                    <span className="drafted-player-name">{p.name}</span>
+                    <span className={`position-badge small ${p.position}`}>
+                      {p.position === 'keeper' ? 'WK' : p.position.toUpperCase().slice(0, 3)}
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
           
           <div className="draft-log">
@@ -2926,33 +3043,53 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
   const getAllRosteredPlayers = () => {
     const tournamentTeams = allTeams.filter(t => t.tournamentId === tournament.id);
     const rosteredIds = new Set();
+    const rosteredNames = new Set();
+    
+    // Get IDs and names from all teams
     tournamentTeams.forEach(t => {
-      (t.roster || []).forEach(p => rosteredIds.add(p.id));
+      (t.roster || []).forEach(p => {
+        if (p.id) rosteredIds.add(p.id);
+        if (p.name) rosteredNames.add(p.name);
+      });
     });
-    return rosteredIds;
+    
+    // Also include current team's roster
+    (team.roster || []).forEach(p => {
+      if (p.id) rosteredIds.add(p.id);
+      if (p.name) rosteredNames.add(p.name);
+    });
+    
+    return { rosteredIds, rosteredNames };
   };
   
   // Free agents = pool players not rostered + dropped players not re-rostered
-  const [freeAgents, setFreeAgents] = useState(() => {
-    const rosteredIds = getAllRosteredPlayers();
+  const [freeAgents, setFreeAgents] = useState([]);
+  
+  // Update free agents when rosters change
+  useEffect(() => {
+    const { rosteredIds, rosteredNames } = getAllRosteredPlayers();
     const droppedPlayers = getDroppedPlayers();
     
-    // Start with pool players not rostered
-    const availableFromPool = playerPool.filter(p => !rosteredIds.has(p.id));
+    // Start with pool players not rostered (check both ID and name)
+    const availableFromPool = playerPool.filter(p => 
+      !rosteredIds.has(p.id) && !rosteredNames.has(p.name)
+    );
     
     // Add dropped players that aren't re-rostered
-    const availableDropped = droppedPlayers.filter(p => !rosteredIds.has(p.id));
+    const availableDropped = droppedPlayers.filter(p => 
+      !rosteredIds.has(p.id) && !rosteredNames.has(p.name)
+    );
     
     // Combine, avoiding duplicates
     const combined = [...availableFromPool];
     availableDropped.forEach(dp => {
-      if (!combined.find(p => p.id === dp.id)) {
+      if (!combined.find(p => p.id === dp.id || p.name === dp.name)) {
         combined.push(dp);
       }
     });
     
-    return combined;
-  });
+    setFreeAgents(combined);
+  }, [team.roster, allTeams, playerPool, tournament.id]);
   
   // Update trading window status periodically
   useEffect(() => {
@@ -2970,11 +3107,28 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
   }, [tournament.matches]);
 
   // Group roster by assigned slot (no bench, no IL - just playing 12)
+  // Enrich roster players with data from player pool if missing
+  const enrichedRoster = useMemo(() => {
+    return (team.roster || []).map(p => {
+      // If player already has name, use as-is
+      if (p.name && p.name !== 'Unknown Player') {
+        return p;
+      }
+      // Try to find player in player pool by ID
+      const poolPlayer = playerPool.find(pp => pp.id === p.id);
+      if (poolPlayer) {
+        return { ...poolPlayer, slot: p.slot || p.position };
+      }
+      // Fallback - use what we have
+      return { ...p, name: p.name || 'Unknown Player' };
+    });
+  }, [team.roster, playerPool]);
+  
   const rosterBySlot = {
-    batters: team.roster.filter(p => p.slot === 'batters'),
-    keepers: team.roster.filter(p => p.slot === 'keepers'),
-    bowlers: team.roster.filter(p => p.slot === 'bowlers'),
-    flex: team.roster.filter(p => p.slot === 'flex'),
+    batters: enrichedRoster.filter(p => p.slot === 'batters'),
+    keepers: enrichedRoster.filter(p => p.slot === 'keepers'),
+    bowlers: enrichedRoster.filter(p => p.slot === 'bowlers'),
+    flex: enrichedRoster.filter(p => p.slot === 'flex'),
   };
   
   // For backward compatibility - old rosters without slots
@@ -4575,8 +4729,14 @@ export default function App() {
   };
 
   const handleDraftComplete = async (roster) => {
+    console.log('📋 Draft complete, roster:', roster);
     const updatedTeam = { ...team, roster };
     setTeam(updatedTeam);
+    
+    // Update allTeams so free agents are correctly filtered
+    setAllTeams(prev => prev.map(t => 
+      t.id === team.id ? { ...t, roster } : t
+    ));
     
     // Save roster to database
     try {

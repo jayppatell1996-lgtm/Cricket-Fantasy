@@ -85,13 +85,16 @@ export default async function handler(req, res) {
         });
 
         const roster = rosterResult.rows.map(r => ({
+          id: r.player_id,
           playerId: r.player_id,
+          name: r.player_name || 'Unknown Player',
           playerName: r.player_name,
+          team: r.player_team || 'Unknown',
           playerTeam: r.player_team,
-          position: r.player_position,
-          slot: r.slot,
+          position: r.player_position || r.position || 'flex',
+          slot: r.position || 'flex', // position column stores slot in DB schema
           acquiredVia: r.acquired_via,
-          acquiredAt: r.acquired_at
+          acquiredAt: r.acquired_date
         }));
 
         return {
@@ -225,9 +228,9 @@ export default async function handler(req, res) {
         // Insert new roster
         for (const player of roster) {
           await db.execute({
-            sql: `INSERT INTO roster (id, fantasy_team_id, player_id, slot, acquired_via, acquired_at)
-                  VALUES (?, ?, ?, ?, ?, datetime('now'))`,
-            args: [generateId(), id, player.id || player.playerId, player.slot || 'flex', player.acquiredVia || 'draft']
+            sql: `INSERT INTO roster (id, fantasy_team_id, player_id, position, acquired_via)
+                  VALUES (?, ?, ?, ?, ?)`,
+            args: [generateId(), id, player.id || player.playerId, player.slot || player.position || 'flex', player.acquiredVia || 'draft']
           });
         }
       }
