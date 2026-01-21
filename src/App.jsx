@@ -1385,14 +1385,17 @@ const SnakeDraftPage = ({ team, tournament, players, allTeams, onDraftComplete, 
         setAvailablePlayers(players.filter(p => !draftedIds.has(p.id)));
       }
 
-      // Check if draft is complete - ONLY if we have a valid draft order
+      // Check if draft is complete - ONLY if we have a valid draft order AND picks have been made
       const totalPicksRequired = order.length;
       const currentPickNum = leagueData.currentPick || 0;
       
       console.log('📋 Draft progress:', currentPickNum, '/', totalPicksRequired);
       
-      // Only mark complete if we actually have picks and reached the end
-      if (totalPicksRequired > 0 && currentPickNum >= totalPicksRequired) {
+      // Only mark complete if:
+      // 1. We have a valid draft order (totalPicksRequired > 0)
+      // 2. At least one pick has been made (currentPickNum > 0)
+      // 3. We've reached or passed the total picks required
+      if (totalPicksRequired > 0 && currentPickNum > 0 && currentPickNum >= totalPicksRequired) {
         console.log('✅ Draft is complete!');
         setDraftState('completed');
       }
@@ -1459,10 +1462,11 @@ const SnakeDraftPage = ({ team, tournament, players, allTeams, onDraftComplete, 
             setCurrentPick(serverPick);
 
             // Check if draft complete - use server's draft order length
+            // Only complete if at least one pick was made (serverPick > 0)
             const totalPicks = leagueData.draftOrder?.length || draftOrder.length || 0;
             console.log(`📋 Draft progress: ${serverPick} / ${totalPicks}`);
             
-            if (totalPicks > 0 && serverPick >= totalPicks) {
+            if (totalPicks > 0 && serverPick > 0 && serverPick >= totalPicks) {
               console.log('✅ Draft complete via polling!');
               setDraftState('completed');
             }
@@ -1537,6 +1541,12 @@ const SnakeDraftPage = ({ team, tournament, players, allTeams, onDraftComplete, 
   // Make a draft pick
   const draftPlayer = async (player) => {
     if (!isUsersTurn || isSubmitting) return;
+    
+    // Guard: Ensure we have a valid draft order
+    if (!draftOrder || draftOrder.length === 0) {
+      setError('Draft order not loaded. Please refresh the page.');
+      return;
+    }
 
     if (!canDraftPosition(player.position)) {
       alert(`No available slots for ${player.position}s!`);
@@ -1732,6 +1742,23 @@ const SnakeDraftPage = ({ team, tournament, players, allTeams, onDraftComplete, 
               style={{ marginTop: '20px' }}
             >
               Go to My Roster →
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Guard: Show loading if draftOrder is empty
+  if (!draftOrder || draftOrder.length === 0) {
+    return (
+      <div className="draft-page">
+        <div className="draft-intro">
+          <div className="draft-intro-content">
+            <h1>⏳ Loading Draft...</h1>
+            <p>Waiting for draft order to load. Please wait...</p>
+            <button className="btn-secondary" onClick={loadDraftState}>
+              Refresh
             </button>
           </div>
         </div>
@@ -2173,6 +2200,8 @@ const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament
         });
       }
       
+      console.log('📋 Generated draft order:', draftOrder.length, 'total picks for', tournamentTeams.length, 'teams');
+      
       // Save draft order to league
       try {
         const leaguesResponse = await leaguesAPI.getAll(tournament.id);
@@ -2181,12 +2210,15 @@ const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament
           await leaguesAPI.update({
             id: league.id,
             draftOrder: draftOrder,
-            draftStatus: 'in_progress'
+            draftStatus: 'in_progress',
+            currentPick: 0  // IMPORTANT: Start at pick 0
           });
-          console.log('✅ Draft started with order:', draftOrder.slice(0, 4));
+          console.log('✅ Draft started with order:', draftOrder.length, 'picks, currentPick: 0');
         }
       } catch (err) {
         console.error('Failed to save draft order:', err);
+        alert('Failed to start draft. Please try again.');
+        return;
       }
       
       setDraftStatus('in_progress');
@@ -4198,10 +4230,8 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
                 <span className="points">Points</span>
               </div>
               {(() => {
-                // Get all teams for this tournament from localStorage
-                const savedAllTeams = localStorage.getItem('t20fantasy_all_teams');
-                const allTeamsData = savedAllTeams ? JSON.parse(savedAllTeams) : [];
-                const tournamentTeams = allTeamsData
+                // Get all teams for this tournament from allTeams prop (loaded from database)
+                const tournamentTeams = (allTeams || [])
                   .filter(t => t.tournamentId === tournament.id)
                   .map(t => ({
                     ...t,
