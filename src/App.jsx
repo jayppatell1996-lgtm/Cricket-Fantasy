@@ -2027,6 +2027,30 @@ const AdminPanel = ({ user, tournament, onUpdateTournament, onLogout, onBackToTo
                 </button>
               </div>
             </div>
+            
+            {/* Important Notice */}
+            <div className="admin-notice" style={{ 
+              background: 'rgba(255, 193, 7, 0.1)', 
+              border: '1px solid rgba(255, 193, 7, 0.3)', 
+              borderRadius: '8px', 
+              padding: '16px', 
+              marginTop: '20px' 
+            }}>
+              <h4 style={{ color: '#ffc107', marginTop: 0 }}>⚠️ Testing Note: Browser-Specific Data</h4>
+              <p style={{ margin: '8px 0', color: '#ccc', fontSize: '14px' }}>
+                This app currently uses <strong>localStorage</strong> for data storage, which is <strong>browser-specific</strong>. 
+                This means:
+              </p>
+              <ul style={{ margin: '8px 0', paddingLeft: '20px', color: '#aaa', fontSize: '13px' }}>
+                <li>Users in different browsers/devices <strong>cannot see each other's data</strong></li>
+                <li>For multi-user testing, use <strong>multiple tabs in the same browser</strong></li>
+                <li>Draft status changes will sync between tabs (with 5-second delay)</li>
+                <li>For production multi-user support, <strong>database integration is required</strong> (Turso)</li>
+              </ul>
+              <p style={{ margin: '8px 0 0 0', color: '#888', fontSize: '12px' }}>
+                💡 Tip: Open multiple incognito windows in the same browser to test as different users.
+              </p>
+            </div>
           </div>
         )}
         
@@ -2605,6 +2629,7 @@ const Dashboard = ({ user, team, tournament, onLogout, onUpdateTeam, onBackToTou
   const [tradingWindowStatus, setTradingWindowStatus] = useState({ open: true, message: '' });
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [selectedPlayerProfile, setSelectedPlayerProfile] = useState(null); // Player profile modal
+  const [localDraftOpen, setLocalDraftOpen] = useState(isDraftOpen); // Local state for auto-refresh
   
   // Enhanced Test Mode State
   const [selectedMatch, setSelectedMatch] = useState(null);
@@ -2617,6 +2642,28 @@ const Dashboard = ({ user, team, tournament, onLogout, onUpdateTeam, onBackToTou
   const [pointsVerification, setPointsVerification] = useState(null);
   
   const playerPool = getPlayersForTournament(tournament.id);
+  
+  // Auto-refresh draft status every 5 seconds (for same-browser multi-tab testing)
+  useEffect(() => {
+    if (isDraftComplete) return; // No need to check if draft is already complete
+    
+    const checkDraftStatus = () => {
+      const tournamentKey = tournament?.id || 'default';
+      const savedDraftPhase = localStorage.getItem(`t20fantasy_draft_status_${tournamentKey}`);
+      const draftIsOpen = savedDraftPhase === 'open' || savedDraftPhase === 'in_progress';
+      
+      if (draftIsOpen && !localDraftOpen) {
+        // Draft just opened! Update state
+        setLocalDraftOpen(true);
+      }
+    };
+    
+    const interval = setInterval(checkDraftStatus, 5000); // Check every 5 seconds
+    return () => clearInterval(interval);
+  }, [isDraftComplete, localDraftOpen, tournament?.id]);
+  
+  // Use localDraftOpen if it's true (detected from polling), otherwise use prop
+  const effectiveDraftOpen = localDraftOpen || isDraftOpen;
   
   // Check and reset weekly pickups if new week
   useEffect(() => {
@@ -3397,8 +3444,8 @@ const Dashboard = ({ user, team, tournament, onLogout, onUpdateTeam, onBackToTou
             
             {/* Draft Status Banner */}
             {!isDraftComplete && (
-              <div className={`draft-status-banner ${isDraftOpen ? 'draft-open' : 'draft-pending'}`}>
-                {isDraftOpen ? (
+              <div className={`draft-status-banner ${effectiveDraftOpen ? 'draft-open' : 'draft-pending'}`}>
+                {effectiveDraftOpen ? (
                   <>
                     <span className="banner-icon">🚀</span>
                     <span className="banner-text">Draft is OPEN! Complete your roster now.</span>
@@ -3410,6 +3457,22 @@ const Dashboard = ({ user, team, tournament, onLogout, onUpdateTeam, onBackToTou
                   <>
                     <span className="banner-icon">⏳</span>
                     <span className="banner-text">Waiting for admin to open the draft. Browse players in the meantime.</span>
+                    <button 
+                      className="btn-secondary btn-small" 
+                      onClick={() => {
+                        // Re-check draft status from localStorage
+                        const tournamentKey = tournament?.id || 'default';
+                        const savedDraftPhase = localStorage.getItem(`t20fantasy_draft_status_${tournamentKey}`);
+                        if (savedDraftPhase === 'open' || savedDraftPhase === 'in_progress') {
+                          window.location.reload();
+                        } else {
+                          alert('Draft is still pending. Admin has not opened the draft yet.\n\n⚠️ Note: If admin is in a different browser/device, data won\'t sync automatically. This app uses localStorage which is browser-specific.');
+                        }
+                      }}
+                      title="Check if admin has opened the draft"
+                    >
+                      🔄 Refresh
+                    </button>
                   </>
                 )}
               </div>
@@ -3453,6 +3516,7 @@ const Dashboard = ({ user, team, tournament, onLogout, onUpdateTeam, onBackToTou
                   <React.Fragment key={slotKey}>
                     {rosterBySlot[slotKey]?.map(player => {
                       const gameStatus = getPlayerGameStatus(player, tournament.matches, selectedDate);
+                      const slotLabel = slotKey === 'keepers' ? 'WK' : slotKey === 'batters' ? 'BAT' : slotKey === 'bowlers' ? 'BWL' : 'UTIL';
                       
                       return (
                         <div 
@@ -3460,7 +3524,7 @@ const Dashboard = ({ user, team, tournament, onLogout, onUpdateTeam, onBackToTou
                           className={`player-row ${gameStatus.status} clickable`}
                           onClick={() => setSelectedPlayerProfile(player)}
                         >
-                          <div className="slot-indicator">{slotKey === 'keepers' ? 'WK' : slotKey === 'batters' ? 'BAT' : slotKey === 'bowlers' ? 'BWL' : 'AR'}</div>
+                          <div className="slot-indicator">{slotLabel}</div>
                           <div className={`game-status-dot ${gameStatus.color}`}></div>
                           <div className="player-info-yahoo">
                             <div className="player-main">
@@ -3478,18 +3542,21 @@ const Dashboard = ({ user, team, tournament, onLogout, onUpdateTeam, onBackToTou
                       );
                     })}
                     {/* Empty slots for this position */}
-                    {Array(config.max - (rosterBySlot[slotKey]?.length || 0)).fill(null).map((_, i) => (
-                      <div key={`empty-${slotKey}-${i}`} className="player-row empty-row">
-                        <div className="slot-indicator">{slotKey === 'keepers' ? 'WK' : slotKey === 'batters' ? 'BAT' : slotKey === 'bowlers' ? 'BWL' : 'AR'}</div>
-                        <div className="game-status-dot red"></div>
-                        <div className="player-info-yahoo">
-                          <span className="empty-slot-text">Empty {config.label} Slot</span>
+                    {Array(config.max - (rosterBySlot[slotKey]?.length || 0)).fill(null).map((_, i) => {
+                      const slotLabel = slotKey === 'keepers' ? 'WK' : slotKey === 'batters' ? 'BAT' : slotKey === 'bowlers' ? 'BWL' : 'UTIL';
+                      return (
+                        <div key={`empty-${slotKey}-${i}`} className="player-row empty-row">
+                          <div className="slot-indicator">{slotLabel}</div>
+                          <div className="game-status-dot red"></div>
+                          <div className="player-info-yahoo">
+                            <span className="empty-slot-text">Empty {config.label} Slot</span>
+                          </div>
+                          <div className="player-stats-yahoo">
+                            <span className="stat-value">-</span>
+                          </div>
                         </div>
-                        <div className="player-stats-yahoo">
-                          <span className="stat-value">-</span>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </React.Fragment>
                 ))}
             </div>
