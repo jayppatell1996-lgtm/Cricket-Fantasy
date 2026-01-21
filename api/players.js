@@ -1,11 +1,7 @@
-/**
- * API Route: Players CRUD
- * GET /api/players?tournament=t20_wc_2026
- * GET /api/players?tournament=ind_nz_test&leagueId=xxx&available=true
- * POST /api/players (single or bulk)
- * PUT /api/players (update player)
- * DELETE /api/players?playerId=xxx
- */
+// API: Players Management
+// GET /api/players - Get players (filter by tournament, position, team)
+// POST /api/players - Create player or bulk insert
+// PUT /api/players - Update player stats
 
 import { createClient } from '@libsql/client';
 
@@ -22,7 +18,7 @@ function generateId() {
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
   if (req.method === 'OPTIONS') {
@@ -34,41 +30,48 @@ export default async function handler(req, res) {
   }
 
   const db = getDb();
-  const { tournament, tournamentId, leagueId, playerId, available } = req.query;
-  const effectiveTournamentId = tournament || tournamentId;
 
   try {
-    // GET: Fetch players
+    // ============================================
+    // GET - Fetch players
+    // ============================================
     if (req.method === 'GET') {
-      let sql, args;
+      const { tournament, playerId, position, team, leagueId, available } = req.query;
+
+      let sql = 'SELECT * FROM players WHERE 1=1';
+      const args = [];
 
       if (playerId) {
-        // Get specific player
-        sql = 'SELECT * FROM players WHERE id = ?';
-        args = [playerId];
-      } else if (effectiveTournamentId) {
-        if (available === 'true' && leagueId) {
-          // Get available players (not on any roster in this league)
-          sql = `SELECT p.* FROM players p
-                 WHERE p.tournament_id = ?
-                 AND p.is_active = 1
-                 AND p.id NOT IN (
-                   SELECT r.player_id FROM roster r
-                   JOIN fantasy_teams ft ON r.fantasy_team_id = ft.id
-                   WHERE ft.league_id = ?
-                 )
-                 ORDER BY p.total_points DESC, p.name ASC`;
-          args = [effectiveTournamentId, leagueId];
-        } else {
-          // Get all players for tournament
-          sql = 'SELECT * FROM players WHERE tournament_id = ? AND is_active = 1 ORDER BY total_points DESC, name ASC';
-          args = [effectiveTournamentId];
-        }
-      } else {
-        // Get all players
-        sql = 'SELECT * FROM players WHERE is_active = 1 ORDER BY tournament_id, total_points DESC, name ASC';
-        args = [];
+        sql += ' AND id = ?';
+        args.push(playerId);
       }
+
+      if (tournament) {
+        sql += ' AND tournament_id = ?';
+        args.push(tournament);
+      }
+
+      if (position) {
+        sql += ' AND position = ?';
+        args.push(position);
+      }
+
+      if (team) {
+        sql += ' AND team = ?';
+        args.push(team);
+      }
+
+      // Filter out drafted players if available=true
+      if (available === 'true' && leagueId) {
+        sql += ` AND id NOT IN (
+          SELECT player_id FROM roster r
+          JOIN fantasy_teams ft ON r.fantasy_team_id = ft.id
+          WHERE ft.league_id = ?
+        )`;
+        args.push(leagueId);
+      }
+
+      sql += ' ORDER BY total_points DESC, name ASC';
 
       const result = await db.execute({ sql, args });
 
@@ -78,41 +81,38 @@ export default async function handler(req, res) {
         team: p.team,
         position: p.position,
         tournamentId: p.tournament_id,
-        imageUrl: p.image_url,
         price: p.price || 0,
         avgPoints: p.avg_points || 0,
         totalPoints: p.total_points || 0,
         matchesPlayed: p.matches_played || 0,
-        isActive: p.is_active === 1 || p.is_active === true,
-        isInjured: p.is_injured === 1 || p.is_injured === true,
-        injuryDetails: p.injury_details
+        isActive: Boolean(p.is_active),
+        isInjured: Boolean(p.is_injured)
       }));
 
-      return res.status(200).json({ 
-        success: true, 
-        tournament: effectiveTournamentId || 'all',
-        player: playerId ? players[0] : undefined,
-        players: playerId ? undefined : players,
-        count: players.length
-      });
+      if (playerId) {
+        return res.status(200).json({ success: true, player: players[0] || null });
+      }
+
+      return res.status(200).json({ success: true, players });
     }
 
-    // POST: Add player(s)
+    // ============================================
+    // POST - Create player(s)
+    // ============================================
     if (req.method === 'POST') {
-      const body = req.body;
+      const { players, tournamentId, name, team, position } = req.body;
 
       // Bulk insert
-      if (body.players && Array.isArray(body.players)) {
-        const tournamentIdForBulk = body.tournamentId;
+      if (players && Array.isArray(players)) {
         let inserted = 0;
-        
-        for (const p of body.players) {
-          const id = p.id || generateId();
+
+        for (const p of players) {
+          const pid = p.id || generateId();
           try {
             await db.execute({
-              sql: `INSERT OR REPLACE INTO players (id, name, team, position, tournament_id, image_url, price, avg_points, total_points, matches_played, is_active, is_injured)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)`,
-              args: [id, p.name, p.team, p.position, tournamentIdForBulk || p.tournamentId, p.imageUrl || null, p.price || 0, p.avgPoints || 0, p.totalPoints || 0, p.matchesPlayed || 0]
+              sql: `INSERT OR REPLACE INTO players (id, name, team, position, tournament_id, price, avg_points, total_points, matches_played, is_active, is_injured)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)`,
+              args: [pid, p.name, p.team, p.position, tournamentId || p.tournamentId, p.price || 0, p.avgPoints || 0, p.totalPoints || 0, p.matchesPlayed || 0]
             });
             inserted++;
           } catch (err) {
@@ -120,98 +120,81 @@ export default async function handler(req, res) {
           }
         }
 
-        return res.status(201).json({ success: true, inserted, total: body.players.length });
+        return res.status(201).json({ success: true, inserted });
       }
 
       // Single insert
-      const { name, team, position, imageUrl, price } = body;
-      const singleTournamentId = body.tournamentId;
-
-      if (!name || !team || !position) {
-        return res.status(400).json({ error: 'name, team, and position are required' });
+      if (!name || !team || !position || !tournamentId) {
+        return res.status(400).json({ error: 'name, team, position, and tournamentId required' });
       }
 
-      const id = generateId();
+      const playerId = generateId();
 
       await db.execute({
-        sql: `INSERT INTO players (id, name, team, position, tournament_id, image_url, price, avg_points, total_points, matches_played, is_active, is_injured)
-              VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 1, 0)`,
-        args: [id, name, team, position, singleTournamentId, imageUrl || null, price || 0]
+        sql: `INSERT INTO players (id, name, team, position, tournament_id, price, avg_points, total_points, matches_played, is_active, is_injured)
+              VALUES (?, ?, ?, ?, ?, 0, 0, 0, 0, 1, 0)`,
+        args: [playerId, name, team, position, tournamentId]
       });
 
-      return res.status(201).json({ success: true, playerId: id });
+      return res.status(201).json({ success: true, playerId });
     }
 
-    // PUT: Update a player
+    // ============================================
+    // PUT - Update player
+    // ============================================
     if (req.method === 'PUT') {
-      const { id, totalPoints, avgPoints, matchesPlayed, isInjured, injuryDetails, isActive } = req.body;
+      const { id, totalPoints, avgPoints, matchesPlayed, isActive, isInjured } = req.body;
 
       if (!id) {
-        return res.status(400).json({ error: 'Player ID is required' });
+        return res.status(400).json({ error: 'Player ID required' });
       }
 
       const updates = [];
-      const values = [];
+      const args = [];
 
       if (totalPoints !== undefined) {
         updates.push('total_points = ?');
-        values.push(totalPoints);
+        args.push(totalPoints);
       }
+
       if (avgPoints !== undefined) {
         updates.push('avg_points = ?');
-        values.push(avgPoints);
+        args.push(avgPoints);
       }
+
       if (matchesPlayed !== undefined) {
         updates.push('matches_played = ?');
-        values.push(matchesPlayed);
+        args.push(matchesPlayed);
       }
-      if (isInjured !== undefined) {
-        updates.push('is_injured = ?');
-        values.push(isInjured ? 1 : 0);
-      }
-      if (injuryDetails !== undefined) {
-        updates.push('injury_details = ?');
-        values.push(injuryDetails);
-      }
+
       if (isActive !== undefined) {
         updates.push('is_active = ?');
-        values.push(isActive ? 1 : 0);
+        args.push(isActive ? 1 : 0);
+      }
+
+      if (isInjured !== undefined) {
+        updates.push('is_injured = ?');
+        args.push(isInjured ? 1 : 0);
       }
 
       if (updates.length === 0) {
-        return res.status(400).json({ error: 'No updates provided' });
+        return res.status(400).json({ error: 'No fields to update' });
       }
 
-      values.push(id);
+      args.push(id);
 
       await db.execute({
         sql: `UPDATE players SET ${updates.join(', ')} WHERE id = ?`,
-        args: values
+        args
       });
 
       return res.status(200).json({ success: true, message: 'Player updated' });
-    }
-
-    // DELETE: Remove a player (soft delete)
-    if (req.method === 'DELETE') {
-      const id = playerId || req.body?.id;
-
-      if (!id) {
-        return res.status(400).json({ error: 'Player ID is required' });
-      }
-
-      await db.execute({
-        sql: 'UPDATE players SET is_active = 0 WHERE id = ?',
-        args: [id]
-      });
-
-      return res.status(200).json({ success: true, message: 'Player deactivated' });
     }
 
     return res.status(405).json({ error: 'Method not allowed' });
 
   } catch (error) {
     console.error('Players API error:', error);
-    return res.status(500).json({ error: 'Database error', details: error.message });
+    return res.status(500).json({ error: 'Server error', details: error.message });
   }
 }

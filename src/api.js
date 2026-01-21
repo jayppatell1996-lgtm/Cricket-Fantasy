@@ -211,6 +211,11 @@ export const playersAPI = {
     return apiCall(`/players${query}`);
   },
 
+  // Alias for getAll with tournament filter
+  async getByTournament(tournamentId) {
+    return this.getAll(tournamentId);
+  },
+
   async getAvailable(tournamentId, leagueId) {
     return apiCall(`/players?tournament=${tournamentId}&leagueId=${leagueId}&available=true`);
   },

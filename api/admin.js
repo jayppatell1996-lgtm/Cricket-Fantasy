@@ -1,10 +1,11 @@
 // API: Admin Functions (Health, Seed, Users, Tournaments)
 // /api/admin?action=health - Database health check
-// /api/admin?action=seed - Seed database
+// /api/admin?action=seed - Seed database (tournaments, players, leagues)
 // /api/admin?action=users - User management
 // /api/admin?action=tournaments - Tournament management
 
 import { createClient } from '@libsql/client';
+import seedData from './seed-data.json' assert { type: 'json' };
 
 function getDb() {
   return createClient({
@@ -20,14 +21,14 @@ function generateId() {
 // Tournament definitions
 const TOURNAMENTS = [
   {
-    id: 'ind_nz_test',
+    id: 'test_ind_nz',
     name: 'India vs NZ T20 Series 2026',
     shortName: 'IND vs NZ T20',
     type: 'test',
-    startDate: '2026-01-25',
-    endDate: '2026-02-05',
+    startDate: '2026-01-15',
+    endDate: '2026-01-25',
     teams: JSON.stringify(['IND', 'NZ']),
-    description: 'Test tournament for fantasy cricket app development',
+    description: 'Test tournament for fantasy cricket development',
     isTest: 1
   },
   {
@@ -37,8 +38,8 @@ const TOURNAMENTS = [
     type: 'worldcup',
     startDate: '2026-02-09',
     endDate: '2026-03-07',
-    teams: JSON.stringify(['IND', 'AUS', 'ENG', 'PAK', 'SA', 'NZ', 'WI', 'SL', 'BAN', 'AFG']),
-    description: 'ICC Men\'s T20 World Cup 2026',
+    teams: JSON.stringify(['IND', 'AUS', 'ENG', 'PAK', 'SA', 'NZ', 'WI', 'SL', 'BAN', 'AFG', 'IRE', 'ZIM', 'NED', 'NAM', 'NEP', 'OMA', 'CAN', 'ITA']),
+    description: 'ICC T20 World Cup 2026',
     isTest: 0
   },
   {
@@ -54,42 +55,6 @@ const TOURNAMENTS = [
   }
 ];
 
-// Sample players for IND vs NZ Test
-const IND_NZ_PLAYERS = [
-  { id: 'ind_rohit', name: 'Rohit Sharma', team: 'IND', position: 'batter' },
-  { id: 'ind_virat', name: 'Virat Kohli', team: 'IND', position: 'batter' },
-  { id: 'ind_gill', name: 'Shubman Gill', team: 'IND', position: 'batter' },
-  { id: 'ind_sky', name: 'Suryakumar Yadav', team: 'IND', position: 'batter' },
-  { id: 'ind_tilak', name: 'Tilak Varma', team: 'IND', position: 'batter' },
-  { id: 'ind_pant', name: 'Rishabh Pant', team: 'IND', position: 'keeper' },
-  { id: 'ind_samson', name: 'Sanju Samson', team: 'IND', position: 'keeper' },
-  { id: 'ind_hardik', name: 'Hardik Pandya', team: 'IND', position: 'allrounder' },
-  { id: 'ind_jadeja', name: 'Ravindra Jadeja', team: 'IND', position: 'allrounder' },
-  { id: 'ind_axar', name: 'Axar Patel', team: 'IND', position: 'allrounder' },
-  { id: 'ind_bumrah', name: 'Jasprit Bumrah', team: 'IND', position: 'bowler' },
-  { id: 'ind_siraj', name: 'Mohammed Siraj', team: 'IND', position: 'bowler' },
-  { id: 'ind_arshdeep', name: 'Arshdeep Singh', team: 'IND', position: 'bowler' },
-  { id: 'ind_chahal', name: 'Yuzvendra Chahal', team: 'IND', position: 'bowler' },
-  { id: 'ind_kuldeep', name: 'Kuldeep Yadav', team: 'IND', position: 'bowler' },
-  { id: 'ind_shami', name: 'Mohammed Shami', team: 'IND', position: 'bowler' },
-  { id: 'nz_conway', name: 'Devon Conway', team: 'NZ', position: 'batter' },
-  { id: 'nz_williamson', name: 'Kane Williamson', team: 'NZ', position: 'batter' },
-  { id: 'nz_allen', name: 'Finn Allen', team: 'NZ', position: 'batter' },
-  { id: 'nz_chapman', name: 'Mark Chapman', team: 'NZ', position: 'batter' },
-  { id: 'nz_nicholls', name: 'Henry Nicholls', team: 'NZ', position: 'batter' },
-  { id: 'nz_latham', name: 'Tom Latham', team: 'NZ', position: 'keeper' },
-  { id: 'nz_blundell', name: 'Tom Blundell', team: 'NZ', position: 'keeper' },
-  { id: 'nz_phillips', name: 'Glenn Phillips', team: 'NZ', position: 'allrounder' },
-  { id: 'nz_neesham', name: 'Jimmy Neesham', team: 'NZ', position: 'allrounder' },
-  { id: 'nz_mitchell', name: 'Daryl Mitchell', team: 'NZ', position: 'allrounder' },
-  { id: 'nz_santner', name: 'Mitchell Santner', team: 'NZ', position: 'allrounder' },
-  { id: 'nz_boult', name: 'Trent Boult', team: 'NZ', position: 'bowler' },
-  { id: 'nz_southee', name: 'Tim Southee', team: 'NZ', position: 'bowler' },
-  { id: 'nz_ferguson', name: 'Lockie Ferguson', team: 'NZ', position: 'bowler' },
-  { id: 'nz_henry', name: 'Matt Henry', team: 'NZ', position: 'bowler' },
-  { id: 'nz_sodhi', name: 'Ish Sodhi', team: 'NZ', position: 'bowler' },
-];
-
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
@@ -99,9 +64,6 @@ export default async function handler(req, res) {
     return res.status(200).end();
   }
 
-  const { action } = req.query;
-
-  // Check database config
   if (!process.env.TURSO_DATABASE_URL || !process.env.TURSO_AUTH_TOKEN) {
     return res.status(500).json({ 
       error: 'Database not configured',
@@ -111,6 +73,7 @@ export default async function handler(req, res) {
   }
 
   const db = getDb();
+  const { action } = req.query;
 
   try {
     // ============================================
@@ -120,7 +83,7 @@ export default async function handler(req, res) {
       const checks = { database: null, tables: null };
 
       try {
-        const testResult = await db.execute('SELECT 1 as test');
+        await db.execute('SELECT 1 as test');
         checks.database = { connected: true };
 
         const tables = ['users', 'tournaments', 'leagues', 'fantasy_teams', 'players', 'roster', 'draft_picks'];
@@ -148,7 +111,6 @@ export default async function handler(req, res) {
     // ============================================
     if (action === 'seed') {
       if (req.method === 'GET') {
-        // Get current status
         const tournamentsResult = await db.execute('SELECT COUNT(*) as count FROM tournaments');
         const playersResult = await db.execute('SELECT COUNT(*) as count FROM players');
         const usersResult = await db.execute('SELECT COUNT(*) as count FROM users');
@@ -163,13 +125,37 @@ export default async function handler(req, res) {
             users: usersResult.rows[0].count,
             fantasyTeams: teamsResult.rows[0].count,
             leagues: leaguesResult.rows[0].count
+          },
+          available: {
+            tournaments: TOURNAMENTS.length,
+            players: {
+              test_ind_nz: seedData.test_ind_nz?.length || 0,
+              t20_wc_2026: seedData.t20_wc_2026?.length || 0,
+              ipl_2026: seedData.ipl_2026?.length || 0,
+              total: (seedData.test_ind_nz?.length || 0) + (seedData.t20_wc_2026?.length || 0) + (seedData.ipl_2026?.length || 0)
+            }
           }
         });
       }
 
       if (req.method === 'POST') {
-        const { seedType = 'all' } = req.body;
-        const results = { tournaments: 0, players: 0, leagues: 0 };
+        const { seedType = 'all', clearFirst = false } = req.body;
+        const results = { tournaments: 0, players: 0, leagues: 0, errors: [] };
+
+        // Optionally clear existing data
+        if (clearFirst) {
+          try {
+            await db.execute('DELETE FROM roster');
+            await db.execute('DELETE FROM draft_picks');
+            await db.execute('DELETE FROM fantasy_teams');
+            await db.execute('DELETE FROM players');
+            await db.execute('DELETE FROM leagues');
+            await db.execute('DELETE FROM tournaments');
+            console.log('Cleared existing data');
+          } catch (err) {
+            results.errors.push(`Clear failed: ${err.message}`);
+          }
+        }
 
         // Seed tournaments
         if (seedType === 'all' || seedType === 'tournaments') {
@@ -182,11 +168,11 @@ export default async function handler(req, res) {
               });
               results.tournaments++;
             } catch (err) {
-              console.error(`Failed to insert tournament ${t.id}:`, err.message);
+              results.errors.push(`Tournament ${t.id}: ${err.message}`);
             }
           }
 
-          // Create default leagues
+          // Create default leagues for each tournament
           for (const t of TOURNAMENTS) {
             const leagueId = `league_${t.id}`;
             try {
@@ -197,23 +183,31 @@ export default async function handler(req, res) {
               });
               results.leagues++;
             } catch (err) {
-              console.error(`Failed to create league for ${t.id}:`, err.message);
+              results.errors.push(`League ${leagueId}: ${err.message}`);
             }
           }
         }
 
         // Seed players
         if (seedType === 'all' || seedType === 'players') {
-          for (const p of IND_NZ_PLAYERS) {
-            try {
-              await db.execute({
-                sql: `INSERT OR REPLACE INTO players (id, name, team, position, tournament_id, price, avg_points, total_points, matches_played, is_active, is_injured)
-                      VALUES (?, ?, ?, ?, 'ind_nz_test', 0, 0, 0, 0, 1, 0)`,
-                args: [p.id, p.name, p.team, p.position]
-              });
-              results.players++;
-            } catch (err) {
-              console.error(`Failed to insert player ${p.name}:`, err.message);
+          const tournamentPlayerMap = {
+            'test_ind_nz': seedData.test_ind_nz || [],
+            't20_wc_2026': seedData.t20_wc_2026 || [],
+            'ipl_2026': seedData.ipl_2026 || []
+          };
+
+          for (const [tournamentId, players] of Object.entries(tournamentPlayerMap)) {
+            for (const p of players) {
+              try {
+                await db.execute({
+                  sql: `INSERT OR REPLACE INTO players (id, name, team, position, tournament_id, price, avg_points, total_points, matches_played, is_active, is_injured)
+                        VALUES (?, ?, ?, ?, ?, 0, 0, 0, 0, 1, 0)`,
+                  args: [p.id, p.name, p.team, p.position, tournamentId]
+                });
+                results.players++;
+              } catch (err) {
+                results.errors.push(`Player ${p.name}: ${err.message}`);
+              }
             }
           }
         }
@@ -226,10 +220,15 @@ export default async function handler(req, res) {
             args: []
           });
         } catch (err) {
-          console.error('Failed to create admin:', err.message);
+          results.errors.push(`Admin user: ${err.message}`);
         }
 
-        return res.status(200).json({ success: true, message: 'Database seeded', results });
+        return res.status(200).json({ 
+          success: true, 
+          message: 'Database seeded successfully', 
+          results,
+          summary: `Seeded ${results.tournaments} tournaments, ${results.leagues} leagues, ${results.players} players`
+        });
       }
     }
 
@@ -255,7 +254,12 @@ export default async function handler(req, res) {
             isAdmin: u.email.toLowerCase() === 'admin@t20fantasy.com',
             createdAt: u.created_at,
             lastLogin: u.updated_at,
-            teams: teamsResult.rows,
+            teams: teamsResult.rows.map(t => ({
+              id: t.id,
+              name: t.name,
+              tournamentId: t.tournament_id,
+              totalPoints: t.total_points
+            })),
             hasTeam: teamsResult.rows.length > 0
           };
         }));
@@ -270,7 +274,6 @@ export default async function handler(req, res) {
           return res.status(400).json({ error: 'User ID required' });
         }
 
-        // Don't delete admin
         const userResult = await db.execute({
           sql: 'SELECT email FROM users WHERE id = ?',
           args: [userId]
@@ -280,7 +283,7 @@ export default async function handler(req, res) {
           return res.status(403).json({ error: 'Cannot delete admin' });
         }
 
-        // Delete user's teams first
+        // Delete user's teams first (cascade)
         const teams = await db.execute({
           sql: 'SELECT id FROM fantasy_teams WHERE user_id = ?',
           args: [userId]
