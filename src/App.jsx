@@ -778,86 +778,43 @@ const generateSnakeDraftOrder = (teams, totalRounds) => {
 
 // Tournament Selection Page
 const TournamentSelectPage = ({ onSelectTournament, user, onLogout }) => {
-  // Debug: Log localStorage state when page loads
-  useEffect(() => {
-    console.log('📋 TournamentSelectPage loaded');
-    console.log('   User:', user?.email, 'ID:', user?.id);
-    const allTeamsRaw = localStorage.getItem('t20fantasy_all_teams');
-    console.log('   allTeams raw:', allTeamsRaw);
-    if (allTeamsRaw) {
-      try {
-        const teams = JSON.parse(allTeamsRaw);
-        console.log('   allTeams parsed:', teams.map(t => ({ name: t.name, owner: t.owner, tournamentId: t.tournamentId, userId: t.userId, userEmail: t.userEmail })));
-      } catch (e) {
-        console.log('   allTeams parse error:', e);
-      }
-    }
-    // List all t20fantasy localStorage keys
-    const keys = Object.keys(localStorage).filter(k => k.startsWith('t20fantasy'));
-    console.log('   All t20fantasy keys:', keys);
-  }, [user]);
+  const [userTeams, setUserTeams] = useState({});
+  const [loading, setLoading] = useState(true);
 
-  // Check which tournaments user already has teams for
+  // Fetch user's teams from database on load
+  useEffect(() => {
+    const fetchUserTeams = async () => {
+      if (!user?.id) {
+        setLoading(false);
+        return;
+      }
+      
+      console.log('📋 TournamentSelectPage: Fetching teams for user:', user.email);
+      
+      try {
+        const response = await teamsAPI.getAll({ userId: user.id });
+        if (response.teams) {
+          // Create a map of tournamentId -> team
+          const teamsMap = {};
+          response.teams.forEach(team => {
+            teamsMap[team.tournamentId] = team;
+          });
+          setUserTeams(teamsMap);
+          console.log('✅ Found teams:', Object.keys(teamsMap));
+        }
+      } catch (err) {
+        console.error('Failed to fetch user teams:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    fetchUserTeams();
+  }, [user?.id]);
+
+  // Check if user has a team for this tournament
   const getUserTeamStatus = (tournamentId) => {
-    if (!user) {
-      console.log(`🔍 getUserTeamStatus(${tournamentId}): No user`);
-      return false;
-    }
-    
-    console.log(`🔍 Checking ${tournamentId} for ${user.email} (${user.id})`);
-    
-    // Check all possible storage locations
-    // 1. User-specific key by ID
-    const userSpecificKey = `t20fantasy_team_${tournamentId}_${user?.id}`;
-    const userSpecificTeam = localStorage.getItem(userSpecificKey);
-    if (userSpecificTeam) {
-      console.log(`   ✅ Found via ID key`);
-      return true;
-    }
-    
-    // 2. User-specific key by email (more reliable)
-    const emailKey = `t20fantasy_team_${tournamentId}_${user?.email?.toLowerCase()}`;
-    const emailTeam = localStorage.getItem(emailKey);
-    if (emailTeam) {
-      console.log(`   ✅ Found via email key`);
-      return true;
-    }
-    
-    // 3. Old format (single team per tournament)
-    const oldFormatTeam = localStorage.getItem(`t20fantasy_team_${tournamentId}`);
-    if (oldFormatTeam) {
-      const parsed = JSON.parse(oldFormatTeam);
-      if (!parsed.userId || parsed.userId === user?.id || 
-          parsed.owner?.toLowerCase() === user?.name?.toLowerCase() ||
-          parsed.userEmail?.toLowerCase() === user?.email?.toLowerCase()) {
-        console.log(`   ✅ Found via old format key`);
-        return true;
-      }
-    }
-    
-    // 4. Check allTeams array
-    const savedAllTeams = localStorage.getItem('t20fantasy_all_teams');
-    if (savedAllTeams) {
-      const teams = JSON.parse(savedAllTeams);
-      const matchingTeam = teams.find(t => 
-        t.tournamentId === tournamentId && 
-        (t.userId === user?.id || 
-         t.userEmail?.toLowerCase() === user?.email?.toLowerCase() ||
-         t.owner?.toLowerCase() === user?.name?.toLowerCase())
-      );
-      if (matchingTeam) {
-        console.log(`   ✅ Found in allTeams: ${matchingTeam.name}`);
-        return true;
-      }
-      // Debug: show all teams for this tournament
-      const tournamentTeams = teams.filter(t => t.tournamentId === tournamentId);
-      if (tournamentTeams.length > 0) {
-        console.log(`   Teams in ${tournamentId}:`, tournamentTeams.map(t => ({ name: t.name, owner: t.owner, userId: t.userId, userEmail: t.userEmail })));
-      }
-    }
-    
-    console.log(`   ❌ No team found`);
-    return false;
+    return !!userTeams[tournamentId];
   };
 
   return (
@@ -875,35 +832,39 @@ const TournamentSelectPage = ({ onSelectTournament, user, onLogout }) => {
           )}
         </div>
         
-        <div className="tournament-list">
-          {Object.values(TOURNAMENTS).map(tournament => {
-            const hasTeam = getUserTeamStatus(tournament.id);
-            return (
-              <div 
-                key={tournament.id} 
-                className={`tournament-card ${tournament.isTest ? 'test-tournament' : ''} ${hasTeam ? 'has-team' : ''}`}
-                onClick={() => onSelectTournament(tournament)}
-              >
-                <div className="tournament-badge">
-                  {tournament.isTest ? '🧪 TEST' : tournament.status === 'upcoming' ? '📅 UPCOMING' : '🔴 LIVE'}
+        {loading ? (
+          <div className="loading-spinner">Loading tournaments...</div>
+        ) : (
+          <div className="tournament-list">
+            {Object.values(TOURNAMENTS).map(tournament => {
+              const hasTeam = getUserTeamStatus(tournament.id);
+              return (
+                <div 
+                  key={tournament.id} 
+                  className={`tournament-card ${tournament.isTest ? 'test-tournament' : ''} ${hasTeam ? 'has-team' : ''}`}
+                  onClick={() => onSelectTournament(tournament)}
+                >
+                  <div className="tournament-badge">
+                    {tournament.isTest ? '🧪 TEST' : tournament.status === 'upcoming' ? '📅 UPCOMING' : '🔴 LIVE'}
+                  </div>
+                  {hasTeam && <div className="team-exists-badge">✓ Team Created</div>}
+                  <h3>{tournament.name}</h3>
+                  <p className="tournament-desc">{tournament.description}</p>
+                  <div className="tournament-dates">
+                    {new Date(tournament.startDate).toLocaleDateString()} - {new Date(tournament.endDate).toLocaleDateString()}
+                  </div>
+                  <div className="tournament-teams">
+                    {tournament.teams.slice(0, 6).join(' • ')}
+                    {tournament.teams.length > 6 && ` +${tournament.teams.length - 6} more`}
+                  </div>
+                  <button className="btn-primary btn-small">
+                    {hasTeam ? 'Continue' : tournament.isTest ? 'Start Test Mode' : 'Enter & Register'}
+                  </button>
                 </div>
-                {hasTeam && <div className="team-exists-badge">✓ Team Created</div>}
-                <h3>{tournament.name}</h3>
-                <p className="tournament-desc">{tournament.description}</p>
-                <div className="tournament-dates">
-                  {new Date(tournament.startDate).toLocaleDateString()} - {new Date(tournament.endDate).toLocaleDateString()}
-                </div>
-                <div className="tournament-teams">
-                  {tournament.teams.slice(0, 6).join(' • ')}
-                  {tournament.teams.length > 6 && ` +${tournament.teams.length - 6} more`}
-                </div>
-                <button className="btn-primary btn-small">
-                  {hasTeam ? 'Continue' : tournament.isTest ? 'Start Test Mode' : 'Enter & Register'}
-                </button>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1721,26 +1682,45 @@ const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament
     }
   };
   
-  // Draft status state - initialize from localStorage
+  // Draft status state
   const [draftStatus, setDraftStatusState] = useState('pending');
   
-  // Load draft status from localStorage when tournament changes
+  // Load draft status from database when tournament changes
   useEffect(() => {
-    const savedStatus = localStorage.getItem(`t20fantasy_draft_status_${tournament.id}`);
-    console.log(`📋 Admin: Loading draft status for ${tournament.id}: ${savedStatus}`);
-    if (savedStatus) {
-      setDraftStatusState(savedStatus);
-    } else {
-      setDraftStatusState(tournament.draftStatus || 'pending');
-    }
+    const loadDraftStatus = async () => {
+      try {
+        const leaguesResponse = await leaguesAPI.getAll(tournament.id);
+        if (leaguesResponse.leagues && leaguesResponse.leagues.length > 0) {
+          const league = leaguesResponse.leagues[0];
+          console.log(`📋 Admin: Loaded draft status from DB: ${league.draftStatus}`);
+          setDraftStatusState(league.draftStatus || 'pending');
+        }
+      } catch (err) {
+        console.log('Failed to load draft status:', err);
+        setDraftStatusState('pending');
+      }
+    };
+    loadDraftStatus();
   }, [tournament.id]);
   
-  // Wrapper to save draft status to localStorage
-  const setDraftStatus = (status) => {
-    console.log(`💾 Admin: Saving draft status for ${tournament.id}: ${status}`);
+  // Save draft status to database
+  const setDraftStatus = async (status) => {
+    console.log(`💾 Admin: Saving draft status: ${status}`);
     setDraftStatusState(status);
-    localStorage.setItem(`t20fantasy_draft_status_${tournament.id}`, status);
-    // Also update isDraftOpen in parent
+    
+    // Persist to database
+    try {
+      const leaguesResponse = await leaguesAPI.getAll(tournament.id);
+      if (leaguesResponse.leagues && leaguesResponse.leagues.length > 0) {
+        const league = leaguesResponse.leagues[0];
+        await leaguesAPI.updateDraftStatus(league.id, status);
+        console.log(`✅ Draft status saved to database: ${status}`);
+      }
+    } catch (err) {
+      console.error('Failed to save draft status to database:', err);
+    }
+    
+    // Update isDraftOpen in parent
     if (status === 'open' || status === 'in_progress') {
       onStartDraft && onStartDraft();
     }
@@ -2074,28 +2054,23 @@ const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament
               </div>
             </div>
             
-            {/* Important Notice */}
+            {/* Database Status Notice */}
             <div className="admin-notice" style={{ 
-              background: 'rgba(255, 193, 7, 0.1)', 
-              border: '1px solid rgba(255, 193, 7, 0.3)', 
+              background: 'rgba(76, 175, 80, 0.1)', 
+              border: '1px solid rgba(76, 175, 80, 0.3)', 
               borderRadius: '8px', 
               padding: '16px', 
               marginTop: '20px' 
             }}>
-              <h4 style={{ color: '#ffc107', marginTop: 0 }}>⚠️ Testing Note: Browser-Specific Data</h4>
+              <h4 style={{ color: '#4caf50', marginTop: 0 }}>✅ Database Connected</h4>
               <p style={{ margin: '8px 0', color: '#ccc', fontSize: '14px' }}>
-                This app currently uses <strong>localStorage</strong> for data storage, which is <strong>browser-specific</strong>. 
-                This means:
+                This app is connected to <strong>Turso Database</strong> for persistent storage.
               </p>
               <ul style={{ margin: '8px 0', paddingLeft: '20px', color: '#aaa', fontSize: '13px' }}>
-                <li>Users in different browsers/devices <strong>cannot see each other's data</strong></li>
-                <li>For multi-user testing, use <strong>multiple tabs in the same browser</strong></li>
-                <li>Draft status changes will sync between tabs (with 5-second delay)</li>
-                <li>For production multi-user support, <strong>database integration is required</strong> (Turso)</li>
+                <li>Teams, draft status, and user data are <strong>saved to database</strong></li>
+                <li>Data persists across <strong>all devices and browsers</strong></li>
+                <li>Changes sync automatically</li>
               </ul>
-              <p style={{ margin: '8px 0 0 0', color: '#888', fontSize: '12px' }}>
-                💡 Tip: Open multiple incognito windows in the same browser to test as different users.
-              </p>
             </div>
           </div>
         )}
@@ -2272,14 +2247,16 @@ const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament
               {allTeams && allTeams.length > 0 && (
                 <button 
                   className="btn-small btn-danger"
-                  onClick={() => {
+                  onClick={async () => {
                     if (confirm(`Delete ALL ${allTeams.length} teams? This cannot be undone.`)) {
-                      // Clear all teams
-                      localStorage.setItem('t20fantasy_all_teams', '[]');
-                      // Also clear individual team keys
-                      Object.keys(localStorage)
-                        .filter(k => k.startsWith('t20fantasy_team_'))
-                        .forEach(k => localStorage.removeItem(k));
+                      // Delete all teams from database
+                      for (const team of allTeams) {
+                        try {
+                          await teamsAPI.delete(team.id);
+                        } catch (err) {
+                          console.error('Failed to delete team:', team.id, err);
+                        }
+                      }
                       window.location.reload();
                     }
                   }}
@@ -2663,7 +2640,7 @@ const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament
 };
 
 // Main Dashboard Component  
-const Dashboard = ({ user, team, tournament, players: playersProp, onLogout, onUpdateTeam, onBackToTournaments, onSwitchTournament, isDraftComplete, isDraftOpen, onGoToDraft }) => {
+const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = [], onLogout, onUpdateTeam, onBackToTournaments, onSwitchTournament, isDraftComplete, isDraftOpen, onGoToDraft }) => {
   const [activeTab, setActiveTab] = useState('roster');
   const [showPlayerModal, setShowPlayerModal] = useState(false);
   const [selectedPosition, setSelectedPosition] = useState(null);
@@ -2692,22 +2669,27 @@ const Dashboard = ({ user, team, tournament, players: playersProp, onLogout, onU
     ? playersProp 
     : getPlayersForTournament(tournament.id);
   
-  // Auto-refresh draft status every 5 seconds (for same-browser multi-tab testing)
+  // Auto-refresh draft status every 10 seconds (poll database)
   useEffect(() => {
-    if (isDraftComplete) return; // No need to check if draft is already complete
+    if (isDraftComplete) return;
     
-    const checkDraftStatus = () => {
-      const tournamentKey = tournament?.id || 'default';
-      const savedDraftPhase = localStorage.getItem(`t20fantasy_draft_status_${tournamentKey}`);
-      const draftIsOpen = savedDraftPhase === 'open' || savedDraftPhase === 'in_progress';
-      
-      if (draftIsOpen && !localDraftOpen) {
-        // Draft just opened! Update state
-        setLocalDraftOpen(true);
+    const checkDraftStatus = async () => {
+      try {
+        const leaguesResponse = await leaguesAPI.getAll(tournament.id);
+        if (leaguesResponse.leagues && leaguesResponse.leagues.length > 0) {
+          const league = leaguesResponse.leagues[0];
+          const draftIsOpen = league.draftStatus === 'open' || league.draftStatus === 'in_progress';
+          
+          if (draftIsOpen && !localDraftOpen) {
+            setLocalDraftOpen(true);
+          }
+        }
+      } catch (err) {
+        // Silently fail - not critical
       }
     };
     
-    const interval = setInterval(checkDraftStatus, 5000); // Check every 5 seconds
+    const interval = setInterval(checkDraftStatus, 10000); // Check every 10 seconds
     return () => clearInterval(interval);
   }, [isDraftComplete, localDraftOpen, tournament?.id]);
   
@@ -2793,8 +2775,6 @@ const Dashboard = ({ user, team, tournament, players: playersProp, onLogout, onU
   
   // Get all rostered players across all teams in this tournament
   const getAllRosteredPlayers = () => {
-    const allTeamsKey = 't20fantasy_all_teams';
-    const allTeams = JSON.parse(localStorage.getItem(allTeamsKey) || '[]');
     const tournamentTeams = allTeams.filter(t => t.tournamentId === tournament.id);
     const rosteredIds = new Set();
     tournamentTeams.forEach(t => {
@@ -3508,14 +3488,20 @@ const Dashboard = ({ user, team, tournament, players: playersProp, onLogout, onU
                     <span className="banner-text">Waiting for admin to open the draft. Browse players in the meantime.</span>
                     <button 
                       className="btn-secondary btn-small" 
-                      onClick={() => {
-                        // Re-check draft status from localStorage
-                        const tournamentKey = tournament?.id || 'default';
-                        const savedDraftPhase = localStorage.getItem(`t20fantasy_draft_status_${tournamentKey}`);
-                        if (savedDraftPhase === 'open' || savedDraftPhase === 'in_progress') {
-                          window.location.reload();
-                        } else {
-                          alert('Draft is still pending. Admin has not opened the draft yet.\n\n⚠️ Note: If admin is in a different browser/device, data won\'t sync automatically. This app uses localStorage which is browser-specific.');
+                      onClick={async () => {
+                        // Re-check draft status from API
+                        try {
+                          const leaguesResponse = await leaguesAPI.getAll(tournament?.id);
+                          if (leaguesResponse.leagues && leaguesResponse.leagues.length > 0) {
+                            const league = leaguesResponse.leagues[0];
+                            if (league.draftStatus === 'open' || league.draftStatus === 'in_progress') {
+                              window.location.reload();
+                            } else {
+                              alert('Draft is still pending. Admin has not opened the draft yet.');
+                            }
+                          }
+                        } catch (err) {
+                          alert('Could not check draft status. Please try again.');
                         }
                       }}
                       title="Check if admin has opened the draft"
@@ -4234,208 +4220,67 @@ export default function App() {
     return false;
   };
 
-  // Load all users from localStorage and API
+  // Load all users from API
   const loadAllUsers = async () => {
-    // Load from localStorage first (for instant display)
-    const savedUsers = localStorage.getItem('t20fantasy_all_users');
-    if (savedUsers) {
-      setAllUsers(JSON.parse(savedUsers));
-    }
-    
-    // Then try to fetch from API (for synced data)
     try {
       const response = await usersAPI.getAll();
-      if (response.users && response.users.length > 0) {
+      if (response.users) {
         console.log('✅ Loaded users from API:', response.users.length);
         setAllUsers(response.users);
-        // Sync to localStorage for offline use
-        localStorage.setItem('t20fantasy_all_users', JSON.stringify(response.users));
       }
     } catch (err) {
-      console.log('⚠️ Could not load users from API, using localStorage:', err.message);
+      console.log('⚠️ Could not load users from API:', err.message);
+      setAllUsers([]);
     }
   };
 
-  // Load all teams from localStorage and API
+  // Load all teams from API
   const loadAllTeams = async (tournamentId = null) => {
-    // Load from localStorage first
-    const savedAllTeams = localStorage.getItem('t20fantasy_all_teams');
-    if (savedAllTeams) {
-      setAllTeams(JSON.parse(savedAllTeams));
-    }
-    
-    // Then try to fetch from API
     try {
       const filters = tournamentId ? { tournamentId } : {};
       const response = await teamsAPI.getAll(filters);
-      if (response.teams && response.teams.length > 0) {
+      if (response.teams) {
         console.log('✅ Loaded teams from API:', response.teams.length);
         setAllTeams(response.teams);
-        // Sync to localStorage for offline use
-        localStorage.setItem('t20fantasy_all_teams', JSON.stringify(response.teams));
       }
     } catch (err) {
-      console.log('⚠️ Could not load teams from API, using localStorage:', err.message);
+      console.log('⚠️ Could not load teams from API:', err.message);
+      setAllTeams([]);
     }
   };
 
-  // Save user to the all users list
-  const saveUserToList = (userData) => {
-    const savedUsers = localStorage.getItem('t20fantasy_all_users');
-    let users = savedUsers ? JSON.parse(savedUsers) : [];
-    
-    // Check if user already exists
-    const existingIndex = users.findIndex(u => u.email.toLowerCase() === userData.email.toLowerCase());
-    if (existingIndex >= 0) {
-      users[existingIndex] = { ...users[existingIndex], ...userData, lastLogin: new Date().toISOString() };
-    } else {
-      users.push({ ...userData, createdAt: new Date().toISOString(), lastLogin: new Date().toISOString() });
-    }
-    
-    localStorage.setItem('t20fantasy_all_users', JSON.stringify(users));
-    setAllUsers(users);
-  };
-
-  // Delete user from the list
+  // Delete user (calls API)
   const handleDeleteUser = async (userId) => {
-    // Delete from API first
     try {
       await usersAPI.delete(userId);
       console.log('✅ User deleted from API');
+      // Refresh users list from API
+      loadAllUsers();
     } catch (err) {
-      console.log('⚠️ Could not delete user from API:', err.message);
+      console.error('Failed to delete user:', err);
     }
-    
-    // Also delete from localStorage
-    const savedUsers = localStorage.getItem('t20fantasy_all_users');
-    let users = savedUsers ? JSON.parse(savedUsers) : [];
-    users = users.filter(u => u.id !== userId);
-    localStorage.setItem('t20fantasy_all_users', JSON.stringify(users));
-    setAllUsers(users);
-    
-    // Also delete their team if they have one
-    const userTeams = allTeams.filter(t => t.userId === userId);
-    userTeams.forEach(t => handleDeleteTeam(t.id));
   };
 
   useEffect(() => {
-    // Check API health first
+    // Check API health
     checkApiHealth();
     
+    // Load users and teams from API (for admin panel)
     loadAllUsers();
-    
-    // Load all teams from localStorage first, then API
-    const savedAllTeams = localStorage.getItem('t20fantasy_all_teams');
-    if (savedAllTeams) {
-      setAllTeams(JSON.parse(savedAllTeams));
-    }
-    
-    // Also load from API
     loadAllTeams();
     
+    // Check if user is logged in
     const savedUser = localStorage.getItem('t20fantasy_user');
-    const savedTournament = localStorage.getItem('t20fantasy_tournament');
     
     if (savedUser) {
       const parsedUser = JSON.parse(savedUser);
       setUser(parsedUser);
       
-      // Check if tournament is saved
-      if (savedTournament) {
-        const tournamentToUse = JSON.parse(savedTournament);
-        setSelectedTournament(tournamentToUse);
-        
-        // Load players for this tournament
-        loadPlayers(tournamentToUse.id);
-        
-        // Get tournament-specific data
-        const tournamentKey = tournamentToUse?.id || 'default';
-        const savedDraftStatus = localStorage.getItem(`t20fantasy_draft_complete_${tournamentKey}`);
-        const savedDraftOpen = localStorage.getItem(`t20fantasy_draft_open_${tournamentKey}`);
-        const savedDraftPhase = localStorage.getItem(`t20fantasy_draft_status_${tournamentKey}`);
-        
-        // Try to find user's team - check multiple sources
-        let userTeam = null;
-        
-        // 1. Check user-specific storage key first (by ID)
-        const userSpecificTeam = localStorage.getItem(`t20fantasy_team_${tournamentKey}_${parsedUser?.id}`);
-        if (userSpecificTeam) {
-          userTeam = JSON.parse(userSpecificTeam);
-        }
-        
-        // 1b. Check email-specific key (more reliable)
-        if (!userTeam) {
-          const emailKey = `t20fantasy_team_${tournamentKey}_${parsedUser?.email?.toLowerCase()}`;
-          const emailTeam = localStorage.getItem(emailKey);
-          if (emailTeam) {
-            userTeam = JSON.parse(emailTeam);
-          }
-        }
-        
-        // 2. Check old format (single team per tournament)
-        if (!userTeam) {
-          const oldFormatTeam = localStorage.getItem(`t20fantasy_team_${tournamentKey}`);
-          if (oldFormatTeam) {
-            const parsedTeam = JSON.parse(oldFormatTeam);
-            // Use if it's this user's team (check owner name or email)
-            if (!parsedTeam.userId || parsedTeam.userId === parsedUser?.id || 
-                parsedTeam.userEmail?.toLowerCase() === parsedUser?.email?.toLowerCase() ||
-                parsedTeam.owner?.toLowerCase() === parsedUser?.name?.toLowerCase()) {
-              userTeam = parsedTeam;
-              // Migrate: add userId if missing
-              if (!userTeam.userId) {
-                userTeam.userId = parsedUser?.id;
-                userTeam.userEmail = parsedUser?.email;
-                localStorage.setItem(`t20fantasy_team_${tournamentKey}_${parsedUser?.id}`, JSON.stringify(userTeam));
-              }
-            }
-          }
-        }
-        
-        // 3. Check allTeams global list
-        if (!userTeam) {
-          const savedAllTeams = localStorage.getItem('t20fantasy_all_teams');
-          const teams = savedAllTeams ? JSON.parse(savedAllTeams) : [];
-          userTeam = teams.find(t => 
-            t.tournamentId === tournamentToUse.id && 
-            (t.userId === parsedUser.id || 
-             t.userEmail?.toLowerCase() === parsedUser.email?.toLowerCase() ||
-             t.owner?.toLowerCase() === parsedUser?.name?.toLowerCase())
-          );
-          
-          // If found but missing userId, migrate it
-          if (userTeam && !userTeam.userId) {
-            userTeam.userId = parsedUser?.id;
-            userTeam.userEmail = parsedUser?.email;
-            const updatedTeams = teams.map(t => t.id === userTeam.id ? userTeam : t);
-            localStorage.setItem('t20fantasy_all_teams', JSON.stringify(updatedTeams));
-          }
-        }
-        
-        // Check if draft is open (from either old key or new key)
-        if (savedDraftOpen === 'true' || savedDraftPhase === 'open' || savedDraftPhase === 'in_progress') {
-          setIsDraftOpen(true);
-        }
-        
-        // Admin users go to admin panel
-        if (parsedUser.isAdmin) {
-          setCurrentPage('admin');
-        } else if (userTeam && savedDraftStatus === 'true') {
-          setTeam(userTeam);
-          setIsDraftComplete(true);
-          setCurrentPage('dashboard');
-        } else if (userTeam) {
-          setTeam(userTeam);
-          setCurrentPage('dashboard');
-        } else {
-          // User is logged in, has tournament but no team
-          setCurrentPage('createTeam');
-        }
-      } else {
-        // User is logged in but no tournament selected - go to tournament select
-        setCurrentPage('tournamentSelect');
-      }
+      // Always go to tournament selection on app load
+      // The tournament page will handle loading teams from API
+      setCurrentPage('tournamentSelect');
     }
+    // If not logged in, stays on login page (default)
   }, []);
 
   const handleSelectTournament = async (tournament) => {
@@ -4448,170 +4293,58 @@ export default function App() {
     // Load players for this tournament
     setIsLoading(true);
     await loadPlayers(tournament.id);
-    setIsLoading(false);
     
-    // Load tournament-specific data from localStorage
     const tournamentKey = tournament.id;
-    let savedDraftStatus = localStorage.getItem(`t20fantasy_draft_complete_${tournamentKey}`);
-    let savedDraftOpen = localStorage.getItem(`t20fantasy_draft_open_${tournamentKey}`);
-    let savedDraftPhase = localStorage.getItem(`t20fantasy_draft_status_${tournamentKey}`);
+    let draftStatus = 'pending';
+    let draftComplete = false;
     
-    // Try to get league info from API (for draft status)
+    // Get league info from API (for draft status)
     try {
       const leaguesResponse = await leaguesAPI.getAll(tournamentKey);
       if (leaguesResponse.leagues && leaguesResponse.leagues.length > 0) {
         const league = leaguesResponse.leagues[0];
-        console.log('✅ Got league from API:', league.draftStatus);
-        savedDraftPhase = league.draftStatus;
-        // Sync to localStorage
-        localStorage.setItem(`t20fantasy_draft_status_${tournamentKey}`, league.draftStatus);
-        if (league.draftStatus === 'completed') {
-          localStorage.setItem(`t20fantasy_draft_complete_${tournamentKey}`, 'true');
-          savedDraftStatus = 'true';
-        }
+        draftStatus = league.draftStatus || 'pending';
+        draftComplete = draftStatus === 'completed';
+        console.log('✅ Got league from API:', draftStatus);
       }
     } catch (err) {
       console.log('⚠️ Could not get league from API:', err.message);
     }
     
-    console.log(`   Draft Phase: ${savedDraftPhase}, Draft Open: ${savedDraftOpen}, Draft Complete: ${savedDraftStatus}`);
-    
-    // Check if draft is open (from either old key or new key)
-    if (savedDraftOpen === 'true' || savedDraftPhase === 'open' || savedDraftPhase === 'in_progress') {
-      setIsDraftOpen(true);
-    } else {
-      setIsDraftOpen(false);
-    }
+    // Set draft state
+    setIsDraftOpen(draftStatus === 'open' || draftStatus === 'in_progress');
+    setIsDraftComplete(draftComplete);
     
     // Admin goes to admin panel
     if (user?.isAdmin) {
       console.log(`   → Admin user, going to admin panel`);
+      setIsLoading(false);
       setCurrentPage('admin');
       return;
     }
     
-    // Try to find user's team - check API first, then localStorage
+    // Get user's team from API
     let userTeam = null;
-    
-    // 0. Check API for user's team
     try {
       const teamsResponse = await teamsAPI.getUserTeam(user?.id, tournamentKey);
       if (teamsResponse.teams && teamsResponse.teams.length > 0) {
         userTeam = teamsResponse.teams[0];
         console.log('✅ Found team from API:', userTeam.name);
-        // Sync to localStorage
-        const userSpecificKey = `t20fantasy_team_${tournamentKey}_${user?.id}`;
-        localStorage.setItem(userSpecificKey, JSON.stringify(userTeam));
       }
     } catch (err) {
-      console.log('⚠️ Could not get team from API, checking localStorage:', err.message);
+      console.log('⚠️ Could not get team from API:', err.message);
     }
     
-    // 1. Check user-specific storage key first (newest format - by ID)
-    if (!userTeam) {
-      const userSpecificKey = `t20fantasy_team_${tournamentKey}_${user?.id}`;
-      const userSpecificTeam = localStorage.getItem(userSpecificKey);
-      console.log(`   Checking key: ${userSpecificKey} → ${userSpecificTeam ? 'FOUND' : 'not found'}`);
-      if (userSpecificTeam) {
-        userTeam = JSON.parse(userSpecificTeam);
-        console.log(`   ✅ Found team in user-specific key: ${userTeam.name}`);
-      }
-    }
+    setIsLoading(false);
     
-    // 1b. Check email-specific key (more reliable than ID)
-    if (!userTeam) {
-      const emailKey = `t20fantasy_team_${tournamentKey}_${user?.email?.toLowerCase()}`;
-      const emailTeam = localStorage.getItem(emailKey);
-      console.log(`   Checking email key: ${emailKey} → ${emailTeam ? 'FOUND' : 'not found'}`);
-      if (emailTeam) {
-        userTeam = JSON.parse(emailTeam);
-        console.log(`   ✅ Found team in email-specific key: ${userTeam.name}`);
-      }
-    }
-    
-    // 2. Check old format (single team per tournament)
-    if (!userTeam) {
-      const oldKey = `t20fantasy_team_${tournamentKey}`;
-      const oldFormatTeam = localStorage.getItem(oldKey);
-      console.log(`   Checking old key: ${oldKey} → ${oldFormatTeam ? 'FOUND' : 'not found'}`);
-      if (oldFormatTeam) {
-        const parsedTeam = JSON.parse(oldFormatTeam);
-        console.log(`   Old format team: userId=${parsedTeam.userId}, userEmail=${parsedTeam.userEmail}, owner=${parsedTeam.owner}`);
-        // Only use if it's this user's team (check owner name or email)
-        if (!parsedTeam.userId || parsedTeam.userId === user?.id || 
-            parsedTeam.userEmail?.toLowerCase() === user?.email?.toLowerCase() ||
-            parsedTeam.owner?.toLowerCase() === user?.name?.toLowerCase()) {
-          userTeam = parsedTeam;
-          console.log(`   ✅ Found team in old format: ${userTeam.name}`);
-          // Migrate: add userId if missing
-          if (!userTeam.userId) {
-            userTeam.userId = user?.id;
-            userTeam.userEmail = user?.email;
-            const userSpecificKey = `t20fantasy_team_${tournamentKey}_${user?.id}`;
-            localStorage.setItem(userSpecificKey, JSON.stringify(userTeam));
-            console.log(`   📝 Migrated team to new format`);
-          }
-        }
-      }
-    }
-    
-    // 3. Check allTeams global list
-    if (!userTeam) {
-      const savedAllTeams = localStorage.getItem('t20fantasy_all_teams');
-      const teams = savedAllTeams ? JSON.parse(savedAllTeams) : [];
-      console.log(`   Checking allTeams (${teams.length} teams total)`);
-      
-      // Log all teams for this tournament
-      const tournamentTeams = teams.filter(t => t.tournamentId === tournament.id);
-      console.log(`   Teams for ${tournament.id}:`, tournamentTeams.map(t => ({
-        name: t.name, 
-        owner: t.owner,
-        userId: t.userId, 
-        userEmail: t.userEmail,
-        tournamentId: t.tournamentId
-      })));
-      
-      userTeam = teams.find(t => 
-        t.tournamentId === tournament.id && 
-        (t.userId === user?.id || 
-         t.userEmail?.toLowerCase() === user?.email?.toLowerCase() ||
-         t.owner?.toLowerCase() === user?.name?.toLowerCase())
-      );
-      
-      if (userTeam) {
-        console.log(`   ✅ Found team in allTeams: ${userTeam.name}`);
-        // If found in allTeams but missing userId, migrate it
-        if (!userTeam.userId) {
-          userTeam.userId = user?.id;
-          userTeam.userEmail = user?.email;
-          // Update in allTeams
-          const updatedTeams = teams.map(t => 
-            t.id === userTeam.id ? userTeam : t
-          );
-          localStorage.setItem('t20fantasy_all_teams', JSON.stringify(updatedTeams));
-        }
-        // Also save to user-specific key for faster future lookups
-        localStorage.setItem(userSpecificKey, JSON.stringify(userTeam));
-      }
-    }
-    
-    // Check if user has a team for this tournament
+    // Navigate based on team status
     if (userTeam) {
       console.log(`   ✅ TEAM FOUND: ${userTeam.name}, going to dashboard`);
       setTeam(userTeam);
-      // Save to user-specific key for faster future lookups
-      localStorage.setItem(userSpecificKey, JSON.stringify(userTeam));
-      if (savedDraftStatus === 'true') {
-        setIsDraftComplete(true);
-      } else {
-        setIsDraftComplete(false);
-      }
       setCurrentPage('dashboard');
     } else {
-      // No team for this tournament - check if draft is open before allowing creation
       console.log(`   ❌ NO TEAM FOUND, going to createTeam`);
       setTeam(null);
-      setIsDraftComplete(false);
       setCurrentPage('createTeam');
     }
     console.log(`🏆 === END TOURNAMENT SELECTION ===\n`);
@@ -4626,195 +4359,149 @@ export default function App() {
   };
 
   const handleLogin = (userData) => {
-    console.log(`\n🔐 === LOGIN ===`);
-    console.log(`   Email: ${userData.email}`);
-    console.log(`   User ID: ${userData.id}`);
-    console.log(`   Is Admin: ${userData.isAdmin}`);
+    console.log('🔐 Login:', userData.email);
     
     setUser(userData);
     localStorage.setItem('t20fantasy_user', JSON.stringify(userData));
     
-    // Track user in all users list
-    saveUserToList(userData);
-    
-    // After login, ALWAYS go to tournament select first
-    // Clear the saved tournament so user can choose
+    // Go to tournament selection
     localStorage.removeItem('t20fantasy_tournament');
     setSelectedTournament(null);
     setCurrentPage('tournamentSelect');
-    console.log(`🔐 === END LOGIN ===\n`);
   };
 
   const handleSignup = (userData) => {
+    console.log('📝 Signup:', userData.email);
+    
     setUser(userData);
     localStorage.setItem('t20fantasy_user', JSON.stringify(userData));
     
-    // Track user in all users list
-    saveUserToList(userData);
-    
-    // After signup, ALWAYS go to tournament select first
+    // Go to tournament selection
     localStorage.removeItem('t20fantasy_tournament');
     setSelectedTournament(null);
     setCurrentPage('tournamentSelect');
   };
 
-  const handleTeamCreated = (teamData) => {
+  const handleTeamCreated = async (teamData) => {
     const tournamentKey = selectedTournament?.id || 'default';
     
-    // Ensure userId and email are set
-    const teamWithUser = {
-      ...teamData,
-      userId: user?.id,
-      userEmail: user?.email?.toLowerCase(),
-      tournamentId: tournamentKey, // Ensure this is set correctly
-    };
+    console.log('🏏 Creating team:', teamData.name);
     
-    console.log('🏏 Creating team:', {
-      teamName: teamWithUser.name,
-      owner: teamWithUser.owner,
-      userId: teamWithUser.userId,
-      userEmail: teamWithUser.userEmail,
-      tournamentId: teamWithUser.tournamentId,
-      tournamentKey,
-    });
-    
-    setTeam(teamWithUser);
-    
-    // Save to BOTH user ID key AND email key for reliable lookup
-    const userIdKey = `t20fantasy_team_${tournamentKey}_${user?.id}`;
-    const emailKey = `t20fantasy_team_${tournamentKey}_${user?.email?.toLowerCase()}`;
-    
-    localStorage.setItem(userIdKey, JSON.stringify(teamWithUser));
-    localStorage.setItem(emailKey, JSON.stringify(teamWithUser));
-    console.log(`💾 Saved to: ${userIdKey}`);
-    console.log(`💾 Saved to: ${emailKey}`);
-    
-    // Add to allTeams and persist
-    setAllTeams(prev => {
-      // Remove any existing team for this user in this tournament first
-      const filtered = prev.filter(t => 
-        !(t.tournamentId === tournamentKey && (t.userId === user?.id || t.userEmail?.toLowerCase() === user?.email?.toLowerCase()))
-      );
-      const updated = [...filtered, teamWithUser];
-      localStorage.setItem('t20fantasy_all_teams', JSON.stringify(updated));
-      console.log(`💾 Updated allTeams, now has ${updated.length} teams`);
-      return updated;
-    });
-    
-    // Also update user's hasTeam flag
-    const savedUsers = localStorage.getItem('t20fantasy_all_users');
-    if (savedUsers && user) {
-      const users = JSON.parse(savedUsers).map(u => 
-        u.id === user.id ? { ...u, hasTeam: true } : u
-      );
-      localStorage.setItem('t20fantasy_all_users', JSON.stringify(users));
-      setAllUsers(users);
-    }
-    
-    // Check if draft is open from localStorage
-    const savedDraftStatus = localStorage.getItem(`t20fantasy_draft_status_${tournamentKey}`);
-    const draftIsOpen = savedDraftStatus === 'open' || savedDraftStatus === 'in_progress' || isDraftOpen;
-    
-    if (draftIsOpen) {
-      setIsDraftComplete(false);
-      localStorage.setItem(`t20fantasy_draft_complete_${tournamentKey}`, 'false');
-      setCurrentPage('draft');
-    } else {
-      // Go to dashboard but draft not complete - browse mode
-      setIsDraftComplete(false);
-      localStorage.setItem(`t20fantasy_draft_complete_${tournamentKey}`, 'false');
-      setCurrentPage('dashboard');
+    // Save to database
+    try {
+      const response = await teamsAPI.create({
+        userId: user?.id,
+        tournamentId: tournamentKey,
+        name: teamData.name,
+        ownerName: teamData.owner || teamData.name,
+      });
+      
+      if (response.teamId) {
+        const newTeam = {
+          id: response.teamId,
+          name: teamData.name,
+          owner: teamData.owner || teamData.name,
+          userId: user?.id,
+          tournamentId: tournamentKey,
+          leagueId: response.leagueId,
+          draftPosition: response.draftPosition,
+          roster: [],
+          totalPoints: 0,
+        };
+        
+        console.log('✅ Team saved to database:', response.teamId);
+        setTeam(newTeam);
+        
+        // Navigate based on draft status
+        if (isDraftOpen) {
+          setCurrentPage('draft');
+        } else {
+          setCurrentPage('dashboard');
+        }
+      }
+    } catch (err) {
+      console.error('Failed to create team:', err);
+      alert('Failed to create team. Please try again.');
     }
   };
 
-  const handleDraftComplete = (roster) => {
-    const tournamentKey = selectedTournament?.id || 'default';
+  const handleDraftComplete = async (roster) => {
     const updatedTeam = { ...team, roster };
     setTeam(updatedTeam);
     
-    // Save to user-specific key (primary)
-    localStorage.setItem(`t20fantasy_team_${tournamentKey}_${user?.id}`, JSON.stringify(updatedTeam));
-    // Also save to old format for backward compatibility
-    localStorage.setItem(`t20fantasy_team_${tournamentKey}`, JSON.stringify(updatedTeam));
-    
-    // Update allTeams
-    setAllTeams(prev => {
-      const filtered = prev.filter(t => t.id !== updatedTeam.id);
-      const updated = [...filtered, updatedTeam];
-      localStorage.setItem('t20fantasy_all_teams', JSON.stringify(updated));
-      return updated;
-    });
+    // Save roster to database
+    try {
+      await teamsAPI.update({
+        id: team.id,
+        roster: roster,
+      });
+      console.log('✅ Roster saved to database');
+    } catch (err) {
+      console.error('Failed to save roster:', err);
+    }
     
     setIsDraftComplete(true);
-    localStorage.setItem(`t20fantasy_draft_complete_${tournamentKey}`, 'true');
     setCurrentPage('dashboard');
   };
 
-  const handleUpdateTeam = (teamIdOrTeam, updates = null) => {
-    const tournamentKey = selectedTournament?.id || 'default';
-    
+  const handleUpdateTeam = async (teamIdOrTeam, updates = null) => {
     // Support both: handleUpdateTeam(updatedTeam) and handleUpdateTeam(teamId, updates)
     if (updates !== null) {
       // Called with (teamId, updates) from admin panel
       const teamId = teamIdOrTeam;
+      
+      // Update in database
+      try {
+        await teamsAPI.update({ id: teamId, ...updates });
+        console.log('✅ Team updated in database');
+      } catch (err) {
+        console.error('Failed to update team:', err);
+      }
+      
+      // Update local state
       setAllTeams(prev => prev.map(t => 
         t.id === teamId ? { ...t, ...updates } : t
       ));
       
-      // If it's the current user's team, update local state too
       if (team && team.id === teamId) {
-        const updatedTeam = { ...team, ...updates };
-        setTeam(updatedTeam);
-        localStorage.setItem(`t20fantasy_team_${tournamentKey}_${user?.id}`, JSON.stringify(updatedTeam));
-      }
-      
-      // Update allTeams in localStorage
-      const savedTeams = localStorage.getItem('t20fantasy_all_teams');
-      if (savedTeams) {
-        const teams = JSON.parse(savedTeams).map(t => 
-          t.id === teamId ? { ...t, ...updates } : t
-        );
-        localStorage.setItem('t20fantasy_all_teams', JSON.stringify(teams));
+        setTeam({ ...team, ...updates });
       }
     } else {
       // Called with (updatedTeam) from dashboard
       const updatedTeam = teamIdOrTeam;
-      setTeam(updatedTeam);
-      localStorage.setItem(`t20fantasy_team_${tournamentKey}_${user?.id}`, JSON.stringify(updatedTeam));
       
-      // Also update in allTeams
-      setAllTeams(prev => {
-        const updated = prev.map(t => t.id === updatedTeam.id ? updatedTeam : t);
-        localStorage.setItem('t20fantasy_all_teams', JSON.stringify(updated));
-        return updated;
-      });
+      // Update in database
+      try {
+        await teamsAPI.update({ id: updatedTeam.id, roster: updatedTeam.roster });
+        console.log('✅ Team updated in database');
+      } catch (err) {
+        console.error('Failed to update team:', err);
+      }
+      
+      setTeam(updatedTeam);
+      setAllTeams(prev => prev.map(t => t.id === updatedTeam.id ? updatedTeam : t));
     }
   };
   
-  const handleDeleteTeam = (teamId) => {
-    // Remove from allTeams state
-    setAllTeams(prev => prev.filter(t => t.id !== teamId));
-    
-    // If it's the current user's team, clear it
-    if (team && team.id === teamId) {
-      setTeam(null);
-      const tournamentKey = selectedTournament?.id || 'default';
-      localStorage.removeItem(`t20fantasy_team_${tournamentKey}`);
-      localStorage.removeItem(`t20fantasy_draft_complete_${tournamentKey}`);
+  const handleDeleteTeam = async (teamId) => {
+    // Delete from database
+    try {
+      await teamsAPI.delete(teamId);
+      console.log('✅ Team deleted from database');
+    } catch (err) {
+      console.error('Failed to delete team:', err);
     }
     
-    // Update allTeams in localStorage
-    const savedTeams = localStorage.getItem('t20fantasy_all_teams');
-    if (savedTeams) {
-      const teams = JSON.parse(savedTeams).filter(t => t.id !== teamId);
-      localStorage.setItem('t20fantasy_all_teams', JSON.stringify(teams));
+    // Update local state
+    setAllTeams(prev => prev.filter(t => t.id !== teamId));
+    
+    if (team && team.id === teamId) {
+      setTeam(null);
     }
   };
   
   const handleStartDraft = () => {
-    const tournamentKey = selectedTournament?.id || 'default';
     setIsDraftOpen(true);
-    localStorage.setItem(`t20fantasy_draft_open_${tournamentKey}`, 'true');
   };
   
   const handleGoToDraft = () => {
@@ -4824,39 +4511,30 @@ export default function App() {
   };
 
   const handleLogout = () => {
-    console.log('🚪 LOGOUT - Preserving team data');
-    console.log('   Before logout, allTeams in localStorage:', localStorage.getItem('t20fantasy_all_teams'));
+    console.log('🚪 Logging out');
     
-    // Only clear user session, NOT all data
-    // Keep: teams, draft status, users list
+    // Clear all state
     setUser(null);
     setTeam(null);
     setSelectedTournament(null);
     setIsDraftComplete(false);
     setIsDraftOpen(false);
     
-    // Only remove user session data, keep everything else
+    // Only remove user session
     localStorage.removeItem('t20fantasy_user');
     localStorage.removeItem('t20fantasy_tournament');
-    
-    // DO NOT call localStorage.clear() - it wipes all team data!
-    
-    console.log('   After logout, allTeams in localStorage:', localStorage.getItem('t20fantasy_all_teams'));
     
     setCurrentPage('login');
   };
 
   const handleBackToTournaments = () => {
-    // Keep user logged in, but reset tournament-specific state
-    const currentTournamentKey = selectedTournament?.id;
+    // Keep user logged in, reset tournament state
     setSelectedTournament(null);
     setTeam(null);
     setIsDraftComplete(false);
     setIsDraftOpen(false);
     
-    // Remove only the current tournament data, keep user session
     localStorage.removeItem('t20fantasy_tournament');
-    // Note: We keep tournament-specific team data so user can return to it
     
     setCurrentPage('tournamentSelect');
   };
@@ -4926,6 +4604,7 @@ export default function App() {
           team={team}
           tournament={selectedTournament}
           players={playerPool}
+          allTeams={allTeams}
           onLogout={handleLogout}
           onUpdateTeam={handleUpdateTeam}
           onBackToTournaments={handleBackToTournaments}
