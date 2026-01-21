@@ -65,37 +65,26 @@ const TRADING_WINDOW = {
 };
 
 // Check if a player is locked (their game has started or is in progress)
-const isPlayerLocked = (player, matches) => {
+const isPlayerLocked = (player, matches, isTestMode = false) => {
+  // In test/demo mode, never lock players
+  if (isTestMode) return false;
+  
+  // If no matches defined, don't lock
   if (!matches || matches.length === 0) return false;
   
   const now = new Date();
-  
-  // Find today's or upcoming match for this player's team
   const playerTeam = player.team;
   
   for (const match of matches) {
     // Check if player's team is in this match
-    const teamsInMatch = Array.isArray(match.teams) ? match.teams : match.teams.split(' vs ').map(t => t.trim());
+    const teamsInMatch = Array.isArray(match.teams) ? match.teams : (match.teams || '').split(' vs ').map(t => t.trim());
     if (!teamsInMatch.some(t => t === playerTeam || t.includes(playerTeam))) continue;
     
-    // Parse match date and time
-    const matchDate = new Date(match.date);
-    const [hours, minutes] = (match.startTime || '19:00').split(':').map(Number);
-    matchDate.setHours(hours, minutes, 0, 0);
-    
-    // If match is live or completed today, player is locked
-    if (match.status === 'live') return true;
-    
-    // If match is upcoming and has started (current time > match start time)
-    if (match.status === 'upcoming' && now >= matchDate) return true;
-    
-    // If match is today and game time has passed
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const matchDay = new Date(match.date);
-    matchDay.setHours(0, 0, 0, 0);
-    
-    if (matchDay.getTime() === today.getTime() && now >= matchDate) return true;
+    // ONLY lock if match status is explicitly 'live' or 'in_progress'
+    // Don't auto-lock based on time - let the actual match status drive it
+    if (match.status === 'live' || match.status === 'in_progress') {
+      return true;
+    }
   }
   
   return false;
@@ -142,8 +131,13 @@ const isInTradingWindow = (matches) => {
 };
 
 // Get lock status message for a player
-const getPlayerLockStatus = (player, matches) => {
-  if (isPlayerLocked(player, matches)) {
+const getPlayerLockStatus = (player, matches, isTestMode = false) => {
+  // In test/demo mode, never lock players
+  if (isTestMode) {
+    return { locked: false, message: '' };
+  }
+  
+  if (isPlayerLocked(player, matches, isTestMode)) {
     return { locked: true, message: '🔒 Locked - Game in progress' };
   }
   
@@ -1904,6 +1898,15 @@ const SnakeDraftPage = ({ team, tournament, players, allTeams, onDraftComplete, 
 // Admin Panel Component
 const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament, onLogout, onBackToTournaments, onSwitchTournament, allTeams, allUsers, onStartDraft, onDeleteTeam, onUpdateTeam, onDeleteUser }) => {
   const [activeTab, setActiveTab] = useState('overview');
+  
+  // Tournament editing state
+  const [editingTournament, setEditingTournament] = useState(false);
+  const [tournamentForm, setTournamentForm] = useState({
+    startDate: tournament?.startDate || '',
+    endDate: tournament?.endDate || '',
+    matches: tournament?.matches || []
+  });
+  const [savingTournament, setSavingTournament] = useState(false);
   const [newPlayerForm, setNewPlayerForm] = useState({
     name: '', team: '', position: 'batter'
   });
@@ -2365,6 +2368,195 @@ const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament
                 <span className="stat-value">{tournament.matches?.length || 0}</span>
                 <span className="stat-label">Matches</span>
               </div>
+            </div>
+            
+            {/* Tournament Dates Section */}
+            <div className="tournament-dates-section" style={{ 
+              background: 'var(--bg-card)', 
+              borderRadius: '12px', 
+              padding: '20px', 
+              marginTop: '20px' 
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                <h3 style={{ margin: 0 }}>📅 Tournament Dates</h3>
+                {!editingTournament ? (
+                  <button 
+                    className="btn-secondary btn-small"
+                    onClick={() => {
+                      setTournamentForm({
+                        startDate: tournament?.startDate || '',
+                        endDate: tournament?.endDate || '',
+                        matches: tournament?.matches || []
+                      });
+                      setEditingTournament(true);
+                    }}
+                  >
+                    ✏️ Edit
+                  </button>
+                ) : (
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button 
+                      className="btn-primary btn-small"
+                      disabled={savingTournament}
+                      onClick={async () => {
+                        setSavingTournament(true);
+                        try {
+                          await tournamentsAPI.update({
+                            id: tournament.id,
+                            startDate: tournamentForm.startDate,
+                            endDate: tournamentForm.endDate,
+                            matches: tournamentForm.matches
+                          });
+                          // Update local tournament state
+                          if (onUpdateTournament) {
+                            onUpdateTournament({
+                              ...tournament,
+                              startDate: tournamentForm.startDate,
+                              endDate: tournamentForm.endDate,
+                              matches: tournamentForm.matches
+                            });
+                          }
+                          setEditingTournament(false);
+                          alert('Tournament dates saved!');
+                        } catch (err) {
+                          console.error('Failed to save tournament:', err);
+                          alert('Failed to save tournament dates. Check console for details.');
+                        } finally {
+                          setSavingTournament(false);
+                        }
+                      }}
+                    >
+                      {savingTournament ? 'Saving...' : '💾 Save'}
+                    </button>
+                    <button 
+                      className="btn-secondary btn-small"
+                      onClick={() => setEditingTournament(false)}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )}
+              </div>
+              
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                <div>
+                  <label style={{ display: 'block', marginBottom: '4px', color: 'var(--text-muted)', fontSize: '0.875rem' }}>Start Date</label>
+                  {editingTournament ? (
+                    <input 
+                      type="date" 
+                      value={tournamentForm.startDate}
+                      onChange={(e) => setTournamentForm({ ...tournamentForm, startDate: e.target.value })}
+                      style={{ width: '100%', padding: '8px', borderRadius: '8px', background: 'var(--bg-input)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }}
+                    />
+                  ) : (
+                    <div style={{ padding: '8px', background: 'var(--bg-input)', borderRadius: '8px' }}>
+                      {tournament.startDate || 'Not set'}
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <label style={{ display: 'block', marginBottom: '4px', color: 'var(--text-muted)', fontSize: '0.875rem' }}>End Date</label>
+                  {editingTournament ? (
+                    <input 
+                      type="date" 
+                      value={tournamentForm.endDate}
+                      onChange={(e) => setTournamentForm({ ...tournamentForm, endDate: e.target.value })}
+                      style={{ width: '100%', padding: '8px', borderRadius: '8px', background: 'var(--bg-input)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }}
+                    />
+                  ) : (
+                    <div style={{ padding: '8px', background: 'var(--bg-input)', borderRadius: '8px' }}>
+                      {tournament.endDate || 'Not set'}
+                    </div>
+                  )}
+                </div>
+              </div>
+              
+              {/* Match Dates */}
+              {editingTournament && (
+                <div style={{ marginTop: '16px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <label style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>Match Schedule</label>
+                    <button 
+                      className="btn-secondary btn-small"
+                      onClick={() => {
+                        setTournamentForm({
+                          ...tournamentForm,
+                          matches: [
+                            ...tournamentForm.matches,
+                            {
+                              id: `match_${Date.now()}`,
+                              date: tournamentForm.startDate || new Date().toISOString().split('T')[0],
+                              teams: tournament.teams?.slice(0, 2) || ['TBD', 'TBD'],
+                              venue: 'TBD',
+                              startTime: '19:00',
+                              status: 'upcoming'
+                            }
+                          ]
+                        });
+                      }}
+                    >
+                      + Add Match
+                    </button>
+                  </div>
+                  <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
+                    {(tournamentForm.matches || []).map((match, idx) => (
+                      <div key={match.id || idx} style={{ 
+                        display: 'grid', 
+                        gridTemplateColumns: '1fr 1fr 1fr auto', 
+                        gap: '8px', 
+                        marginBottom: '8px',
+                        padding: '8px',
+                        background: 'var(--bg-input)',
+                        borderRadius: '8px'
+                      }}>
+                        <input 
+                          type="date" 
+                          value={match.date}
+                          onChange={(e) => {
+                            const newMatches = [...tournamentForm.matches];
+                            newMatches[idx] = { ...match, date: e.target.value };
+                            setTournamentForm({ ...tournamentForm, matches: newMatches });
+                          }}
+                          style={{ padding: '6px', borderRadius: '4px', background: 'var(--bg-card)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }}
+                        />
+                        <input 
+                          type="text" 
+                          value={Array.isArray(match.teams) ? match.teams.join(' vs ') : match.teams}
+                          placeholder="IND vs NZ"
+                          onChange={(e) => {
+                            const newMatches = [...tournamentForm.matches];
+                            newMatches[idx] = { ...match, teams: e.target.value.split(' vs ').map(t => t.trim()) };
+                            setTournamentForm({ ...tournamentForm, matches: newMatches });
+                          }}
+                          style={{ padding: '6px', borderRadius: '4px', background: 'var(--bg-card)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }}
+                        />
+                        <select
+                          value={match.status}
+                          onChange={(e) => {
+                            const newMatches = [...tournamentForm.matches];
+                            newMatches[idx] = { ...match, status: e.target.value };
+                            setTournamentForm({ ...tournamentForm, matches: newMatches });
+                          }}
+                          style={{ padding: '6px', borderRadius: '4px', background: 'var(--bg-card)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }}
+                        >
+                          <option value="upcoming">Upcoming</option>
+                          <option value="live">Live</option>
+                          <option value="completed">Completed</option>
+                        </select>
+                        <button 
+                          onClick={() => {
+                            const newMatches = tournamentForm.matches.filter((_, i) => i !== idx);
+                            setTournamentForm({ ...tournamentForm, matches: newMatches });
+                          }}
+                          style={{ padding: '6px 10px', background: '#ef4444', border: 'none', borderRadius: '4px', color: 'white', cursor: 'pointer' }}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
             
             <div className="quick-actions">
@@ -3010,6 +3202,11 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
     ? playersProp 
     : getPlayersForTournament(tournament.id);
   
+  // Detect if this is a test/demo tournament (never lock players)
+  const isTestMode = tournament?.id?.includes('test') || 
+                     tournament?.name?.toLowerCase().includes('test') ||
+                     tournament?.isTest === true;
+  
   // Auto-refresh draft status every 10 seconds (poll database)
   useEffect(() => {
     if (isDraftComplete) return;
@@ -3169,6 +3366,12 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
   // Update trading window status periodically
   useEffect(() => {
     const checkTradingWindow = () => {
+      // In test mode, always keep trading open
+      if (isTestMode) {
+        setTradingWindowStatus({ open: true, message: '' });
+        return;
+      }
+      
       const inWindow = isInTradingWindow(tournament.matches);
       setTradingWindowStatus({
         open: inWindow,
@@ -3179,7 +3382,7 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
     checkTradingWindow();
     const interval = setInterval(checkTradingWindow, 60000); // Check every minute
     return () => clearInterval(interval);
-  }, [tournament.matches]);
+  }, [tournament.matches, isTestMode]);
 
   // Group roster by assigned slot (no bench, no IL - just playing 12)
   // Enrich roster players with data from player pool if missing
@@ -3593,13 +3796,13 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
 
   const handleAddPlayer = (player, targetSlot = null) => {
     // Check if in trading window
-    if (!tradingWindowStatus.open) {
+    if (!tradingWindowStatus.open && !isTestMode) {
       alert(tradingWindowStatus.message);
       return;
     }
     
     // Check if player is locked (their game has started)
-    const lockStatus = getPlayerLockStatus(player, tournament.matches);
+    const lockStatus = getPlayerLockStatus(player, tournament.matches, isTestMode);
     if (lockStatus.locked) {
       alert(lockStatus.message);
       return;
@@ -3694,13 +3897,13 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
 
   const handleDropPlayer = (player) => {
     // Check if in trading window
-    if (!tradingWindowStatus.open) {
+    if (!tradingWindowStatus.open && !isTestMode) {
       alert(tradingWindowStatus.message);
       return;
     }
     
     // Check if player is locked (their game has started)
-    const lockStatus = getPlayerLockStatus(player, tournament.matches);
+    const lockStatus = getPlayerLockStatus(player, tournament.matches, isTestMode);
     if (lockStatus.locked) {
       alert(lockStatus.message);
       return;
@@ -4181,8 +4384,9 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
             
             <div className="players-grid">
               {(isDraftComplete ? filteredFreeAgents : allPlayersForBrowse).map(player => {
-                const lockStatus = getPlayerLockStatus(player, tournament.matches);
-                const isLocked = isDraftComplete && (lockStatus.locked || !tradingWindowStatus.open);
+                // Use component-level isTestMode
+                const lockStatus = getPlayerLockStatus(player, tournament.matches, isTestMode);
+                const isLocked = isDraftComplete && !isTestMode && (lockStatus.locked || !tradingWindowStatus.open);
                 return (
                   <div key={player.id} className={`player-card-full ${isLocked ? 'locked' : ''}`}>
                     <div className="player-header">

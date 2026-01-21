@@ -101,6 +101,13 @@ export const adminAPI = {
       method: 'POST',
       body: tournament
     });
+  },
+
+  async updateTournament(data) {
+    return apiCall('/admin?action=tournaments', {
+      method: 'PUT',
+      body: data
+    });
   }
 };
 
@@ -114,6 +121,10 @@ export const tournamentsAPI = {
 
   async create(tournament) {
     return adminAPI.createTournament(tournament);
+  },
+
+  async update(data) {
+    return adminAPI.updateTournament(data);
   }
 };
 

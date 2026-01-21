@@ -331,6 +331,7 @@ export default async function handler(req, res) {
           startDate: t.start_date,
           endDate: t.end_date,
           teams: JSON.parse(t.teams || '[]'),
+          matches: t.matches ? JSON.parse(t.matches) : [],
           description: t.description,
           isTest: Boolean(t.is_test),
           isActive: Boolean(t.is_active)
@@ -350,6 +351,55 @@ export default async function handler(req, res) {
         });
 
         return res.status(201).json({ success: true, tournamentId });
+      }
+      
+      // PUT - Update existing tournament
+      if (req.method === 'PUT') {
+        const { id, startDate, endDate, matches } = req.body;
+        
+        if (!id) {
+          return res.status(400).json({ error: 'Tournament ID required' });
+        }
+        
+        // Ensure matches column exists (migration for older schemas)
+        try {
+          await db.execute({
+            sql: `ALTER TABLE tournaments ADD COLUMN matches TEXT`
+          });
+        } catch (e) {
+          // Column already exists, ignore error
+        }
+        
+        const updates = [];
+        const args = [];
+        
+        if (startDate !== undefined) {
+          updates.push('start_date = ?');
+          args.push(startDate);
+        }
+        
+        if (endDate !== undefined) {
+          updates.push('end_date = ?');
+          args.push(endDate);
+        }
+        
+        if (matches !== undefined) {
+          updates.push('matches = ?');
+          args.push(JSON.stringify(matches));
+        }
+        
+        if (updates.length === 0) {
+          return res.status(400).json({ error: 'No fields to update' });
+        }
+        
+        args.push(id);
+        
+        await db.execute({
+          sql: `UPDATE tournaments SET ${updates.join(', ')} WHERE id = ?`,
+          args
+        });
+        
+        return res.status(200).json({ success: true, message: 'Tournament updated' });
       }
     }
 
