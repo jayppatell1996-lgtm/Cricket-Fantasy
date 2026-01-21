@@ -5,7 +5,20 @@
 // /api/admin?action=tournaments - Tournament management
 
 import { createClient } from '@libsql/client';
-import seedData from './seed-data.json' assert { type: 'json' };
+import { readFileSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+// Load seed data using fs (import assertions not supported in Vercel)
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+let seedData = { test_ind_nz: [], t20_wc_2026: [], ipl_2026: [] };
+try {
+  const seedPath = join(__dirname, 'seed-data.json');
+  seedData = JSON.parse(readFileSync(seedPath, 'utf-8'));
+} catch (err) {
+  console.error('Failed to load seed-data.json:', err.message);
+}
 
 function getDb() {
   return createClient({
