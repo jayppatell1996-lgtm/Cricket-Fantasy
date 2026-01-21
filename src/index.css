@@ -2589,6 +2589,150 @@ button {
   color: #ef4444;
 }
 
+/* Bench Selection & Move Functionality */
+.empty-slot-container {
+  position: relative;
+}
+
+.player-row.empty-row.clickable {
+  cursor: pointer;
+  border: 1px dashed var(--border-color);
+}
+
+.player-row.empty-row.clickable:hover {
+  background: rgba(212, 175, 55, 0.1);
+  border-color: var(--gold);
+}
+
+.player-row.empty-row.selected {
+  background: rgba(212, 175, 55, 0.15);
+  border-color: var(--gold);
+}
+
+.bench-player-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: var(--bg-card);
+  border: 1px solid var(--gold);
+  border-radius: var(--radius-sm);
+  z-index: 100;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.bench-player-dropdown .dropdown-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--spacing-sm);
+  background: var(--bg-input);
+  font-size: 0.75rem;
+  font-weight: 600;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.bench-player-dropdown .close-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 1rem;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.bench-player-dropdown .close-btn:hover {
+  color: var(--text-primary);
+}
+
+.bench-player-dropdown .dropdown-player {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--spacing-sm);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.bench-player-dropdown .dropdown-player:hover {
+  background: rgba(212, 175, 55, 0.1);
+}
+
+.bench-player-dropdown .player-name {
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+
+.bench-player-dropdown .player-detail {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+/* Move buttons on player rows */
+.move-btn {
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  padding: 4px 8px;
+  font-size: 0.75rem;
+  cursor: pointer;
+  margin-left: var(--spacing-sm);
+  transition: all 0.15s;
+}
+
+.move-btn:hover {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: #ef4444;
+  color: #ef4444;
+}
+
+/* Bench section styling */
+.roster-section-yahoo.bench-section {
+  margin-top: var(--spacing-md);
+  border-top: 2px dashed var(--border-color);
+  padding-top: var(--spacing-md);
+}
+
+.roster-section-yahoo.bench-section .section-label {
+  color: var(--text-muted);
+}
+
+.player-row.bench-player {
+  background: var(--bg-input);
+}
+
+.slot-indicator.bench {
+  background: var(--bg-input);
+  color: var(--text-muted);
+}
+
+/* Move to slot buttons on bench players */
+.move-options {
+  display: flex;
+  gap: 4px;
+  margin-left: var(--spacing-sm);
+}
+
+.move-to-slot-btn {
+  background: rgba(34, 197, 94, 0.1);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+  border-radius: var(--radius-sm);
+  color: #22c55e;
+  padding: 2px 6px;
+  font-size: 0.625rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.move-to-slot-btn:hover {
+  background: rgba(34, 197, 94, 0.2);
+  border-color: #22c55e;
+}
+
 /* Responsive */
 @media (max-width: 640px) {
   .player-stats-yahoo {

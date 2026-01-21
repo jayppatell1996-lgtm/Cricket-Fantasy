@@ -56,19 +56,31 @@ export default async function handler(req, res) {
 
       const result = await db.execute({ sql, args });
 
-      const leagues = result.rows.map(l => ({
-        id: l.id,
-        name: l.name,
-        tournamentId: l.tournament_id,
-        draftType: l.draft_type,
-        draftStatus: l.draft_status,
-        draftOrder: l.draft_order ? JSON.parse(l.draft_order) : null,
-        currentPick: l.current_pick,
-        maxTeams: l.max_teams,
-        rosterSize: l.roster_size,
-        isPublic: Boolean(l.is_public),
-        createdAt: l.created_at
-      }));
+      const leagues = result.rows.map(l => {
+        let draftOrder = null;
+        if (l.draft_order) {
+          try {
+            draftOrder = JSON.parse(l.draft_order);
+            console.log(`League ${l.id}: draftOrder has ${draftOrder?.length || 0} picks`);
+          } catch (e) {
+            console.error('Failed to parse draft_order:', e);
+          }
+        }
+        
+        return {
+          id: l.id,
+          name: l.name,
+          tournamentId: l.tournament_id,
+          draftType: l.draft_type,
+          draftStatus: l.draft_status,
+          draftOrder: draftOrder,
+          currentPick: l.current_pick || 0,
+          maxTeams: l.max_teams,
+          rosterSize: l.roster_size,
+          isPublic: Boolean(l.is_public),
+          createdAt: l.created_at
+        };
+      });
 
       if (leagueId) {
         return res.status(200).json({ success: true, league: leagues[0] || null });
@@ -123,7 +135,9 @@ export default async function handler(req, res) {
 
       if (draftOrder !== undefined) {
         updates.push('draft_order = ?');
-        args.push(JSON.stringify(draftOrder));
+        const orderJson = JSON.stringify(draftOrder);
+        args.push(orderJson);
+        console.log(`Saving draftOrder with ${draftOrder?.length || 0} picks`);
       }
 
       if (currentPick !== undefined) {

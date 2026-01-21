@@ -197,10 +197,11 @@ const SCORING_RULES = {
 // Squad Configuration - Playing 12 only (no bench, no IL)
 // 5 Batters + 1 WK + 5 Bowlers + 1 Flex = 12 players
 const SQUAD_CONFIG = {
-  batters: { min: 5, max: 5, label: 'Batters', icon: '🏏', isPlaying: true },
-  keepers: { min: 1, max: 1, label: 'Wicketkeeper', icon: '🧤', isPlaying: true },
-  bowlers: { min: 5, max: 5, label: 'Bowlers', icon: '🎯', isPlaying: true },
-  flex: { min: 1, max: 1, label: 'Utility', icon: '🔄', isPlaying: true },
+  batters: { min: 0, max: 5, label: 'Batters', icon: '🏏', isPlaying: true },
+  keepers: { min: 0, max: 1, label: 'Wicketkeeper', icon: '🧤', isPlaying: true },
+  bowlers: { min: 0, max: 5, label: 'Bowlers', icon: '🎯', isPlaying: true },
+  flex: { min: 0, max: 1, label: 'Utility', icon: '🔄', isPlaying: true },
+  bench: { min: 0, max: 12, label: 'Bench', icon: '📋', isPlaying: false },
 };
 
 // Position compatibility rules
@@ -208,11 +209,12 @@ const SQUAD_CONFIG = {
 // WK slot: keepers only
 // Bowlers slot: bowlers or allrounders
 // Flex slot: any position
+// Bench: any position
 const POSITION_COMPATIBILITY = {
-  batter: ['batters', 'flex'],
-  keeper: ['batters', 'keepers', 'flex'],
-  bowler: ['bowlers', 'flex'],
-  allrounder: ['batters', 'bowlers', 'flex'],
+  batter: ['batters', 'flex', 'bench'],
+  keeper: ['batters', 'keepers', 'flex', 'bench'],
+  bowler: ['bowlers', 'flex', 'bench'],
+  allrounder: ['batters', 'bowlers', 'flex', 'bench'],
 };
 
 // Get valid slots for a player position
@@ -1319,6 +1321,12 @@ const SnakeDraftPage = ({ team, tournament, players, allTeams, onDraftComplete, 
 
       const leagueData = leaguesResponse.leagues[0];
       setLeague(leagueData);
+      
+      console.log('📋 League data:', {
+        draftStatus: leagueData.draftStatus,
+        currentPick: leagueData.currentPick,
+        draftOrderLength: leagueData.draftOrder?.length || 0
+      });
 
       // Check draft status
       if (leagueData.draftStatus === 'pending' || leagueData.draftStatus === 'open') {
@@ -1335,16 +1343,27 @@ const SnakeDraftPage = ({ team, tournament, players, allTeams, onDraftComplete, 
       setDraftState('drafting');
       setCurrentPick(leagueData.currentPick || 0);
 
-      // Load or generate draft order
+      // Load draft order from database - DO NOT regenerate
       let order = leagueData.draftOrder;
+      
+      // Only regenerate if order doesn't exist AND we have teams
       if (!order || order.length === 0) {
-        order = generateDraftOrder(tournamentTeams, TOTAL_ROSTER_SIZE);
-        // Save draft order to league
-        await leaguesAPI.update({
-          id: leagueData.id,
-          draftOrder: order
-        });
+        if (tournamentTeams.length >= 2) {
+          console.log('⚠️ No draft order found, generating for', tournamentTeams.length, 'teams');
+          order = generateDraftOrder(tournamentTeams, TOTAL_ROSTER_SIZE);
+          // Save draft order to league
+          await leaguesAPI.update({
+            id: leagueData.id,
+            draftOrder: order
+          });
+        } else {
+          console.error('❌ Cannot generate draft order - not enough teams loaded');
+          setError('Draft order not found. Please refresh or contact admin.');
+          return;
+        }
       }
+      
+      console.log('📋 Draft order loaded:', order.length, 'total picks');
       setDraftOrder(order);
 
       // Load existing picks and enrich with player data
@@ -1366,8 +1385,15 @@ const SnakeDraftPage = ({ team, tournament, players, allTeams, onDraftComplete, 
         setAvailablePlayers(players.filter(p => !draftedIds.has(p.id)));
       }
 
-      // Check if draft is complete - just set state, don't auto-redirect
-      if (leagueData.currentPick >= order.length) {
+      // Check if draft is complete - ONLY if we have a valid draft order
+      const totalPicksRequired = order.length;
+      const currentPickNum = leagueData.currentPick || 0;
+      
+      console.log('📋 Draft progress:', currentPickNum, '/', totalPicksRequired);
+      
+      // Only mark complete if we actually have picks and reached the end
+      if (totalPicksRequired > 0 && currentPickNum >= totalPicksRequired) {
+        console.log('✅ Draft is complete!');
         setDraftState('completed');
       }
     } catch (err) {
@@ -1403,6 +1429,12 @@ const SnakeDraftPage = ({ team, tournament, players, allTeams, onDraftComplete, 
         if (draftState === 'drafting') {
           const serverPick = leagueData.currentPick || 0;
           
+          // Also update draft order if we don't have it
+          if ((!draftOrder || draftOrder.length === 0) && leagueData.draftOrder?.length > 0) {
+            console.log('📋 Loading draft order from server:', leagueData.draftOrder.length, 'picks');
+            setDraftOrder(leagueData.draftOrder);
+          }
+          
           if (serverPick > currentPick) {
             console.log(`📥 New pick detected: ${currentPick} → ${serverPick}`);
             
@@ -1426,8 +1458,12 @@ const SnakeDraftPage = ({ team, tournament, players, allTeams, onDraftComplete, 
             
             setCurrentPick(serverPick);
 
-            // Check if draft complete - just set state, don't auto-redirect
-            if (serverPick >= draftOrder.length) {
+            // Check if draft complete - use server's draft order length
+            const totalPicks = leagueData.draftOrder?.length || draftOrder.length || 0;
+            console.log(`📋 Draft progress: ${serverPick} / ${totalPicks}`);
+            
+            if (totalPicks > 0 && serverPick >= totalPicks) {
+              console.log('✅ Draft complete via polling!');
               setDraftState('completed');
             }
           }
@@ -1536,10 +1572,16 @@ const SnakeDraftPage = ({ team, tournament, players, allTeams, onDraftComplete, 
         };
         setPicks(prev => [...prev, newPick]);
         setAvailablePlayers(prev => prev.filter(p => p.id !== player.id));
-        setCurrentPick(prev => prev + 1);
+        
+        const nextPick = currentPick + 1;
+        setCurrentPick(nextPick);
 
-        // Check if draft complete
-        if (currentPick + 1 >= draftOrder.length) {
+        // Check if draft complete - only if we have a valid draft order
+        const totalPicks = draftOrder.length;
+        console.log(`📋 Draft progress after pick: ${nextPick} / ${totalPicks}`);
+        
+        if (totalPicks > 0 && nextPick >= totalPicks) {
+          console.log('✅ Draft complete!');
           setDraftState('completed');
           // Don't auto-redirect - let user click "Go to Roster" button
         }
@@ -1609,7 +1651,7 @@ const SnakeDraftPage = ({ team, tournament, players, allTeams, onDraftComplete, 
 
   // Completed state
   if (draftState === 'completed') {
-    // Build final roster with full player data
+    // Build final roster with full player data - ALL go to BENCH first
     const finalRoster = picks
       .filter(p => p.teamId === team?.id)
       .map(p => ({
@@ -1617,7 +1659,7 @@ const SnakeDraftPage = ({ team, tournament, players, allTeams, onDraftComplete, 
         name: p.playerName || 'Unknown Player',
         team: p.playerTeam || 'Unknown',
         position: p.playerPosition || 'flex',
-        slot: getBestSlotForPosition(p.playerPosition || 'flex'),
+        slot: 'bench', // All players start on bench
         totalPoints: 0,
         avgPoints: 0,
         matchesPlayed: 0
@@ -2919,6 +2961,7 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [selectedPlayerProfile, setSelectedPlayerProfile] = useState(null); // Player profile modal
   const [localDraftOpen, setLocalDraftOpen] = useState(isDraftOpen); // Local state for auto-refresh
+  const [selectedSlotToFill, setSelectedSlotToFill] = useState(null); // For moving players from bench to lineup
   
   // Enhanced Test Mode State
   const [selectedMatch, setSelectedMatch] = useState(null);
@@ -3129,6 +3172,49 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
     keepers: enrichedRoster.filter(p => p.slot === 'keepers'),
     bowlers: enrichedRoster.filter(p => p.slot === 'bowlers'),
     flex: enrichedRoster.filter(p => p.slot === 'flex'),
+    bench: enrichedRoster.filter(p => p.slot === 'bench' || !p.slot),
+  };
+  
+  // Count players in active lineup (not bench)
+  const activeLineupCount = rosterBySlot.batters.length + rosterBySlot.keepers.length + 
+                            rosterBySlot.bowlers.length + rosterBySlot.flex.length;
+  
+  // Move a player to a different slot
+  const movePlayerToSlot = async (playerId, newSlot) => {
+    const player = enrichedRoster.find(p => p.id === playerId);
+    if (!player) return;
+    
+    // Check if player can go in this slot
+    if (newSlot !== 'bench' && !canPlaceInSlot(player.position, newSlot)) {
+      alert(`${player.name} (${player.position}) cannot be placed in ${newSlot} slot`);
+      return;
+    }
+    
+    // Check if slot is full (except bench)
+    if (newSlot !== 'bench' && isSlotFull(newSlot)) {
+      alert(`${SQUAD_CONFIG[newSlot]?.label || newSlot} slot is full`);
+      return;
+    }
+    
+    // Update roster
+    const updatedRoster = team.roster.map(p => 
+      p.id === playerId ? { ...p, slot: newSlot } : p
+    );
+    
+    onUpdateTeam({ ...team, roster: updatedRoster });
+    setSelectedSlotToFill(null);
+    
+    // Also save to database
+    try {
+      await teamsAPI.update({ id: team.id, roster: updatedRoster });
+    } catch (err) {
+      console.error('Failed to save roster change:', err);
+    }
+  };
+  
+  // Get bench players that can fill a specific slot
+  const getBenchPlayersForSlot = (slotKey) => {
+    return rosterBySlot.bench.filter(p => canPlaceInSlot(p.position, slotKey));
   };
   
   // For backward compatibility - old rosters without slots
@@ -3841,9 +3927,9 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
               </div>
             )}
 
-            {/* Roster - Playing 12 */}
+            {/* Roster - Starting Lineup */}
             <div className="roster-section-yahoo starters-section">
-              <div className="section-label">Your Squad ({team.roster?.length || 0}/12)</div>
+              <div className="section-label">Starting Lineup ({activeLineupCount}/12)</div>
               <div className="stat-headers">
                 <span className="stat-header">PTS</span>
               </div>
@@ -3860,11 +3946,10 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
                         <div 
                           key={player.id} 
                           className={`player-row ${gameStatus.status} clickable`}
-                          onClick={() => setSelectedPlayerProfile(player)}
                         >
                           <div className="slot-indicator">{slotLabel}</div>
                           <div className={`game-status-dot ${gameStatus.color}`}></div>
-                          <div className="player-info-yahoo">
+                          <div className="player-info-yahoo" onClick={() => setSelectedPlayerProfile(player)}>
                             <div className="player-main">
                               <span className="player-name-yahoo">{player.name}</span>
                             </div>
@@ -3876,28 +3961,122 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
                           <div className="player-stats-yahoo">
                             <span className="stat-value">{player.totalPoints || 0}</span>
                           </div>
+                          <button 
+                            className="move-btn" 
+                            onClick={(e) => { e.stopPropagation(); movePlayerToSlot(player.id, 'bench'); }}
+                            title="Move to bench"
+                          >
+                            ↓
+                          </button>
                         </div>
                       );
                     })}
-                    {/* Empty slots for this position */}
+                    {/* Empty slots for this position - clickable to fill from bench */}
                     {Array(config.max - (rosterBySlot[slotKey]?.length || 0)).fill(null).map((_, i) => {
                       const slotLabel = slotKey === 'keepers' ? 'WK' : slotKey === 'batters' ? 'BAT' : slotKey === 'bowlers' ? 'BWL' : 'UTIL';
+                      const eligibleBenchPlayers = getBenchPlayersForSlot(slotKey);
+                      const isSelected = selectedSlotToFill === `${slotKey}-${i}`;
+                      
                       return (
-                        <div key={`empty-${slotKey}-${i}`} className="player-row empty-row">
-                          <div className="slot-indicator">{slotLabel}</div>
-                          <div className="game-status-dot red"></div>
-                          <div className="player-info-yahoo">
-                            <span className="empty-slot-text">Empty {config.label} Slot</span>
+                        <div key={`empty-${slotKey}-${i}`} className="empty-slot-container">
+                          <div 
+                            className={`player-row empty-row ${eligibleBenchPlayers.length > 0 ? 'clickable' : ''} ${isSelected ? 'selected' : ''}`}
+                            onClick={() => eligibleBenchPlayers.length > 0 && setSelectedSlotToFill(isSelected ? null : `${slotKey}-${i}`)}
+                          >
+                            <div className="slot-indicator">{slotLabel}</div>
+                            <div className="game-status-dot gray"></div>
+                            <div className="player-info-yahoo">
+                              <span className="empty-slot-text">
+                                {eligibleBenchPlayers.length > 0 
+                                  ? `Click to fill ${config.label} slot (${eligibleBenchPlayers.length} available)`
+                                  : `Empty ${config.label} Slot`
+                                }
+                              </span>
+                            </div>
+                            <div className="player-stats-yahoo">
+                              <span className="stat-value">-</span>
+                            </div>
                           </div>
-                          <div className="player-stats-yahoo">
-                            <span className="stat-value">-</span>
-                          </div>
+                          
+                          {/* Dropdown showing eligible bench players */}
+                          {isSelected && (
+                            <div className="bench-player-dropdown">
+                              <div className="dropdown-header">
+                                Select player for {config.label}:
+                                <button className="close-btn" onClick={() => setSelectedSlotToFill(null)}>×</button>
+                              </div>
+                              {eligibleBenchPlayers.map(benchPlayer => (
+                                <div 
+                                  key={benchPlayer.id}
+                                  className="dropdown-player"
+                                  onClick={() => movePlayerToSlot(benchPlayer.id, slotKey)}
+                                >
+                                  <span className="player-name">{benchPlayer.name}</span>
+                                  <span className="player-detail">{benchPlayer.team} • {benchPlayer.position.toUpperCase()}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       );
                     })}
                   </React.Fragment>
                 ))}
             </div>
+            
+            {/* Bench Section */}
+            {rosterBySlot.bench.length > 0 && (
+              <div className="roster-section-yahoo bench-section">
+                <div className="section-label">Bench ({rosterBySlot.bench.length})</div>
+                <div className="stat-headers">
+                  <span className="stat-header">PTS</span>
+                </div>
+                
+                {rosterBySlot.bench.map(player => {
+                  const gameStatus = getPlayerGameStatus(player, tournament.matches, selectedDate);
+                  const availableSlots = getAvailableSlotsForPlayer(player).filter(s => s !== 'bench');
+                  
+                  return (
+                    <div 
+                      key={player.id} 
+                      className={`player-row bench-player ${gameStatus.status}`}
+                    >
+                      <div className="slot-indicator bench">BN</div>
+                      <div className={`game-status-dot ${gameStatus.color}`}></div>
+                      <div className="player-info-yahoo" onClick={() => setSelectedPlayerProfile(player)}>
+                        <div className="player-main">
+                          <span className="player-name-yahoo">{player.name}</span>
+                        </div>
+                        <div className="player-sub">
+                          <span className="player-team-yahoo">{player.team}</span>
+                          <span className="player-positions">• {player.position.toUpperCase()}</span>
+                        </div>
+                      </div>
+                      <div className="player-stats-yahoo">
+                        <span className="stat-value">{player.totalPoints || 0}</span>
+                      </div>
+                      {availableSlots.length > 0 && (
+                        <div className="move-options">
+                          {availableSlots.map(slot => {
+                            const slotLabel = slot === 'keepers' ? 'WK' : slot === 'batters' ? 'BAT' : slot === 'bowlers' ? 'BWL' : 'UTIL';
+                            return (
+                              <button 
+                                key={slot}
+                                className="move-to-slot-btn"
+                                onClick={() => movePlayerToSlot(player.id, slot)}
+                                title={`Move to ${SQUAD_CONFIG[slot]?.label}`}
+                              >
+                                ↑ {slotLabel}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
 
