@@ -233,7 +233,7 @@ const getPlayerGameStatus = (player, matches, selectedDate = new Date()) => {
   
   for (const match of matches) {
     // Check if player's team is in this match
-    const teamsInMatch = Array.isArray(match.teams) ? match.teams : match.teams.split(' vs ').map(t => t.trim());
+    const teamsInMatch = Array.isArray(match.teams) ? match.teams : (match.teams || '').split(' vs ').map(t => t.trim());
     if (!teamsInMatch.some(t => t === playerTeam || t.includes(playerTeam))) continue;
     
     // Check if match is on selected date
@@ -782,6 +782,7 @@ const generateSnakeDraftOrder = (teams, totalRounds) => {
 const TournamentSelectPage = ({ onSelectTournament, user, onLogout }) => {
   const [userTeams, setUserTeams] = useState({});
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   // Fetch user's teams from database on load
   useEffect(() => {
@@ -795,17 +796,21 @@ const TournamentSelectPage = ({ onSelectTournament, user, onLogout }) => {
       
       try {
         const response = await teamsAPI.getAll({ userId: user.id });
-        if (response.teams) {
+        if (response && response.teams) {
           // Create a map of tournamentId -> team
           const teamsMap = {};
           response.teams.forEach(team => {
-            teamsMap[team.tournamentId] = team;
+            if (team && team.tournamentId) {
+              teamsMap[team.tournamentId] = team;
+            }
           });
           setUserTeams(teamsMap);
           console.log('✅ Found teams:', Object.keys(teamsMap));
         }
       } catch (err) {
         console.error('Failed to fetch user teams:', err);
+        setError(err.message);
+        // Don't block the page - just show tournaments without team status
       } finally {
         setLoading(false);
       }
@@ -838,8 +843,10 @@ const TournamentSelectPage = ({ onSelectTournament, user, onLogout }) => {
           <div className="loading-spinner">Loading tournaments...</div>
         ) : (
           <div className="tournament-list">
-            {Object.values(TOURNAMENTS).map(tournament => {
+            {Object.values(TOURNAMENTS || {}).map(tournament => {
+              if (!tournament || !tournament.id) return null;
               const hasTeam = getUserTeamStatus(tournament.id);
+              const teams = tournament.teams || [];
               return (
                 <div 
                   key={tournament.id} 
@@ -853,11 +860,11 @@ const TournamentSelectPage = ({ onSelectTournament, user, onLogout }) => {
                   <h3>{tournament.name}</h3>
                   <p className="tournament-desc">{tournament.description}</p>
                   <div className="tournament-dates">
-                    {new Date(tournament.startDate).toLocaleDateString()} - {new Date(tournament.endDate).toLocaleDateString()}
+                    {tournament.startDate ? new Date(tournament.startDate).toLocaleDateString() : 'TBD'} - {tournament.endDate ? new Date(tournament.endDate).toLocaleDateString() : 'TBD'}
                   </div>
                   <div className="tournament-teams">
-                    {tournament.teams.slice(0, 6).join(' • ')}
-                    {tournament.teams.length > 6 && ` +${tournament.teams.length - 6} more`}
+                    {teams.slice(0, 6).join(' • ')}
+                    {teams.length > 6 && ` +${teams.length - 6} more`}
                   </div>
                   <button className="btn-primary btn-small">
                     {hasTeam ? 'Continue' : tournament.isTest ? 'Start Test Mode' : 'Enter & Register'}
@@ -4207,7 +4214,7 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
                       );
                     })}
                     {/* Empty slots for this position - clickable to fill from bench */}
-                    {Array(config.max - (rosterBySlot[slotKey]?.length || 0)).fill(null).map((_, i) => {
+                    {Array(Math.max(0, (config.max || 0) - (rosterBySlot[slotKey]?.length || 0))).fill(null).map((_, i) => {
                       const slotLabel = slotKey === 'keepers' ? 'WK' : slotKey === 'batters' ? 'BAT' : slotKey === 'bowlers' ? 'BWL' : 'UTIL';
                       const eligibleBenchPlayers = getBenchPlayersForSlot(slotKey);
                       const isSelected = selectedSlotToFill === `${slotKey}-${i}`;
