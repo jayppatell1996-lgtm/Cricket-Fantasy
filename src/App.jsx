@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import api, { authAPI, teamsAPI, playersAPI, leaguesAPI, draftAPI, rosterAPI, tournamentsAPI, usersAPI, adminAPI } from './api.js';
+import api, { authAPI, teamsAPI, playersAPI, leaguesAPI, draftAPI, rosterAPI, tournamentsAPI, usersAPI, adminAPI, liveSyncAPI } from './api.js';
 
 // ============================================
 // T20 FANTASY CRICKET - COMPLETE APPLICATION
@@ -755,6 +755,85 @@ const generateTestStats = (player) => {
   return stats;
 };
 
+// Generate game log for a player based on completed matches
+const generatePlayerGameLog = (player, matches) => {
+  if (!matches || matches.length === 0) return [];
+  
+  const completedMatches = matches.filter(m => m.status === 'completed' || m.status === 'live');
+  const playerTeam = player.team;
+  
+  // Filter matches where player's team participated
+  const playerMatches = completedMatches.filter(match => {
+    const teamsInMatch = Array.isArray(match.teams) ? match.teams : (match.teams || '').split(' vs ').map(t => t.trim());
+    return teamsInMatch.some(t => t === playerTeam || t.includes(playerTeam) || playerTeam.includes(t));
+  });
+  
+  if (playerMatches.length === 0) return [];
+  
+  // Generate stats for each match (seeded by player id + match id for consistency)
+  const gameLog = playerMatches.map(match => {
+    const teamsInMatch = Array.isArray(match.teams) ? match.teams : (match.teams || '').split(' vs ').map(t => t.trim());
+    const opponent = teamsInMatch.find(t => t !== playerTeam && !playerTeam.includes(t) && !t.includes(playerTeam)) || teamsInMatch[0];
+    
+    // Use player id + match date as seed for consistent random values
+    const seed = (player.id + match.date).split('').reduce((a, c) => a + c.charCodeAt(0), 0);
+    const seededRandom = (offset = 0) => {
+      const x = Math.sin(seed + offset) * 10000;
+      return x - Math.floor(x);
+    };
+    
+    const isBatter = player.position === 'batter' || player.position === 'keeper' || player.position === 'allrounder';
+    const isBowler = player.position === 'bowler' || player.position === 'allrounder';
+    
+    let runs = 0, strikeRate = 0, wickets = 0, economy = 0, catches = 0, runOuts = 0, points = 0;
+    
+    if (isBatter) {
+      runs = Math.floor(seededRandom(1) * 70) + (seededRandom(2) > 0.3 ? 10 : 0);
+      const ballsFaced = Math.max(runs, Math.floor(runs * (0.7 + seededRandom(3) * 0.6)));
+      strikeRate = ballsFaced > 0 ? (runs / ballsFaced) * 100 : 0;
+      
+      // Calculate batting points
+      points += runs; // 1 point per run
+      if (runs >= 50 && runs < 100) points += 10; // 50 bonus
+      if (runs >= 100) points += 25; // Century bonus
+      if (strikeRate >= 150) points += 5; // High SR bonus
+    }
+    
+    if (isBowler) {
+      const overs = Math.floor(seededRandom(4) * 4) + 1;
+      wickets = seededRandom(5) > 0.5 ? Math.floor(seededRandom(6) * 3) + 1 : 0;
+      const runsConceded = Math.floor(overs * (5 + seededRandom(7) * 5));
+      economy = overs > 0 ? runsConceded / overs : 0;
+      
+      // Calculate bowling points
+      points += wickets * 20; // 20 points per wicket
+      if (wickets >= 3) points += 10; // 3+ wickets bonus
+      if (wickets >= 5) points += 15; // 5+ wickets bonus
+      if (economy < 6 && overs >= 2) points += 5; // Good economy bonus
+    }
+    
+    // Fielding
+    catches = seededRandom(8) > 0.7 ? Math.floor(seededRandom(9) * 2) + 1 : 0;
+    runOuts = seededRandom(10) > 0.9 ? 1 : 0;
+    points += catches * 5 + runOuts * 5;
+    
+    return {
+      matchId: match.id,
+      date: match.date,
+      opponent,
+      runs: isBatter ? runs : null,
+      strikeRate: isBatter ? strikeRate : null,
+      wickets: isBowler ? wickets : null,
+      economy: isBowler ? economy : null,
+      catches,
+      runOuts,
+      points: Math.round(points)
+    };
+  });
+  
+  return gameLog.sort((a, b) => new Date(b.date) - new Date(a.date)); // Most recent first
+};
+
 // Snake Draft Order Generator
 const generateSnakeDraftOrder = (teams, totalRounds) => {
   const order = [];
@@ -781,8 +860,37 @@ const generateSnakeDraftOrder = (teams, totalRounds) => {
 // Tournament Selection Page
 const TournamentSelectPage = ({ onSelectTournament, user, onLogout }) => {
   const [userTeams, setUserTeams] = useState({});
+  const [tournaments, setTournaments] = useState(TOURNAMENTS);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  // Fetch tournaments from database and merge with local
+  useEffect(() => {
+    const fetchTournaments = async () => {
+      try {
+        const response = await tournamentsAPI.getAll();
+        if (response && response.tournaments && response.tournaments.length > 0) {
+          console.log('📋 Loaded tournaments from DB:', response.tournaments.length);
+          // Merge DB tournaments with local TOURNAMENTS (DB takes priority)
+          const mergedTournaments = { ...TOURNAMENTS };
+          response.tournaments.forEach(dbTournament => {
+            if (dbTournament.id) {
+              mergedTournaments[dbTournament.id] = {
+                ...TOURNAMENTS[dbTournament.id], // Start with local defaults
+                ...dbTournament, // Override with DB values
+              };
+            }
+          });
+          setTournaments(mergedTournaments);
+        }
+      } catch (err) {
+        console.error('Failed to fetch tournaments from DB:', err);
+        // Fall back to hardcoded tournaments
+      }
+    };
+    
+    fetchTournaments();
+  }, []);
 
   // Fetch user's teams from database on load
   useEffect(() => {
@@ -843,7 +951,7 @@ const TournamentSelectPage = ({ onSelectTournament, user, onLogout }) => {
           <div className="loading-spinner">Loading tournaments...</div>
         ) : (
           <div className="tournament-list">
-            {Object.values(TOURNAMENTS || {}).map(tournament => {
+            {Object.values(tournaments || {}).map(tournament => {
               if (!tournament || !tournament.id) return null;
               const hasTeam = getUserTeamStatus(tournament.id);
               const teams = tournament.teams || [];
@@ -2097,22 +2205,102 @@ const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament
     setSyncStatus(prev => ({ ...prev, scores: 'syncing...' }));
     
     try {
-      const response = await fetch(`${getApiBaseUrl()}/api/sync/live-scores`);
-      const data = await response.json();
+      // Try to get live matches from Cricket API
+      const response = await liveSyncAPI.getLiveMatches();
       
-      if (data.success) {
-        const matchCount = data.results?.length || 0;
+      if (response.success && response.count > 0) {
         setSyncStatus(prev => ({ 
           ...prev, 
-          scores: `✅ Synced! ${matchCount} matches processed` 
+          scores: `✅ Found ${response.count} live T20 matches` 
         }));
       } else {
-        setSyncStatus(prev => ({ ...prev, scores: `❌ Error: ${data.error}` }));
+        setSyncStatus(prev => ({ 
+          ...prev, 
+          scores: `ℹ️ No live T20 matches found. Use Match Sync below to simulate.` 
+        }));
       }
     } catch (error) {
       setSyncStatus(prev => ({ ...prev, scores: `❌ Error: ${error.message}` }));
     } finally {
       setIsSyncing(prev => ({ ...prev, scores: false }));
+    }
+  };
+  
+  // Sync specific match scores to database
+  const handleSyncMatch = async (match, simulate = false) => {
+    setIsSyncing(prev => ({ ...prev, match: match.id }));
+    setSyncStatus(prev => ({ ...prev, match: `Syncing ${match.name}...` }));
+    
+    try {
+      let response;
+      
+      if (simulate) {
+        // Get players for this tournament to simulate stats for
+        const tournamentPlayers = players.filter(p => {
+          const teamsInMatch = Array.isArray(match.teams) ? match.teams : (match.teams || '').split(' vs ').map(t => t.trim());
+          return teamsInMatch.some(t => t === p.team || t.includes(p.team) || p.team.includes(t));
+        });
+        
+        if (tournamentPlayers.length === 0) {
+          throw new Error('No players found for this match teams');
+        }
+        
+        response = await liveSyncAPI.simulateMatch(match.id, tournament.id, tournamentPlayers);
+      } else {
+        response = await liveSyncAPI.syncMatch(match.id, tournament.id);
+      }
+      
+      if (response.success) {
+        const totalPoints = response.totalPoints || response.stats?.reduce((sum, s) => sum + (s.points || 0), 0) || 0;
+        setSyncStatus(prev => ({ 
+          ...prev, 
+          match: `✅ ${match.name}: ${response.playersUpdated} players updated, ${totalPoints} total points` 
+        }));
+        
+        // Refetch players to get updated stats
+        await refetchPlayers();
+        
+        // Update tournament if using onUpdateTournament
+        if (onUpdateTournament && simulate) {
+          const updatedMatches = (tournament.matches || []).map(m => 
+            m.id === match.id ? { ...m, status: 'completed' } : m
+          );
+          onUpdateTournament({ ...tournament, matches: updatedMatches });
+        }
+      } else {
+        setSyncStatus(prev => ({ ...prev, match: `❌ ${match.name}: ${response.error}` }));
+      }
+    } catch (error) {
+      setSyncStatus(prev => ({ ...prev, match: `❌ Error: ${error.message}` }));
+    } finally {
+      setIsSyncing(prev => ({ ...prev, match: null }));
+    }
+  };
+  
+  // Complete a match (mark as completed and sync final scores)
+  const handleCompleteMatch = async (match) => {
+    if (!confirm(`Mark "${match.name}" as completed? This will finalize scores.`)) return;
+    
+    setIsSyncing(prev => ({ ...prev, match: match.id }));
+    
+    try {
+      const response = await liveSyncAPI.completeMatch(match.id, tournament.id);
+      
+      if (response.success) {
+        setSyncStatus(prev => ({ ...prev, match: `✅ ${match.name} marked as completed` }));
+        
+        // Update tournament matches
+        if (onUpdateTournament) {
+          const updatedMatches = (tournament.matches || []).map(m => 
+            m.id === match.id ? { ...m, status: 'completed' } : m
+          );
+          onUpdateTournament({ ...tournament, matches: updatedMatches });
+        }
+      }
+    } catch (error) {
+      setSyncStatus(prev => ({ ...prev, match: `❌ Error: ${error.message}` }));
+    } finally {
+      setIsSyncing(prev => ({ ...prev, match: null }));
     }
   };
   
@@ -2657,24 +2845,115 @@ const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament
               </div>
               
               <div className="sync-card">
-                <h4>📊 Live Scores Sync</h4>
-                <p>Fetch live match scores and calculate fantasy points</p>
+                <h4>📊 Check Live Matches</h4>
+                <p>Check for live T20 matches via Cricket API</p>
                 <button 
                   className="btn-primary btn-large"
                   onClick={handleSyncLiveScores}
                   disabled={isSyncing.scores}
                 >
-                  {isSyncing.scores ? '⏳ Syncing...' : '🔄 Sync Live Scores Now'}
+                  {isSyncing.scores ? '⏳ Checking...' : '🔍 Check Live Matches'}
                 </button>
                 {syncStatus.scores && (
-                  <div className={`sync-result ${syncStatus.scores.startsWith('✅') ? 'success' : 'error'}`}>
+                  <div className={`sync-result ${syncStatus.scores.startsWith('✅') ? 'success' : syncStatus.scores.startsWith('❌') ? 'error' : ''}`}>
                     {syncStatus.scores}
                   </div>
                 )}
               </div>
             </div>
             
-            <div className="sync-schedule">
+            {/* Match-by-Match Sync */}
+            <div className="match-sync-section" style={{ marginTop: '30px' }}>
+              <h3>🏏 Match Scoring Sync</h3>
+              <p className="sync-info">
+                Sync scores for individual matches. Use "Simulate" for test data or "Sync API" if Cricket API is configured.
+              </p>
+              
+              {syncStatus.match && (
+                <div className={`sync-result ${syncStatus.match.startsWith('✅') ? 'success' : syncStatus.match.startsWith('❌') ? 'error' : ''}`} style={{ marginBottom: '15px' }}>
+                  {syncStatus.match}
+                </div>
+              )}
+              
+              <div className="match-sync-list" style={{ display: 'grid', gap: '12px' }}>
+                {(tournament.matches || []).map(match => (
+                  <div 
+                    key={match.id} 
+                    className="match-sync-row" 
+                    style={{ 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      justifyContent: 'space-between',
+                      padding: '12px 16px',
+                      background: 'var(--bg-card)',
+                      borderRadius: '8px',
+                      border: match.status === 'live' ? '2px solid #ef4444' : match.status === 'completed' ? '2px solid #22c55e' : '1px solid var(--border-color)'
+                    }}
+                  >
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: '600' }}>{match.name || `${Array.isArray(match.teams) ? match.teams.join(' vs ') : match.teams}`}</div>
+                      <div style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>
+                        {match.date} • 
+                        <span style={{ 
+                          marginLeft: '8px',
+                          padding: '2px 8px',
+                          borderRadius: '4px',
+                          fontSize: '0.75rem',
+                          background: match.status === 'live' ? '#ef4444' : match.status === 'completed' ? '#22c55e' : '#f59e0b',
+                          color: 'white'
+                        }}>
+                          {match.status?.toUpperCase() || 'UPCOMING'}
+                        </span>
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      {match.status !== 'completed' && (
+                        <>
+                          <button 
+                            className="btn-secondary btn-small"
+                            onClick={() => handleSyncMatch(match, true)}
+                            disabled={isSyncing.match === match.id}
+                            title="Simulate match with random stats"
+                          >
+                            {isSyncing.match === match.id ? '⏳' : '🎲'} Simulate
+                          </button>
+                          <button 
+                            className="btn-primary btn-small"
+                            onClick={() => handleSyncMatch(match, false)}
+                            disabled={isSyncing.match === match.id}
+                            title="Sync from Cricket API (requires API key)"
+                          >
+                            {isSyncing.match === match.id ? '⏳' : '📡'} Sync API
+                          </button>
+                          {match.status === 'live' && (
+                            <button 
+                              className="btn-small"
+                              style={{ background: '#22c55e', color: 'white' }}
+                              onClick={() => handleCompleteMatch(match)}
+                              disabled={isSyncing.match === match.id}
+                              title="Mark match as completed"
+                            >
+                              ✓ Complete
+                            </button>
+                          )}
+                        </>
+                      )}
+                      {match.status === 'completed' && (
+                        <span style={{ color: '#22c55e', fontWeight: '600' }}>✓ Completed</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+                
+                {(!tournament.matches || tournament.matches.length === 0) && (
+                  <div style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)' }}>
+                    No matches defined. Add matches in the Overview tab.
+                  </div>
+                )}
+              </div>
+            </div>
+            
+            <div className="sync-schedule" style={{ marginTop: '30px' }}>
               <h4>⏰ Automatic Sync Setup</h4>
               <p className="cron-info">
                 For automatic syncing, use <a href="https://cron-job.org" target="_blank" rel="noopener noreferrer">cron-job.org</a> (free) to schedule API calls.
@@ -2696,7 +2975,7 @@ const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament
                   <tr>
                     <td>Live Scores</td>
                     <td>Every 15 min during matches</td>
-                    <td><code>/api/sync/live-scores</code></td>
+                    <td><code>/api/live-sync</code></td>
                   </tr>
                 </tbody>
               </table>
@@ -3932,7 +4211,18 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
   return (
     <div className="dashboard">
       {/* Player Profile Modal */}
-      {selectedPlayerProfile && (
+      {selectedPlayerProfile && (() => {
+        // Generate game log for this player based on tournament matches
+        const playerGameLog = selectedPlayerProfile.gameLog && selectedPlayerProfile.gameLog.length > 0 
+          ? selectedPlayerProfile.gameLog 
+          : generatePlayerGameLog(selectedPlayerProfile, tournament.matches);
+        
+        // Calculate totals from game log
+        const totalFromGames = playerGameLog.reduce((sum, g) => sum + (g.points || 0), 0);
+        const displayTotalPoints = selectedPlayerProfile.totalPoints || totalFromGames || 0;
+        const displayMatches = selectedPlayerProfile.matchesPlayed || playerGameLog.length || 0;
+        
+        return (
         <div className="player-profile-modal" onClick={() => setSelectedPlayerProfile(null)}>
           <div className="player-profile-content" onClick={(e) => e.stopPropagation()}>
             <button className="close-btn" onClick={() => setSelectedPlayerProfile(null)}>×</button>
@@ -3950,17 +4240,17 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
             
             <div className="profile-stats-summary">
               <div className="stat-box">
-                <span className="stat-value">{selectedPlayerProfile.totalPoints || 0}</span>
+                <span className="stat-value">{displayTotalPoints}</span>
                 <span className="stat-label">Total Pts</span>
               </div>
               <div className="stat-box">
-                <span className="stat-value">{selectedPlayerProfile.matchesPlayed || 0}</span>
+                <span className="stat-value">{displayMatches}</span>
                 <span className="stat-label">Matches</span>
               </div>
               <div className="stat-box">
                 <span className="stat-value">
-                  {selectedPlayerProfile.matchesPlayed > 0 
-                    ? Math.round((selectedPlayerProfile.totalPoints || 0) / selectedPlayerProfile.matchesPlayed) 
+                  {displayMatches > 0 
+                    ? Math.round(displayTotalPoints / displayMatches) 
                     : '-'}
                 </span>
                 <span className="stat-label">Avg Pts</span>
@@ -3969,7 +4259,7 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
             
             <div className="game-log-section">
               <h3>📊 Game Log</h3>
-              {selectedPlayerProfile.gameLog && selectedPlayerProfile.gameLog.length > 0 ? (
+              {playerGameLog && playerGameLog.length > 0 ? (
                 <div className="game-log-table">
                   <div className="game-log-header">
                     <span>Date</span>
@@ -3981,7 +4271,7 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
                     <span>Ct/RO</span>
                     <span>Pts</span>
                   </div>
-                  {selectedPlayerProfile.gameLog.map((game, idx) => (
+                  {playerGameLog.map((game, idx) => (
                     <div key={idx} className="game-log-row">
                       <span>{new Date(game.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
                       <span>{game.opponent}</span>
@@ -4003,7 +4293,8 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       <header className="dashboard-header">
         <div className="header-left">
@@ -5316,6 +5607,10 @@ export default function App() {
           user={user}
           tournament={selectedTournament || TOURNAMENTS.test_ind_nz}
           players={playerPool}
+          onUpdateTournament={(updatedTournament) => {
+            console.log('📅 Tournament updated:', updatedTournament);
+            setSelectedTournament(updatedTournament);
+          }}
           onLogout={handleLogout}
           onBackToTournaments={handleBackToTournaments}
           onSwitchTournament={handleSwitchTournament}

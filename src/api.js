@@ -316,6 +316,40 @@ export const usersAPI = {
 };
 
 // ============================================
+// LIVE SYNC API
+// ============================================
+export const liveSyncAPI = {
+  // Get current live matches from Cricket API
+  async getLiveMatches() {
+    return apiCall('/live-sync');
+  },
+
+  // Sync scores for a specific match
+  async syncMatch(matchId, tournamentId, playerStats = null) {
+    return apiCall('/live-sync', {
+      method: 'POST',
+      body: { matchId, tournamentId, playerStats }
+    });
+  },
+
+  // Simulate match scores (for testing)
+  async simulateMatch(matchId, tournamentId, players) {
+    return apiCall('/live-sync?action=simulate', {
+      method: 'POST',
+      body: { matchId, tournamentId, players }
+    });
+  },
+
+  // Complete a match and optionally sync final scores
+  async completeMatch(matchId, tournamentId, playerStats = null) {
+    return apiCall('/live-sync?action=complete', {
+      method: 'POST',
+      body: { matchId, tournamentId, playerStats }
+    });
+  }
+};
+
+// ============================================
 // SEED API (Part of Admin)
 // ============================================
 export const seedAPI = {
@@ -403,6 +437,7 @@ export default {
   roster: rosterAPI,
   users: usersAPI,
   seed: seedAPI,
+  liveSync: liveSyncAPI,
   initializeAppData,
   getDraftData,
   getStandings
