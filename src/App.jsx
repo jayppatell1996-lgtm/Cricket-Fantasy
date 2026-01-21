@@ -309,23 +309,359 @@ const checkWeeklyReset = (team) => {
   return team;
 };
 
-// Test Players for India vs NZ
-// No hardcoded player data - all players come from API/database
-const TEST_PLAYERS_IND_NZ = []; // Empty - fetched from API
-const FULL_PLAYER_POOL = []; // Empty - fetched from API
+// ============================================
+// PLAYER DATA - All Tournaments
+// ============================================
 
-// Helper to fetch players from API
-const fetchPlayersFromApi = async (tournamentId) => {
-  try {
-    const response = await fetch(`/api/players?tournament=${tournamentId}`);
-    if (!response.ok) throw new Error('Failed to fetch players');
-    const data = await response.json();
-    return data.players || [];
-  } catch (error) {
-    console.error('Error fetching players:', error);
-    return [];
+// India vs NZ T20 Series 2026 Players
+const PLAYERS_IND_NZ = [
+  // INDIA
+  { id: 'sky_ind', name: 'Suryakumar Yadav', team: 'IND', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'ishan_ind', name: 'Ishan Kishan', team: 'IND', position: 'keeper', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'shreyas_ind', name: 'Shreyas Iyer', team: 'IND', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'sanju_ind', name: 'Sanju Samson', team: 'IND', position: 'keeper', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'rinku_ind', name: 'Rinku Singh', team: 'IND', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'axar_ind', name: 'Axar Patel', team: 'IND', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'abhishek_ind', name: 'Abhishek Sharma', team: 'IND', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'dube_ind', name: 'Shivam Dube', team: 'IND', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'hardik_ind', name: 'Hardik Pandya', team: 'IND', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'tilak_ind', name: 'Tilak Varma', team: 'IND', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'washi_ind', name: 'Washington Sundar', team: 'IND', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'arshdeep_ind', name: 'Arshdeep Singh', team: 'IND', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'bumrah_ind', name: 'Jasprit Bumrah', team: 'IND', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'harshit_ind', name: 'Harshit Rana', team: 'IND', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'kuldeep_ind', name: 'Kuldeep Yadav', team: 'IND', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'bishnoi_ind', name: 'Ravi Bishnoi', team: 'IND', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'varun_ind', name: 'Varun Chakravarthy', team: 'IND', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  // NEW ZEALAND
+  { id: 'conway_nz', name: 'Devon Conway', team: 'NZ', position: 'keeper', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'jacobs_nz', name: 'Bevon Jacobs', team: 'NZ', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'robinson_nz', name: 'Tim Robinson', team: 'NZ', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'santner_nz', name: 'Mitchell Santner', team: 'NZ', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'bracewell_nz', name: 'Michael Bracewell', team: 'NZ', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'chapman_nz', name: 'Mark Chapman', team: 'NZ', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'foulkes_nz', name: 'Zak Foulkes', team: 'NZ', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'mitchell_nz', name: 'Daryl Mitchell', team: 'NZ', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'neesham_nz', name: 'James Neesham', team: 'NZ', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'phillips_nz', name: 'Glenn Phillips', team: 'NZ', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'rachin_nz', name: 'Rachin Ravindra', team: 'NZ', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'clarke_nz', name: 'Kristian Clarke', team: 'NZ', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'duffy_nz', name: 'Jacob Duffy', team: 'NZ', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'henry_nz', name: 'Matt Henry', team: 'NZ', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'jamieson_nz', name: 'Kyle Jamieson', team: 'NZ', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'sodhi_nz', name: 'Ish Sodhi', team: 'NZ', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+];
+
+// T20 World Cup 2026 Players
+const PLAYERS_T20_WC = [
+  // INDIA
+  { id: 'sky_wc', name: 'Suryakumar Yadav', team: 'IND', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'ishan_wc', name: 'Ishan Kishan', team: 'IND', position: 'keeper', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'sanju_wc', name: 'Sanju Samson', team: 'IND', position: 'keeper', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'rinku_wc', name: 'Rinku Singh', team: 'IND', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'axar_wc', name: 'Axar Patel', team: 'IND', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'abhishek_wc', name: 'Abhishek Sharma', team: 'IND', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'dube_wc', name: 'Shivam Dube', team: 'IND', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'hardik_wc', name: 'Hardik Pandya', team: 'IND', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'tilak_wc', name: 'Tilak Varma', team: 'IND', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'washi_wc', name: 'Washington Sundar', team: 'IND', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'arshdeep_wc', name: 'Arshdeep Singh', team: 'IND', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'bumrah_wc', name: 'Jasprit Bumrah', team: 'IND', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'harshit_wc', name: 'Harshit Rana', team: 'IND', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'kuldeep_wc', name: 'Kuldeep Yadav', team: 'IND', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'varun_wc', name: 'Varun Chakravarthy', team: 'IND', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  // AUSTRALIA
+  { id: 'david_aus', name: 'Tim David', team: 'AUS', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'head_aus', name: 'Travis Head', team: 'AUS', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'inglis_aus', name: 'Josh Inglis', team: 'AUS', position: 'keeper', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'short_aus', name: 'Matthew Short', team: 'AUS', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'marsh_aus', name: 'Mitchell Marsh', team: 'AUS', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'connolly_aus', name: 'Cooper Connolly', team: 'AUS', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'green_aus', name: 'Cameron Green', team: 'AUS', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'maxwell_aus', name: 'Glenn Maxwell', team: 'AUS', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'stoinis_aus', name: 'Marcus Stoinis', team: 'AUS', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'bartlett_aus', name: 'Xavier Bartlett', team: 'AUS', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'cummins_aus', name: 'Pat Cummins', team: 'AUS', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'ellis_aus', name: 'Nathan Ellis', team: 'AUS', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'hazlewood_aus', name: 'Josh Hazlewood', team: 'AUS', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'kuhnemann_aus', name: 'Matthew Kuhnemann', team: 'AUS', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'zampa_aus', name: 'Adam Zampa', team: 'AUS', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  // ENGLAND
+  { id: 'brook_eng', name: 'Harry Brook', team: 'ENG', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'banton_eng', name: 'Tom Banton', team: 'ENG', position: 'keeper', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'buttler_eng', name: 'Jos Buttler', team: 'ENG', position: 'keeper', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'duckett_eng', name: 'Ben Duckett', team: 'ENG', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'salt_eng', name: 'Phil Salt', team: 'ENG', position: 'keeper', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'bethell_eng', name: 'Jacob Bethell', team: 'ENG', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'curran_eng', name: 'Sam Curran', team: 'ENG', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'dawson_eng', name: 'Liam Dawson', team: 'ENG', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'jacks_eng', name: 'Will Jacks', team: 'ENG', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'overton_eng', name: 'Jamie Overton', team: 'ENG', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'rehan_eng', name: 'Rehan Ahmed', team: 'ENG', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'archer_eng', name: 'Jofra Archer', team: 'ENG', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'rashid_eng', name: 'Adil Rashid', team: 'ENG', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'tongue_eng', name: 'Josh Tongue', team: 'ENG', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'wood_eng', name: 'Luke Wood', team: 'ENG', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  // SOUTH AFRICA
+  { id: 'markram_sa', name: 'Aiden Markram', team: 'SA', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'brevis_sa', name: 'Dewald Brevis', team: 'SA', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'dekock_sa', name: 'Quinton de Kock', team: 'SA', position: 'keeper', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'dezorzi_sa', name: 'Tony de Zorzi', team: 'SA', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'miller_sa', name: 'David Miller', team: 'SA', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'bosch_sa', name: 'Corbin Bosch', team: 'SA', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'ferreira_sa', name: 'Donovan Ferreira', team: 'SA', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'jansen_sa', name: 'Marco Jansen', team: 'SA', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'linde_sa', name: 'George Linde', team: 'SA', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'maharaj_sa', name: 'Keshav Maharaj', team: 'SA', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'maphaka_sa', name: 'Kwena Maphaka', team: 'SA', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'ngidi_sa', name: 'Lungi Ngidi', team: 'SA', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'nortje_sa', name: 'Anrich Nortje', team: 'SA', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'rabada_sa', name: 'Kagiso Rabada', team: 'SA', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  // NEW ZEALAND
+  { id: 'conway_wc', name: 'Devon Conway', team: 'NZ', position: 'keeper', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'allen_wc', name: 'Finn Allen', team: 'NZ', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'phillips_wc', name: 'Glenn Phillips', team: 'NZ', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'mitchell_wc', name: 'Daryl Mitchell', team: 'NZ', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'chapman_wc', name: 'Mark Chapman', team: 'NZ', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'rachin_wc', name: 'Rachin Ravindra', team: 'NZ', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'santner_wc', name: 'Mitchell Santner', team: 'NZ', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'bracewell_wc', name: 'Michael Bracewell', team: 'NZ', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'neesham_wc', name: 'James Neesham', team: 'NZ', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'southee_wc', name: 'Tim Southee', team: 'NZ', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'boult_wc', name: 'Trent Boult', team: 'NZ', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'henry_wc', name: 'Matt Henry', team: 'NZ', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'ferguson_wc', name: 'Lockie Ferguson', team: 'NZ', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'sodhi_wc', name: 'Ish Sodhi', team: 'NZ', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  // AFGHANISTAN
+  { id: 'rashid_afg', name: 'Rashid Khan', team: 'AFG', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'nabi_afg', name: 'Mohammad Nabi', team: 'AFG', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'gurbaz_afg', name: 'Rahmanullah Gurbaz', team: 'AFG', position: 'keeper', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'ibrahim_afg', name: 'Ibrahim Zadran', team: 'AFG', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'zazai_afg', name: 'Hazratullah Zazai', team: 'AFG', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'najib_afg', name: 'Najibullah Zadran', team: 'AFG', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'gulbadin_afg', name: 'Gulbadin Naib', team: 'AFG', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'azmat_afg', name: 'Azmatullah Omarzai', team: 'AFG', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'mujeeb_afg', name: 'Mujeeb Ur Rahman', team: 'AFG', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'naveen_afg', name: 'Naveen-ul-Haq', team: 'AFG', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'fazal_afg', name: 'Fazalhaq Farooqi', team: 'AFG', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'noor_afg', name: 'Noor Ahmad', team: 'AFG', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  // BANGLADESH
+  { id: 'shakib_ban', name: 'Shakib Al Hasan', team: 'BAN', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'liton_ban', name: 'Liton Das', team: 'BAN', position: 'keeper', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'mushfiq_ban', name: 'Mushfiqur Rahim', team: 'BAN', position: 'keeper', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'tanzid_ban', name: 'Tanzid Hasan', team: 'BAN', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'hridoy_ban', name: 'Towhid Hridoy', team: 'BAN', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'mahmud_ban', name: 'Mahmudullah', team: 'BAN', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'mehidy_ban', name: 'Mehidy Hasan Miraz', team: 'BAN', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'taskin_ban', name: 'Taskin Ahmed', team: 'BAN', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'mustafiz_ban', name: 'Mustafizur Rahman', team: 'BAN', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'shoriful_ban', name: 'Shoriful Islam', team: 'BAN', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  // IRELAND
+  { id: 'stirling_ire', name: 'Paul Stirling', team: 'IRE', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'tucker_ire', name: 'Lorcan Tucker', team: 'IRE', position: 'keeper', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'balbirnie_ire', name: 'Andrew Balbirnie', team: 'IRE', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'tector_ire', name: 'Harry Tector', team: 'IRE', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'campher_ire', name: 'Curtis Campher', team: 'IRE', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'delany_ire', name: 'Gareth Delany', team: 'IRE', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'little_ire', name: 'Josh Little', team: 'IRE', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'adair_ire', name: 'Mark Adair', team: 'IRE', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  // ZIMBABWE
+  { id: 'williams_zim', name: 'Sean Williams', team: 'ZIM', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'ervine_zim', name: 'Craig Ervine', team: 'ZIM', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'raza_zim', name: 'Sikandar Raza', team: 'ZIM', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'chakabva_zim', name: 'Regis Chakabva', team: 'ZIM', position: 'keeper', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'madhevere_zim', name: 'Wessly Madhevere', team: 'ZIM', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'muzarabani_zim', name: 'Blessing Muzarabani', team: 'ZIM', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'ngarava_zim', name: 'Richard Ngarava', team: 'ZIM', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  // NAMIBIA
+  { id: 'erasmus_nam', name: 'Gerhard Erasmus', team: 'NAM', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'frylinck_nam', name: 'Jan Frylinck', team: 'NAM', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'wiese_nam', name: 'David Wiese', team: 'NAM', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'smit_nam', name: 'JJ Smit', team: 'NAM', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'green_nam', name: 'Zane Green', team: 'NAM', position: 'keeper', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'trumpelmann_nam', name: 'Ruben Trumpelmann', team: 'NAM', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  // NETHERLANDS
+  { id: 'ackermann_ned', name: 'Colin Ackermann', team: 'NED', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'odowd_ned', name: 'Max ODowd', team: 'NED', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'vikram_ned', name: 'Vikramjit Singh', team: 'NED', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'deleede_ned', name: 'Bas de Leede', team: 'NED', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'edwards_ned', name: 'Scott Edwards', team: 'NED', position: 'keeper', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'vanbeek_ned', name: 'Logan van Beek', team: 'NED', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  // NEPAL
+  { id: 'sandeep_nep', name: 'Sandeep Lamichhane', team: 'NEP', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'rohit_nep', name: 'Rohit Paudel', team: 'NEP', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'kushal_nep', name: 'Kushal Bhurtel', team: 'NEP', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'aasif_nep', name: 'Aasif Sheikh', team: 'NEP', position: 'keeper', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'dipendra_nep', name: 'Dipendra Singh Airee', team: 'NEP', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'sompal_nep', name: 'Sompal Kami', team: 'NEP', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  // OMAN
+  { id: 'aqib_oma', name: 'Aqib Ilyas', team: 'OMA', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'zeeshan_oma', name: 'Zeeshan Maqsood', team: 'OMA', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'jatinder_oma', name: 'Jatinder Singh', team: 'OMA', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'pratik_oma', name: 'Pratik Athavale', team: 'OMA', position: 'keeper', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'bilal_oma', name: 'Bilal Khan', team: 'OMA', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'mehran_oma', name: 'Mehran Khan', team: 'OMA', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  // CANADA
+  { id: 'aaron_can', name: 'Aaron Johnson', team: 'CAN', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'navneet_can', name: 'Navneet Dhaliwal', team: 'CAN', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'kirton_can', name: 'Nicholas Kirton', team: 'CAN', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'movva_can', name: 'Shreyas Movva', team: 'CAN', position: 'keeper', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'dilon_can', name: 'Dilon Heyliger', team: 'CAN', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'saad_can', name: 'Saad Bin Zafar', team: 'CAN', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'kaleem_can', name: 'Kaleem Sana', team: 'CAN', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  // ITALY
+  { id: 'berg_ita', name: 'Gareth Berg', team: 'ITA', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'stewart_ita', name: 'Grant Stewart', team: 'ITA', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'nikolai_ita', name: 'Nikolai Smith', team: 'ITA', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'petricola_ita', name: 'Peter Petricola', team: 'ITA', position: 'keeper', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'manpreet_ita', name: 'Manpreet Singh', team: 'ITA', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+];
+
+// IPL 2026 Players
+const PLAYERS_IPL = [
+  // CSK
+  { id: 'ruturaj_csk', name: 'Ruturaj Gaikwad', team: 'CSK', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'brevis_csk', name: 'Dewald Brevis', team: 'CSK', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'dhoni_csk', name: 'MS Dhoni', team: 'CSK', position: 'keeper', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'sanju_csk', name: 'Sanju Samson', team: 'CSK', position: 'keeper', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'short_csk', name: 'Matthew Short', team: 'CSK', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'sarfaraz_csk', name: 'Sarfaraz Khan', team: 'CSK', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'dube_csk', name: 'Shivam Dube', team: 'CSK', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'overton_csk', name: 'Jamie Overton', team: 'CSK', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'gopal_csk', name: 'Shreyas Gopal', team: 'CSK', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'foulkes_csk', name: 'Zak Foulkes', team: 'CSK', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'khaleel_csk', name: 'Khaleel Ahmed', team: 'CSK', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'chahar_csk', name: 'Rahul Chahar', team: 'CSK', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'ellis_csk', name: 'Nathan Ellis', team: 'CSK', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'henry_csk', name: 'Matt Henry', team: 'CSK', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'hosein_csk', name: 'Akeal Hosein', team: 'CSK', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'noor_csk', name: 'Noor Ahmad', team: 'CSK', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  // MI
+  { id: 'rohit_mi', name: 'Rohit Sharma', team: 'MI', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'sky_mi', name: 'Suryakumar Yadav', team: 'MI', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'tilak_mi', name: 'Tilak Varma', team: 'MI', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'rickelton_mi', name: 'Ryan Rickelton', team: 'MI', position: 'keeper', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'minz_mi', name: 'Robin Minz', team: 'MI', position: 'keeper', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'rutherford_mi', name: 'Sherfane Rutherford', team: 'MI', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'hardik_mi', name: 'Hardik Pandya', team: 'MI', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'jacks_mi', name: 'Will Jacks', team: 'MI', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'santner_mi', name: 'Mitchell Santner', team: 'MI', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'bawa_mi', name: 'Raj Bawa', team: 'MI', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'bosch_mi', name: 'Corbin Bosch', team: 'MI', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'bumrah_mi', name: 'Jasprit Bumrah', team: 'MI', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'boult_mi', name: 'Trent Boult', team: 'MI', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'dchahar_mi', name: 'Deepak Chahar', team: 'MI', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'shardul_mi', name: 'Shardul Thakur', team: 'MI', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'ghazanfar_mi', name: 'AM Ghazanfar', team: 'MI', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  // RCB
+  { id: 'kohli_rcb', name: 'Virat Kohli', team: 'RCB', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'patidar_rcb', name: 'Rajat Patidar', team: 'RCB', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'salt_rcb', name: 'Phil Salt', team: 'RCB', position: 'keeper', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'livingstone_rcb', name: 'Liam Livingstone', team: 'RCB', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'padikkal_rcb', name: 'Devdutt Padikkal', team: 'RCB', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'krunal_rcb', name: 'Krunal Pandya', team: 'RCB', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'david_rcb', name: 'Tim David', team: 'RCB', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'bethell_rcb', name: 'Jacob Bethell', team: 'RCB', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'hazlewood_rcb', name: 'Josh Hazlewood', team: 'RCB', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'bhuvi_rcb', name: 'Bhuvneshwar Kumar', team: 'RCB', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'ngidi_rcb', name: 'Lungi Ngidi', team: 'RCB', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  // KKR
+  { id: 'venky_kkr', name: 'Venkatesh Iyer', team: 'KKR', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'rinku_kkr', name: 'Rinku Singh', team: 'KKR', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'raghu_kkr', name: 'Angkrish Raghuvanshi', team: 'KKR', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'dekock_kkr', name: 'Quinton de Kock', team: 'KKR', position: 'keeper', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'rahane_kkr', name: 'Ajinkya Rahane', team: 'KKR', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'russell_kkr', name: 'Andre Russell', team: 'KKR', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'narine_kkr', name: 'Sunil Narine', team: 'KKR', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'nortje_kkr', name: 'Anrich Nortje', team: 'KKR', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'varun_kkr', name: 'Varun Chakravarthy', team: 'KKR', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'harshit_kkr', name: 'Harshit Rana', team: 'KKR', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'spencer_kkr', name: 'Spencer Johnson', team: 'KKR', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  // DC
+  { id: 'pant_dc', name: 'Rishabh Pant', team: 'DC', position: 'keeper', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'jake_dc', name: 'Jake Fraser-McGurk', team: 'DC', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'brook_dc', name: 'Harry Brook', team: 'DC', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'kl_dc', name: 'KL Rahul', team: 'DC', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'stubbs_dc', name: 'Tristan Stubbs', team: 'DC', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'axar_dc', name: 'Axar Patel', team: 'DC', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'sameer_dc', name: 'Sameer Rizvi', team: 'DC', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'starc_dc', name: 'Mitchell Starc', team: 'DC', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'kuldeep_dc', name: 'Kuldeep Yadav', team: 'DC', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'natarajan_dc', name: 'T Natarajan', team: 'DC', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'mohit_dc', name: 'Mohit Sharma', team: 'DC', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  // GT
+  { id: 'gill_gt', name: 'Shubman Gill', team: 'GT', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'buttler_gt', name: 'Jos Buttler', team: 'GT', position: 'keeper', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'sudharsan_gt', name: 'Sai Sudharsan', team: 'GT', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'shahrukh_gt', name: 'Shahrukh Khan', team: 'GT', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'washi_gt', name: 'Washington Sundar', team: 'GT', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'rashid_gt', name: 'Rashid Khan', team: 'GT', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'rabada_gt', name: 'Kagiso Rabada', team: 'GT', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'siraj_gt', name: 'Mohammed Siraj', team: 'GT', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'prasidh_gt', name: 'Prasidh Krishna', team: 'GT', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'tewatia_gt', name: 'Rahul Tewatia', team: 'GT', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  // PBKS
+  { id: 'shreyas_pbks', name: 'Shreyas Iyer', team: 'PBKS', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'shashank_pbks', name: 'Shashank Singh', team: 'PBKS', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'prabh_pbks', name: 'Prabhsimran Singh', team: 'PBKS', position: 'keeper', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'maxwell_pbks', name: 'Glenn Maxwell', team: 'PBKS', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'stoinis_pbks', name: 'Marcus Stoinis', team: 'PBKS', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'nehal_pbks', name: 'Nehal Wadhera', team: 'PBKS', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'chahal_pbks', name: 'Yuzvendra Chahal', team: 'PBKS', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'arshdeep_pbks', name: 'Arshdeep Singh', team: 'PBKS', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'lockie_pbks', name: 'Lockie Ferguson', team: 'PBKS', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'harshal_pbks', name: 'Harshal Patel', team: 'PBKS', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'jansen_pbks', name: 'Marco Jansen', team: 'PBKS', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  // RR
+  { id: 'jaiswal_rr', name: 'Yashasvi Jaiswal', team: 'RR', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'parag_rr', name: 'Riyan Parag', team: 'RR', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'hetmyer_rr', name: 'Shimron Hetmyer', team: 'RR', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'jurel_rr', name: 'Dhruv Jurel', team: 'RR', position: 'keeper', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'archer_rr', name: 'Jofra Archer', team: 'RR', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'boult_rr', name: 'Trent Boult', team: 'RR', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'ashwin_rr', name: 'Ravichandran Ashwin', team: 'RR', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'hasaranga_rr', name: 'Wanindu Hasaranga', team: 'RR', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'theekshana_rr', name: 'Maheesh Theekshana', team: 'RR', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  // SRH
+  { id: 'head_srh', name: 'Travis Head', team: 'SRH', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'abhishek_srh', name: 'Abhishek Sharma', team: 'SRH', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'klaasen_srh', name: 'Heinrich Klaasen', team: 'SRH', position: 'keeper', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'ishan_srh', name: 'Ishan Kishan', team: 'SRH', position: 'keeper', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'nitish_srh', name: 'Nitish Kumar Reddy', team: 'SRH', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'cummins_srh', name: 'Pat Cummins', team: 'SRH', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'harshal_srh', name: 'Harshal Patel', team: 'SRH', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'zampa_srh', name: 'Adam Zampa', team: 'SRH', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'umran_srh', name: 'Umran Malik', team: 'SRH', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  // LSG
+  { id: 'pooran_lsg', name: 'Nicholas Pooran', team: 'LSG', position: 'keeper', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'badoni_lsg', name: 'Ayush Badoni', team: 'LSG', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'miller_lsg', name: 'David Miller', team: 'LSG', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'markram_lsg', name: 'Aiden Markram', team: 'LSG', position: 'batter', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'marsh_lsg', name: 'Mitchell Marsh', team: 'LSG', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'samad_lsg', name: 'Abdul Samad', team: 'LSG', position: 'allrounder', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'avesh_lsg', name: 'Avesh Khan', team: 'LSG', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'bishnoi_lsg', name: 'Ravi Bishnoi', team: 'LSG', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'mayank_lsg', name: 'Mayank Yadav', team: 'LSG', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+  { id: 'mohsin_lsg', name: 'Mohsin Khan', team: 'LSG', position: 'bowler', totalPoints: 0, matchesPlayed: 0, gameLog: [] },
+];
+
+// Get players for a specific tournament
+const getPlayersForTournament = (tournamentId) => {
+  switch (tournamentId) {
+    case 'test_ind_nz':
+      return PLAYERS_IND_NZ;
+    case 't20_wc_2026':
+      return PLAYERS_T20_WC;
+    case 'ipl_2026':
+      return PLAYERS_IPL;
+    default:
+      return [];
   }
 };
+
+// Legacy exports for backward compatibility
+const TEST_PLAYERS_IND_NZ = PLAYERS_IND_NZ;
+const FULL_PLAYER_POOL = PLAYERS_T20_WC;
 
 // ============================================
 // UTILITY FUNCTIONS
@@ -2209,7 +2545,7 @@ const Dashboard = ({ user, team, tournament, onLogout, onUpdateTeam, onBackToTou
   const [isTestingDb, setIsTestingDb] = useState(false);
   const [pointsVerification, setPointsVerification] = useState(null);
   
-  const playerPool = tournament.isTest ? TEST_PLAYERS_IND_NZ : FULL_PLAYER_POOL;
+  const playerPool = getPlayersForTournament(tournament.id);
   
   // Check and reset weekly pickups if new week
   useEffect(() => {
@@ -4144,7 +4480,7 @@ export default function App() {
     setCurrentPage('tournamentSelect');
   };
 
-  const playerPool = selectedTournament?.isTest ? TEST_PLAYERS_IND_NZ : FULL_PLAYER_POOL;
+  const playerPool = selectedTournament ? getPlayersForTournament(selectedTournament.id) : [];
 
   return (
     <>
