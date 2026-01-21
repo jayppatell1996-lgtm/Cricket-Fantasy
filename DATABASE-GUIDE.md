@@ -12,21 +12,16 @@ This guide explains how to set up and use the Turso database integration for the
    - `TURSO_DATABASE_URL` - Your Turso database URL
    - `TURSO_AUTH_TOKEN` - Your Turso auth token
 
-## API Endpoints Created
+## API Endpoints (6 Total - Within Vercel Hobby Limit)
 
-| Endpoint | Methods | Description |
-|----------|---------|-------------|
-| `/api/health` | GET | Check database connectivity |
-| `/api/seed` | GET, POST | Seed database with initial data |
-| `/api/auth/signup` | POST | Create new user account |
-| `/api/auth/login` | POST | Login existing user |
-| `/api/tournaments` | GET, POST | Get/create tournaments |
-| `/api/leagues` | GET, POST, PUT, DELETE | Manage fantasy leagues |
-| `/api/teams` | GET, POST, PUT, DELETE | Manage fantasy teams |
-| `/api/players` | GET, POST, PUT, DELETE | Manage cricket players |
-| `/api/roster` | GET, POST, DELETE | Manage team rosters |
-| `/api/draft-picks` | GET, POST, DELETE | Manage draft picks |
-| `/api/users` | GET, DELETE | Admin user management |
+| Endpoint | Methods | Actions/Params |
+|----------|---------|----------------|
+| `/api/auth` | POST | `?action=signup` or `?action=login` |
+| `/api/admin` | GET, POST, DELETE | `?action=health`, `seed`, `users`, `tournaments` |
+| `/api/leagues` | GET, POST, PUT, DELETE | League management |
+| `/api/teams` | GET, POST, PUT, DELETE | Fantasy team management |
+| `/api/players` | GET, POST, PUT, DELETE | Player management |
+| `/api/draft` | GET, POST, DELETE | `?type=picks` or `?type=roster` |
 
 ## Setup Steps
 
@@ -45,16 +40,15 @@ This guide explains how to set up and use the Turso database integration for the
 
 After deployment, visit:
 ```
-https://your-app.vercel.app/api/health
+https://your-app.vercel.app/api/admin?action=health
 ```
 
 You should see a response like:
 ```json
 {
   "success": true,
-  "message": "Database connection healthy",
+  "message": "Database healthy",
   "checks": {
-    "env": { "hasDbUrl": true, "hasAuthToken": true },
     "database": { "connected": true },
     "tables": {
       "users": 0,
@@ -68,18 +62,11 @@ You should see a response like:
 
 ### Step 3: Seed the Database
 
-To populate the database with initial data (tournaments and players), call:
-
-**Using curl:**
-```bash
-curl -X POST https://your-app.vercel.app/api/seed \
-  -H "Content-Type: application/json" \
-  -d '{"seedType": "all"}'
-```
+To populate the database with initial data, call:
 
 **Using browser console:**
 ```javascript
-fetch('/api/seed', {
+fetch('/api/admin?action=seed', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({ seedType: 'all' })
@@ -89,14 +76,14 @@ fetch('/api/seed', {
 This will:
 - Create 3 tournaments (IND vs NZ Test, T20 WC 2026, IPL 2026)
 - Create default leagues for each tournament
-- Add 33 players for IND vs NZ Test tournament
-- Create an admin user (admin@t20fantasy.com)
+- Add 32 players for IND vs NZ Test tournament
+- Create an admin user (admin@t20fantasy.com / admin123)
 
 ### Step 4: Verify Seeding
 
-Visit `/api/seed` (GET request) to check counts:
+Visit `/api/admin?action=seed` (GET request) to check counts:
 ```
-https://your-app.vercel.app/api/seed
+https://your-app.vercel.app/api/admin?action=seed
 ```
 
 ## SQL Commands for Turso Console

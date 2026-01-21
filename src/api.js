@@ -1,6 +1,14 @@
 /**
  * API Service for T20 Fantasy Cricket
  * Provides functions to interact with the backend APIs
+ * 
+ * Consolidated API Endpoints:
+ * - /api/auth?action=signup|login
+ * - /api/admin?action=health|seed|users|tournaments
+ * - /api/leagues
+ * - /api/teams
+ * - /api/players
+ * - /api/draft?type=picks|roster
  */
 
 // Base URL for API calls
@@ -41,14 +49,14 @@ async function apiCall(endpoint, options = {}) {
 // ============================================
 export const authAPI = {
   async signup(email, password, name) {
-    return apiCall('/auth/signup', {
+    return apiCall('/auth?action=signup', {
       method: 'POST',
       body: { email, password, name }
     });
   },
 
   async login(email, password) {
-    return apiCall('/auth/login', {
+    return apiCall('/auth?action=login', {
       method: 'POST',
       body: { email, password }
     });
@@ -56,18 +64,56 @@ export const authAPI = {
 };
 
 // ============================================
-// TOURNAMENTS API
+// ADMIN API (Health, Seed, Users, Tournaments)
 // ============================================
-export const tournamentsAPI = {
-  async getAll() {
-    return apiCall('/tournaments');
+export const adminAPI = {
+  async health() {
+    return apiCall('/admin?action=health');
   },
 
-  async create(tournament) {
-    return apiCall('/tournaments', {
+  async getSeedStatus() {
+    return apiCall('/admin?action=seed');
+  },
+
+  async seed(seedType = 'all') {
+    return apiCall('/admin?action=seed', {
+      method: 'POST',
+      body: { seedType }
+    });
+  },
+
+  async getUsers() {
+    return apiCall('/admin?action=users');
+  },
+
+  async deleteUser(userId) {
+    return apiCall(`/admin?action=users&id=${userId}`, {
+      method: 'DELETE'
+    });
+  },
+
+  async getTournaments() {
+    return apiCall('/admin?action=tournaments');
+  },
+
+  async createTournament(tournament) {
+    return apiCall('/admin?action=tournaments', {
       method: 'POST',
       body: tournament
     });
+  }
+};
+
+// ============================================
+// TOURNAMENTS API (uses admin endpoint)
+// ============================================
+export const tournamentsAPI = {
+  async getAll() {
+    return adminAPI.getTournaments();
+  },
+
+  async create(tournament) {
+    return adminAPI.createTournament(tournament);
   }
 };
 
@@ -196,22 +242,44 @@ export const playersAPI = {
 };
 
 // ============================================
-// ROSTER API
+// DRAFT API (Picks + Roster)
+// ============================================
+export const draftAPI = {
+  async getPicks(leagueId) {
+    return apiCall(`/draft?type=picks&leagueId=${leagueId}`);
+  },
+
+  async makePick(pick) {
+    return apiCall('/draft?type=picks', {
+      method: 'POST',
+      body: pick
+    });
+  },
+
+  async resetDraft(leagueId) {
+    return apiCall(`/draft?type=picks&leagueId=${leagueId}`, {
+      method: 'DELETE'
+    });
+  }
+};
+
+// ============================================
+// ROSTER API (Part of Draft)
 // ============================================
 export const rosterAPI = {
   async get(teamId) {
-    return apiCall(`/roster?teamId=${teamId}`);
+    return apiCall(`/draft?type=roster&teamId=${teamId}`);
   },
 
-  async addPlayer(teamId, playerId, slot, acquiredVia = 'draft') {
-    return apiCall('/roster', {
+  async addPlayer(teamId, playerId, slot, acquiredVia = 'free_agency') {
+    return apiCall('/draft?type=roster', {
       method: 'POST',
       body: { teamId, playerId, slot, acquiredVia }
     });
   },
 
   async dropPlayer(teamId, playerId) {
-    return apiCall('/roster', {
+    return apiCall('/draft?type=roster', {
       method: 'DELETE',
       body: { teamId, playerId }
     });
@@ -219,55 +287,28 @@ export const rosterAPI = {
 };
 
 // ============================================
-// DRAFT API
-// ============================================
-export const draftAPI = {
-  async getPicks(leagueId) {
-    return apiCall(`/draft-picks?leagueId=${leagueId}`);
-  },
-
-  async makePick(pick) {
-    return apiCall('/draft-picks', {
-      method: 'POST',
-      body: pick
-    });
-  },
-
-  async reset(leagueId) {
-    return apiCall(`/draft-picks?leagueId=${leagueId}`, {
-      method: 'DELETE'
-    });
-  }
-};
-
-// ============================================
-// USERS API (Admin)
+// USERS API (Part of Admin)
 // ============================================
 export const usersAPI = {
   async getAll() {
-    return apiCall('/users');
+    return adminAPI.getUsers();
   },
 
   async delete(userId) {
-    return apiCall(`/users?id=${userId}`, {
-      method: 'DELETE'
-    });
+    return adminAPI.deleteUser(userId);
   }
 };
 
 // ============================================
-// SEED API
+// SEED API (Part of Admin)
 // ============================================
 export const seedAPI = {
   async getStatus() {
-    return apiCall('/seed');
+    return adminAPI.getSeedStatus();
   },
 
   async seed(seedType = 'all') {
-    return apiCall('/seed', {
-      method: 'POST',
-      body: { seedType }
-    });
+    return adminAPI.seed(seedType);
   }
 };
 
@@ -277,7 +318,6 @@ export const seedAPI = {
 
 /**
  * Initialize app data from database
- * Returns tournaments, user team, and league status
  */
 export async function initializeAppData(userId, tournamentId) {
   try {
@@ -329,8 +369,6 @@ export async function getStandings(leagueId) {
   try {
     const teamsRes = await teamsAPI.getAll({ leagueId });
     const teams = teamsRes.teams || [];
-    
-    // Sort by total points
     return teams.sort((a, b) => (b.totalPoints || 0) - (a.totalPoints || 0));
   } catch (error) {
     console.error('Failed to get standings:', error);
@@ -340,12 +378,13 @@ export async function getStandings(leagueId) {
 
 export default {
   auth: authAPI,
+  admin: adminAPI,
   tournaments: tournamentsAPI,
   leagues: leaguesAPI,
   teams: teamsAPI,
   players: playersAPI,
-  roster: rosterAPI,
   draft: draftAPI,
+  roster: rosterAPI,
   users: usersAPI,
   seed: seedAPI,
   initializeAppData,
