@@ -70,7 +70,7 @@ const TOURNAMENTS = [
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
   if (req.method === 'OPTIONS') {
@@ -362,12 +362,13 @@ export default async function handler(req, res) {
         }
         
         // Ensure matches column exists (migration for older schemas)
+        // SQLite will error if column exists, which is fine
         try {
-          await db.execute({
-            sql: `ALTER TABLE tournaments ADD COLUMN matches TEXT`
-          });
+          await db.execute(`ALTER TABLE tournaments ADD COLUMN matches TEXT`);
+          console.log('Added matches column to tournaments table');
         } catch (e) {
-          // Column already exists, ignore error
+          // Column already exists or other non-critical error, continue
+          console.log('Matches column check:', e.message);
         }
         
         const updates = [];
