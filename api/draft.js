@@ -55,7 +55,7 @@ export default async function handler(req, res) {
                 LEFT JOIN players p ON dp.player_id = p.id
                 LEFT JOIN fantasy_teams ft ON dp.fantasy_team_id = ft.id
                 WHERE dp.league_id = ?
-                ORDER BY dp.pick_number ASC`,
+                ORDER BY dp.overall_pick ASC`,
           args: [leagueId]
         });
 
@@ -69,8 +69,8 @@ export default async function handler(req, res) {
           playerTeam: p.player_team,
           playerPosition: p.player_position,
           round: p.round,
-          pickNumber: p.pick_number,
-          createdAt: p.created_at
+          pickNumber: p.overall_pick,
+          createdAt: p.pick_time
         }));
 
         return res.status(200).json({ success: true, picks });
@@ -80,43 +80,59 @@ export default async function handler(req, res) {
       if (req.method === 'POST') {
         const { leagueId, teamId, playerId, round, pickNumber, slot } = req.body;
 
+        console.log('Draft pick request:', { leagueId, teamId, playerId, round, pickNumber, slot });
+
         if (!leagueId || !teamId || !playerId) {
           return res.status(400).json({ error: 'leagueId, teamId, and playerId required' });
         }
 
-        // Check if player is already drafted
-        const existing = await db.execute({
-          sql: 'SELECT id FROM draft_picks WHERE league_id = ? AND player_id = ?',
-          args: [leagueId, playerId]
-        });
+        try {
+          // Check if player is already drafted
+          const existing = await db.execute({
+            sql: 'SELECT id FROM draft_picks WHERE league_id = ? AND player_id = ?',
+            args: [leagueId, playerId]
+          });
 
-        if (existing.rows.length > 0) {
-          return res.status(409).json({ error: 'Player already drafted' });
+          if (existing.rows.length > 0) {
+            return res.status(409).json({ error: 'Player already drafted' });
+          }
+
+          // Get current pick number from league
+          const leagueResult = await db.execute({
+            sql: 'SELECT current_pick FROM leagues WHERE id = ?',
+            args: [leagueId]
+          });
+          const currentPickNum = (leagueResult.rows[0]?.current_pick || 0) + 1;
+
+          const pickId = generateId();
+          const rosterId = generateId();
+
+          // Record the draft pick - using simple insert without foreign key check
+          await db.execute({
+            sql: `INSERT INTO draft_picks (id, league_id, fantasy_team_id, player_id, round, pick_in_round, overall_pick)
+                  VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            args: [pickId, leagueId, teamId, playerId, round || 1, pickNumber || currentPickNum, currentPickNum]
+          });
+
+          // Add to roster - position is the slot (flex, batters, etc)
+          await db.execute({
+            sql: `INSERT INTO roster (id, fantasy_team_id, player_id, position, acquired_via)
+                  VALUES (?, ?, ?, ?, 'draft')`,
+            args: [rosterId, teamId, playerId, slot || 'flex']
+          });
+
+          // Update league current pick
+          await db.execute({
+            sql: 'UPDATE leagues SET current_pick = ? WHERE id = ?',
+            args: [currentPickNum, leagueId]
+          });
+
+          console.log('Draft pick saved:', { pickId, currentPick: currentPickNum });
+          return res.status(201).json({ success: true, pickId, currentPick: currentPickNum });
+        } catch (dbError) {
+          console.error('Database error in draft pick:', dbError);
+          return res.status(500).json({ error: 'Database error', details: dbError.message });
         }
-
-        const pickId = generateId();
-
-        // Record the draft pick
-        await db.execute({
-          sql: `INSERT INTO draft_picks (id, league_id, fantasy_team_id, player_id, round, pick_number, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`,
-          args: [pickId, leagueId, teamId, playerId, round || 1, pickNumber || 0]
-        });
-
-        // Add to roster
-        await db.execute({
-          sql: `INSERT INTO roster (id, fantasy_team_id, player_id, slot, acquired_via, acquired_at)
-                VALUES (?, ?, ?, ?, 'draft', datetime('now'))`,
-          args: [generateId(), teamId, playerId, slot || 'flex']
-        });
-
-        // Update league current pick
-        await db.execute({
-          sql: 'UPDATE leagues SET current_pick = current_pick + 1 WHERE id = ?',
-          args: [leagueId]
-        });
-
-        return res.status(201).json({ success: true, pickId });
       }
 
       // DELETE - Reset draft
@@ -180,15 +196,15 @@ export default async function handler(req, res) {
 
         const roster = result.rows.map(r => ({
           id: r.player_id,
-          name: r.player_name,
-          team: r.player_team,
-          position: r.player_position,
-          slot: r.slot,
+          name: r.player_name || 'Unknown Player',
+          team: r.player_team || 'Unknown',
+          position: r.player_position || r.position,
+          slot: r.position, // slot is stored in position column
           totalPoints: r.total_points || 0,
           avgPoints: r.avg_points || 0,
           matchesPlayed: r.matches_played || 0,
           acquiredVia: r.acquired_via,
-          acquiredAt: r.acquired_at
+          acquiredAt: r.acquired_date
         }));
 
         return res.status(200).json({ success: true, roster });
@@ -223,8 +239,8 @@ export default async function handler(req, res) {
         }
 
         await db.execute({
-          sql: `INSERT INTO roster (id, fantasy_team_id, player_id, slot, acquired_via, acquired_at)
-                VALUES (?, ?, ?, ?, ?, datetime('now'))`,
+          sql: `INSERT INTO roster (id, fantasy_team_id, player_id, position, acquired_via)
+                VALUES (?, ?, ?, ?, ?)`,
           args: [generateId(), teamId, playerId, slot || 'flex', acquiredVia]
         });
 
