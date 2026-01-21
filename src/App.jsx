@@ -1257,205 +1257,288 @@ const TeamCreationPage = ({ user, tournament, onTeamCreated }) => {
   );
 };
 
-// Snake Draft Component
+// Snake Draft Component - Database synchronized, turn-based
 const SnakeDraftPage = ({ team, tournament, players, allTeams, onDraftComplete, onUpdateTeam }) => {
-  const [availablePlayers, setAvailablePlayers] = useState([...players]);
+  const [draftState, setDraftState] = useState('loading'); // loading, waiting, drafting, completed
+  const [league, setLeague] = useState(null);
   const [draftOrder, setDraftOrder] = useState([]);
   const [currentPick, setCurrentPick] = useState(0);
-  const [draftLog, setDraftLog] = useState([]);
+  const [picks, setPicks] = useState([]);
+  const [availablePlayers, setAvailablePlayers] = useState([...players]);
   const [filterPosition, setFilterPosition] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
-  const [draftStarted, setDraftStarted] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState(null);
 
-  // Get all registered teams for this tournament (real users only, no CPU)
+  // Get tournament teams
   const tournamentTeams = useMemo(() => {
-    // Filter allTeams to only include teams for this tournament
-    const registeredTeams = (allTeams || [])
+    return (allTeams || [])
       .filter(t => t.tournamentId === tournament?.id)
       .map(t => ({
         id: t.id,
         name: t.name,
         owner: t.owner,
-        isUser: t.id === team?.id, // Mark current user's team
-        roster: t.roster || []
-      }));
-    
-    // Make sure current user's team is included
-    const hasUserTeam = registeredTeams.some(t => t.id === team?.id);
-    if (!hasUserTeam && team) {
-      registeredTeams.unshift({
-        id: team.id,
-        name: team.name,
-        owner: team.owner,
-        isUser: true,
-        roster: []
+        isUser: t.id === team?.id,
+        draftPosition: t.draftPosition || 0
+      }))
+      .sort((a, b) => a.draftPosition - b.draftPosition);
+  }, [allTeams, tournament?.id, team?.id]);
+
+  // Generate snake draft order
+  const generateDraftOrder = (teams, totalRounds) => {
+    const order = [];
+    for (let round = 1; round <= totalRounds; round++) {
+      const roundTeams = round % 2 === 1 ? [...teams] : [...teams].reverse();
+      roundTeams.forEach((t, idx) => {
+        order.push({
+          pick: order.length + 1,
+          round,
+          teamId: t.id,
+          teamName: t.name,
+          isUser: t.isUser
+        });
       });
     }
-    
-    // Shuffle the teams for random draft order
-    const shuffled = [...registeredTeams].sort(() => Math.random() - 0.5);
-    return shuffled;
-  }, [allTeams, tournament?.id, team]);
+    return order;
+  };
 
-  const [teams, setTeams] = useState([]);
-  
-  // Initialize teams when tournamentTeams changes
-  useEffect(() => {
-    if (tournamentTeams.length > 0) {
-      // Reset rosters for draft
-      setTeams(tournamentTeams.map(t => ({ ...t, roster: [] })));
-    }
-  }, [tournamentTeams]);
+  // Load league and draft state
+  const loadDraftState = async () => {
+    try {
+      const leaguesResponse = await leaguesAPI.getAll(tournament.id);
+      if (!leaguesResponse.leagues || leaguesResponse.leagues.length === 0) {
+        setError('No league found for this tournament');
+        return;
+      }
 
-  useEffect(() => {
-    if (teams.length > 0) {
-      const order = generateSnakeDraftOrder(teams, TOTAL_ROSTER_SIZE);
+      const leagueData = leaguesResponse.leagues[0];
+      setLeague(leagueData);
+
+      // Check draft status
+      if (leagueData.draftStatus === 'pending' || leagueData.draftStatus === 'open') {
+        setDraftState('waiting');
+        return;
+      }
+
+      if (leagueData.draftStatus === 'completed') {
+        setDraftState('completed');
+        return;
+      }
+
+      // Draft is in progress
+      setDraftState('drafting');
+      setCurrentPick(leagueData.currentPick || 0);
+
+      // Load or generate draft order
+      let order = leagueData.draftOrder;
+      if (!order || order.length === 0) {
+        order = generateDraftOrder(tournamentTeams, TOTAL_ROSTER_SIZE);
+        // Save draft order to league
+        await leaguesAPI.update({
+          id: leagueData.id,
+          draftOrder: order
+        });
+      }
       setDraftOrder(order);
+
+      // Load existing picks
+      const picksResponse = await draftAPI.getPicks(leagueData.id);
+      if (picksResponse.picks) {
+        setPicks(picksResponse.picks);
+        // Remove drafted players from available
+        const draftedIds = new Set(picksResponse.picks.map(p => p.playerId));
+        setAvailablePlayers(players.filter(p => !draftedIds.has(p.id)));
+      }
+
+      // Check if draft is complete
+      if (leagueData.currentPick >= order.length) {
+        setDraftState('completed');
+        // Load user's roster and complete
+        const rosterResponse = await rosterAPI.get(team.id);
+        if (rosterResponse.roster) {
+          onDraftComplete(rosterResponse.roster);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load draft state:', err);
+      setError('Failed to load draft. Please refresh.');
     }
-  }, [teams]);
-
-  const currentDraftPick = draftOrder[currentPick];
-  const isUsersTurn = currentDraftPick?.teamId === team.id;
-
-  const getRosterCount = (teamRoster, position) => {
-    return teamRoster.filter(p => p.position === position).length;
   };
-  
-  // Get count of players in a specific slot
-  const getSlotCount = (teamRoster, slotKey) => {
-    return teamRoster.filter(p => p.slot === slotKey).length;
+
+  // Initial load
+  useEffect(() => {
+    loadDraftState();
+  }, [tournament?.id]);
+
+  // Poll for updates every 3 seconds
+  useEffect(() => {
+    if (draftState === 'loading' || draftState === 'completed') return;
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const leaguesResponse = await leaguesAPI.getAll(tournament.id);
+        if (!leaguesResponse.leagues || leaguesResponse.leagues.length === 0) return;
+
+        const leagueData = leaguesResponse.leagues[0];
+
+        // Check if draft started (was waiting, now in_progress)
+        if (draftState === 'waiting' && leagueData.draftStatus === 'in_progress') {
+          console.log('🚀 Draft started! Loading draft state...');
+          loadDraftState();
+          return;
+        }
+
+        // If drafting, check for new picks
+        if (draftState === 'drafting') {
+          const serverPick = leagueData.currentPick || 0;
+          
+          if (serverPick > currentPick) {
+            console.log(`📥 New pick detected: ${currentPick} → ${serverPick}`);
+            
+            // Load new picks
+            const picksResponse = await draftAPI.getPicks(leagueData.id);
+            if (picksResponse.picks) {
+              setPicks(picksResponse.picks);
+              const draftedIds = new Set(picksResponse.picks.map(p => p.playerId));
+              setAvailablePlayers(players.filter(p => !draftedIds.has(p.id)));
+            }
+            
+            setCurrentPick(serverPick);
+
+            // Check if draft complete
+            if (serverPick >= draftOrder.length) {
+              setDraftState('completed');
+              const rosterResponse = await rosterAPI.get(team.id);
+              if (rosterResponse.roster) {
+                onDraftComplete(rosterResponse.roster);
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Poll error:', err);
+      }
+    }, 3000);
+
+    return () => clearInterval(pollInterval);
+  }, [draftState, currentPick, draftOrder.length, tournament?.id, team?.id]);
+
+  // Current pick info
+  const currentPickData = draftOrder[currentPick];
+  const isUsersTurn = currentPickData?.teamId === team?.id;
+
+  // Get roster counts
+  const getUserRoster = () => {
+    return picks
+      .filter(p => p.teamId === team?.id)
+      .map(p => ({
+        id: p.playerId,
+        name: p.playerName,
+        team: p.playerTeam,
+        position: p.playerPosition
+      }));
   };
-  
-  // Check if a player position can be drafted (has available slot)
-  const canDraftPosition = (position, teamRoster) => {
-    // Get valid slots for this position
+
+  const userRoster = getUserRoster();
+
+  const getRosterCount = (position) => {
+    return userRoster.filter(p => p.position === position).length;
+  };
+
+  const getSlotCount = (slotKey) => {
+    return userRoster.filter(p => {
+      const validSlots = POSITION_COMPATIBILITY[p.position] || [];
+      return validSlots.includes(slotKey);
+    }).length;
+  };
+
+  const canDraftPosition = (position) => {
     const validSlots = POSITION_COMPATIBILITY[position] || [];
-    
-    // Check if any valid slot has room
     for (const slotKey of validSlots) {
       const config = SQUAD_CONFIG[slotKey];
       if (config) {
-        const current = getSlotCount(teamRoster, slotKey);
-        if (current < config.max) {
-          return true;
-        }
+        const current = getRosterCount(slotKey === 'keepers' ? 'keeper' : slotKey.slice(0, -1));
+        if (current < config.max) return true;
       }
     }
     return false;
   };
-  
-  // Get the best available slot for a position
-  const getBestSlotForPosition = (position, teamRoster) => {
+
+  const getBestSlotForPosition = (position) => {
     const validSlots = POSITION_COMPATIBILITY[position] || [];
-    
-    // Priority: primary slot first, then flex
     for (const slotKey of validSlots) {
-      if (slotKey === 'flex') continue; // Save flex for last
+      if (slotKey === 'flex') continue;
       const config = SQUAD_CONFIG[slotKey];
       if (config) {
-        const current = getSlotCount(teamRoster, slotKey);
-        if (current < config.max) {
-          return slotKey;
+        const pos = slotKey === 'keepers' ? 'keeper' : slotKey.slice(0, -1);
+        const current = getRosterCount(pos);
+        if (current < config.max) return slotKey;
+      }
+    }
+    if (validSlots.includes('flex') && SQUAD_CONFIG.flex) {
+      return 'flex';
+    }
+    return 'flex';
+  };
+
+  // Make a draft pick
+  const draftPlayer = async (player) => {
+    if (!isUsersTurn || isSubmitting) return;
+
+    if (!canDraftPosition(player.position)) {
+      alert(`No available slots for ${player.position}s!`);
+      return;
+    }
+
+    setIsSubmitting(true);
+    setError(null);
+
+    try {
+      const slot = getBestSlotForPosition(player.position);
+      const pickData = {
+        leagueId: league.id,
+        teamId: team.id,
+        playerId: player.id,
+        round: currentPickData?.round || 1,
+        pickNumber: currentPick + 1,
+        slot: slot
+      };
+
+      const response = await draftAPI.makePick(pickData);
+      
+      if (response.success) {
+        console.log('✅ Pick saved:', player.name);
+        
+        // Optimistic update
+        const newPick = {
+          ...pickData,
+          playerName: player.name,
+          playerTeam: player.team,
+          playerPosition: player.position,
+          teamName: team.name
+        };
+        setPicks(prev => [...prev, newPick]);
+        setAvailablePlayers(prev => prev.filter(p => p.id !== player.id));
+        setCurrentPick(prev => prev + 1);
+
+        // Check if draft complete
+        if (currentPick + 1 >= draftOrder.length) {
+          setDraftState('completed');
+          const rosterResponse = await rosterAPI.get(team.id);
+          if (rosterResponse.roster) {
+            onDraftComplete(rosterResponse.roster);
+          }
         }
       }
+    } catch (err) {
+      console.error('Failed to make pick:', err);
+      setError(err.message || 'Failed to make pick. Try again.');
+    } finally {
+      setIsSubmitting(false);
     }
-    
-    // Check flex slot last
-    if (validSlots.includes('flex') && SQUAD_CONFIG.flex) {
-      const flexCount = getSlotCount(teamRoster, 'flex');
-      if (flexCount < SQUAD_CONFIG.flex.max) {
-        return 'flex';
-      }
-    }
-    
-    return null;
   };
 
-  const draftPlayer = (player) => {
-    if (!isUsersTurn) return;
-    
-    const userTeam = teams.find(t => t.id === team.id);
-    if (!canDraftPosition(player.position, userTeam.roster)) {
-      alert(`No available slots for ${player.position}s! Check your roster.`);
-      return;
-    }
-
-    executePick(team.id, player);
-  };
-
-  const executePick = useCallback((teamId, player) => {
-    const pickingTeam = teams.find(t => t.id === teamId);
-    
-    // Determine the best slot for this player
-    const assignedSlot = getBestSlotForPosition(player.position, pickingTeam.roster);
-    const playerWithSlot = { ...player, slot: assignedSlot };
-    
-    // Update teams
-    const updatedTeams = teams.map(t => {
-      if (t.id === teamId) {
-        return { ...t, roster: [...t.roster, playerWithSlot] };
-      }
-      return t;
-    });
-    setTeams(updatedTeams);
-    
-    // Remove from available
-    const newAvailable = availablePlayers.filter(p => p.id !== player.id);
-    setAvailablePlayers(newAvailable);
-    
-    // Log pick
-    setDraftLog(prev => [...prev, { 
-      pick: currentPick + 1, 
-      round: currentDraftPick?.round,
-      team: pickingTeam.name, 
-      player: player.name,
-      position: player.position 
-    }]);
-    
-    // Check if draft is complete
-    if (currentPick + 1 >= draftOrder.length) {
-      const finalUserTeam = updatedTeams.find(t => t.id === team.id);
-      setTimeout(() => onDraftComplete(finalUserTeam.roster), 500);
-      return;
-    }
-    
-    // Move to next pick
-    setCurrentPick(prev => prev + 1);
-  }, [teams, availablePlayers, currentPick, draftOrder, currentDraftPick, team.id, onDraftComplete]);
-
-  // Auto-draft for other teams (they draft automatically when it's their turn)
-  useEffect(() => {
-    if (!draftStarted || currentPick >= draftOrder.length) return;
-    
-    const currentPickData = draftOrder[currentPick];
-    if (currentPickData?.teamId === team.id) return; // User's turn
-    
-    const timer = setTimeout(() => {
-      const otherTeam = teams.find(t => t.id === currentPickData.teamId);
-      if (!otherTeam) return;
-      
-      // Find best available player that can be drafted (has available slot)
-      const eligiblePlayers = availablePlayers.filter(p => canDraftPosition(p.position, otherTeam.roster));
-      
-      // Sort by totalPoints (descending), then by name as tiebreaker
-      const bestPlayer = eligiblePlayers.sort((a, b) => {
-        const pointsDiff = (b.totalPoints || 0) - (a.totalPoints || 0);
-        if (pointsDiff !== 0) return pointsDiff;
-        return a.name.localeCompare(b.name); // Alphabetical as tiebreaker
-      })[0];
-
-      if (bestPlayer) {
-        executePick(currentPickData.teamId, bestPlayer);
-      }
-    }, 800);
-
-    return () => clearTimeout(timer);
-  }, [currentPick, draftStarted, draftOrder, team.id, teams, availablePlayers, executePick]);
-
-  const startDraft = () => {
-    setDraftStarted(true);
-  };
-
+  // Filter players
   const filteredPlayers = availablePlayers.filter(p => {
     const matchesPosition = filterPosition === 'all' || p.position === filterPosition;
     const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -1463,30 +1546,34 @@ const SnakeDraftPage = ({ team, tournament, players, allTeams, onDraftComplete, 
     return matchesPosition && matchesSearch;
   });
 
-  const userTeam = teams.find(t => t.id === team.id);
-
-  if (draftOrder.length === 0 || teams.length === 0) {
-    return <div className="draft-page"><div className="loading">Generating draft order...</div></div>;
+  // Loading state
+  if (draftState === 'loading') {
+    return (
+      <div className="draft-page">
+        <div className="draft-intro">
+          <div className="loading-spinner">Loading draft...</div>
+        </div>
+      </div>
+    );
   }
 
-  if (!draftStarted) {
-    const otherTeamsCount = teams.filter(t => !t.isUser).length;
+  // Waiting room
+  if (draftState === 'waiting') {
     return (
       <div className="draft-page">
         <div className="draft-intro">
           <div className="draft-intro-content">
-            <h1>🐍 Snake Draft</h1>
-            <p>
-              {otherTeamsCount > 0 
-                ? `You'll be drafting against ${otherTeamsCount} other team${otherTeamsCount > 1 ? 's' : ''} in snake draft format.`
-                : `You're the only registered team! Other players need to register before the draft can begin.`
-              }
-            </p>
+            <h1>⏳ Waiting Room</h1>
+            <p>Waiting for admin to start the draft...</p>
             
+            <div className="waiting-animation">
+              <div className="pulse-circle"></div>
+            </div>
+
             <div className="draft-order-preview">
-              <h3>Draft Order</h3>
+              <h3>Registered Teams ({tournamentTeams.length})</h3>
               <div className="team-order">
-                {teams.map((t, i) => (
+                {tournamentTeams.map((t, i) => (
                   <div key={t.id} className={`order-item ${t.isUser ? 'user' : ''}`}>
                     <span className="order-num">{i + 1}</span>
                     <span className="order-name">{t.name}</span>
@@ -1495,49 +1582,63 @@ const SnakeDraftPage = ({ team, tournament, players, allTeams, onDraftComplete, 
                 ))}
               </div>
             </div>
-            
-            <div className="snake-explanation">
-              <h4>How Snake Draft Works</h4>
-              <p>Round 1: 1 → 2 → 3 → {teams.length}</p>
-              <p>Round 2: {teams.length} → {teams.length - 1} → ... → 1</p>
-              <p>Round 3: 1 → 2 → 3 → {teams.length}</p>
-              <p>...and so on</p>
-            </div>
-            
-            <button 
-              className="btn-primary btn-large" 
-              onClick={startDraft}
-              disabled={teams.length < 2}
-            >
-              {teams.length < 2 ? 'Waiting for more teams...' : 'Start Draft'}
-            </button>
+
+            <p className="waiting-hint">
+              💡 The admin will start the draft from the Admin Panel.<br/>
+              This page will automatically update when the draft begins.
+            </p>
           </div>
         </div>
       </div>
     );
   }
 
+  // Completed state
+  if (draftState === 'completed') {
+    return (
+      <div className="draft-page">
+        <div className="draft-intro">
+          <div className="draft-intro-content">
+            <h1>✅ Draft Complete!</h1>
+            <p>Your roster has been set. Redirecting to dashboard...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Active draft
   return (
     <div className="draft-page">
       <header className="draft-header">
         <div className="draft-title">
           <h1>🐍 Snake Draft</h1>
-          <span className="draft-round">Round {currentDraftPick?.round || 1} • Pick {currentPick + 1}/{draftOrder.length}</span>
+          <span className="draft-round">
+            Round {currentPickData?.round || 1} • Pick {currentPick + 1}/{draftOrder.length}
+          </span>
         </div>
         {isUsersTurn ? (
           <div className="your-turn-indicator">🎯 YOUR PICK!</div>
         ) : (
-          <div className="waiting-indicator">⏳ {currentDraftPick?.teamName} is picking...</div>
+          <div className="waiting-indicator">
+            ⏳ Waiting for {currentPickData?.teamName}...
+          </div>
         )}
       </header>
+
+      {error && (
+        <div className="draft-error" style={{ background: '#dc3545', padding: '10px', textAlign: 'center' }}>
+          {error}
+        </div>
+      )}
 
       <div className="draft-content">
         <div className="draft-sidebar">
           <div className="my-roster-preview">
-            <h3>Your Roster ({userTeam?.roster.length || 0}/{TOTAL_ROSTER_SIZE})</h3>
+            <h3>Your Roster ({userRoster.length}/{TOTAL_ROSTER_SIZE})</h3>
             {Object.entries(SQUAD_CONFIG).map(([key, config]) => {
               const pos = key === 'keepers' ? 'keeper' : key.slice(0, -1);
-              const count = getRosterCount(userTeam?.roster || [], pos);
+              const count = getRosterCount(pos);
               return (
                 <div key={key} className="roster-slot-status">
                   <span>{config.icon} {config.label}</span>
@@ -1550,24 +1651,22 @@ const SnakeDraftPage = ({ team, tournament, players, allTeams, onDraftComplete, 
           <div className="draft-log">
             <h3>Recent Picks</h3>
             <div className="log-entries">
-              {draftLog.slice(-10).reverse().map((entry, i) => (
-                <div key={i} className={`log-entry ${entry.team === team.name ? 'user-pick' : ''}`}>
-                  <span className="pick-num">#{entry.pick}</span>
-                  <span className="pick-info">
-                    <span className="pick-team">{entry.team}</span>
-                    <span className="pick-player">{entry.player}</span>
-                  </span>
+              {picks.slice(-8).reverse().map((pick, i) => (
+                <div key={i} className={`log-entry ${pick.teamId === team?.id ? 'user-pick' : ''}`}>
+                  <span className="pick-num">#{pick.pickNumber}</span>
+                  <span className="pick-team">{pick.teamName}</span>
+                  <span className="pick-player">{pick.playerName}</span>
                 </div>
               ))}
-              {draftLog.length === 0 && <p className="no-picks">No picks yet</p>}
+              {picks.length === 0 && <div className="no-picks">No picks yet</div>}
             </div>
           </div>
         </div>
 
         <div className="draft-main">
-          <div className="draft-filters">
+          <div className="player-filters">
             <input
-              type="search"
+              type="text"
               placeholder="Search players..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
@@ -1576,37 +1675,36 @@ const SnakeDraftPage = ({ team, tournament, players, allTeams, onDraftComplete, 
             <select 
               value={filterPosition} 
               onChange={(e) => setFilterPosition(e.target.value)}
-              className="filter-select"
+              className="position-filter"
             >
               <option value="all">All Positions</option>
               <option value="batter">Batters</option>
-              <option value="keeper">Keepers</option>
               <option value="bowler">Bowlers</option>
-              <option value="allrounder">Allrounders</option>
+              <option value="allrounder">All-rounders</option>
+              <option value="keeper">Keepers</option>
             </select>
           </div>
 
           <div className="available-players">
-            {filteredPlayers.map(player => {
-              const canDraft = isUsersTurn && canDraftPosition(player.position, userTeam?.roster || []);
+            {filteredPlayers.slice(0, 50).map(player => {
+              const canDraft = isUsersTurn && canDraftPosition(player.position) && !isSubmitting;
               return (
                 <div 
                   key={player.id} 
-                  className={`draft-player-card ${!isUsersTurn ? 'waiting' : !canDraft ? 'disabled' : ''}`}
+                  className={`player-card ${canDraft ? 'draftable' : 'disabled'}`}
                   onClick={() => canDraft && draftPlayer(player)}
                 >
-                  <div className="player-main">
+                  <div className="player-info">
                     <span className="player-name">{player.name}</span>
-                    <span className={`position-badge ${player.position}`}>
-                      {player.position.toUpperCase()}
-                    </span>
-                  </div>
-                  <div className="player-details">
                     <span className="player-team">{player.team}</span>
-                    <span className="player-avg">{player.totalPoints || 0} pts</span>
                   </div>
-                  {isUsersTurn && canDraft && <button className="btn-draft">Draft</button>}
-                  {isUsersTurn && !canDraft && <span className="position-full">Position Full</span>}
+                  <div className="player-meta">
+                    <span className={`position-badge ${player.position}`}>
+                      {player.position.toUpperCase().slice(0, 3)}
+                    </span>
+                    <span className="player-points">{player.totalPoints || 0} pts</span>
+                  </div>
+                  {canDraft && <div className="draft-btn">Draft</div>}
                 </div>
               );
             })}
@@ -1890,8 +1988,48 @@ const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament
     }
   };
   
-  const handleBeginDraft = () => {
-    if (window.confirm('Begin the snake draft? Make sure all teams are registered.')) {
+  const handleBeginDraft = async () => {
+    // Check if there are at least 2 teams
+    const tournamentTeams = (allTeams || []).filter(t => t.tournamentId === tournament.id);
+    if (tournamentTeams.length < 2) {
+      alert('Need at least 2 teams to start the draft!');
+      return;
+    }
+    
+    if (window.confirm(`Begin the snake draft with ${tournamentTeams.length} teams? Make sure all teams are registered.`)) {
+      // Generate draft order
+      const shuffledTeams = [...tournamentTeams].sort(() => Math.random() - 0.5);
+      const draftOrder = [];
+      const totalRounds = 12; // TOTAL_ROSTER_SIZE
+      
+      for (let round = 1; round <= totalRounds; round++) {
+        const roundTeams = round % 2 === 1 ? [...shuffledTeams] : [...shuffledTeams].reverse();
+        roundTeams.forEach((t, idx) => {
+          draftOrder.push({
+            pick: draftOrder.length + 1,
+            round,
+            teamId: t.id,
+            teamName: t.name
+          });
+        });
+      }
+      
+      // Save draft order to league
+      try {
+        const leaguesResponse = await leaguesAPI.getAll(tournament.id);
+        if (leaguesResponse.leagues && leaguesResponse.leagues.length > 0) {
+          const league = leaguesResponse.leagues[0];
+          await leaguesAPI.update({
+            id: league.id,
+            draftOrder: draftOrder,
+            draftStatus: 'in_progress'
+          });
+          console.log('✅ Draft started with order:', draftOrder.slice(0, 4));
+        }
+      } catch (err) {
+        console.error('Failed to save draft order:', err);
+      }
+      
       setDraftStatus('in_progress');
     }
   };
@@ -1902,8 +2040,19 @@ const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament
     }
   };
   
-  const handleResetDraft = () => {
+  const handleResetDraft = async () => {
     if (window.confirm('⚠️ RESET DRAFT?\n\nThis will:\n- Set draft status back to "pending"\n- Keep all registered teams\n- Clear all draft picks\n\nContinue?')) {
+      try {
+        const leaguesResponse = await leaguesAPI.getAll(tournament.id);
+        if (leaguesResponse.leagues && leaguesResponse.leagues.length > 0) {
+          const league = leaguesResponse.leagues[0];
+          // Reset draft in database
+          await draftAPI.resetDraft(league.id);
+          console.log('✅ Draft reset successfully');
+        }
+      } catch (err) {
+        console.error('Failed to reset draft:', err);
+      }
       setDraftStatus('pending');
     }
   };
