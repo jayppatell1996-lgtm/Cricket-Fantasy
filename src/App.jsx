@@ -187,20 +187,24 @@ const SCORING_RULES = {
 
 // Squad Configuration
 // Squad Configuration - Playing 12 only (no bench, no IL)
+// 5 Batters + 1 WK + 5 Bowlers + 1 Flex = 12 players
 const SQUAD_CONFIG = {
-  batters: { min: 4, max: 4, label: 'Batters', icon: '🏏', isPlaying: true },
+  batters: { min: 5, max: 5, label: 'Batters', icon: '🏏', isPlaying: true },
   keepers: { min: 1, max: 1, label: 'Wicketkeeper', icon: '🧤', isPlaying: true },
-  allrounders: { min: 3, max: 3, label: 'All-rounders', icon: '⚡', isPlaying: true },
-  bowlers: { min: 4, max: 4, label: 'Bowlers', icon: '🎯', isPlaying: true },
+  bowlers: { min: 5, max: 5, label: 'Bowlers', icon: '🎯', isPlaying: true },
+  flex: { min: 1, max: 1, label: 'Utility', icon: '🔄', isPlaying: true },
 };
 
 // Position compatibility rules
-// Which positions can fill which slots
+// Batters slot: batters, allrounders, or keepers
+// WK slot: keepers only
+// Bowlers slot: bowlers or allrounders
+// Flex slot: any position
 const POSITION_COMPATIBILITY = {
-  batter: ['batters'],
-  keeper: ['keepers'],
-  bowler: ['bowlers'],
-  allrounder: ['allrounders'],
+  batter: ['batters', 'flex'],
+  keeper: ['batters', 'keepers', 'flex'],
+  bowler: ['bowlers', 'flex'],
+  allrounder: ['batters', 'bowlers', 'flex'],
 };
 
 // Get valid slots for a player position
@@ -276,7 +280,7 @@ const getPlayerGameStatus = (player, matches, selectedDate = new Date()) => {
 };
 
 const FREE_AGENCY_LIMIT = 4;
-const TOTAL_ROSTER_SIZE = 12; // 4 batters + 1 keeper + 3 allrounders + 4 bowlers
+const TOTAL_ROSTER_SIZE = 12; // 5 batters + 1 keeper + 5 bowlers + 1 flex
 
 // Get start of current week (Monday at midnight)
 const getStartOfWeek = (date = new Date()) => {
@@ -1307,11 +1311,55 @@ const SnakeDraftPage = ({ team, tournament, players, allTeams, onDraftComplete, 
   const getRosterCount = (teamRoster, position) => {
     return teamRoster.filter(p => p.position === position).length;
   };
-
+  
+  // Get count of players in a specific slot
+  const getSlotCount = (teamRoster, slotKey) => {
+    return teamRoster.filter(p => p.slot === slotKey).length;
+  };
+  
+  // Check if a player position can be drafted (has available slot)
   const canDraftPosition = (position, teamRoster) => {
-    const posKey = position === 'keeper' ? 'keepers' : position + 's';
-    const current = getRosterCount(teamRoster, position);
-    return current < SQUAD_CONFIG[posKey].max;
+    // Get valid slots for this position
+    const validSlots = POSITION_COMPATIBILITY[position] || [];
+    
+    // Check if any valid slot has room
+    for (const slotKey of validSlots) {
+      const config = SQUAD_CONFIG[slotKey];
+      if (config) {
+        const current = getSlotCount(teamRoster, slotKey);
+        if (current < config.max) {
+          return true;
+        }
+      }
+    }
+    return false;
+  };
+  
+  // Get the best available slot for a position
+  const getBestSlotForPosition = (position, teamRoster) => {
+    const validSlots = POSITION_COMPATIBILITY[position] || [];
+    
+    // Priority: primary slot first, then flex
+    for (const slotKey of validSlots) {
+      if (slotKey === 'flex') continue; // Save flex for last
+      const config = SQUAD_CONFIG[slotKey];
+      if (config) {
+        const current = getSlotCount(teamRoster, slotKey);
+        if (current < config.max) {
+          return slotKey;
+        }
+      }
+    }
+    
+    // Check flex slot last
+    if (validSlots.includes('flex') && SQUAD_CONFIG.flex) {
+      const flexCount = getSlotCount(teamRoster, 'flex');
+      if (flexCount < SQUAD_CONFIG.flex.max) {
+        return 'flex';
+      }
+    }
+    
+    return null;
   };
 
   const draftPlayer = (player) => {
@@ -1319,7 +1367,7 @@ const SnakeDraftPage = ({ team, tournament, players, allTeams, onDraftComplete, 
     
     const userTeam = teams.find(t => t.id === team.id);
     if (!canDraftPosition(player.position, userTeam.roster)) {
-      alert(`You already have max ${player.position}s!`);
+      alert(`No available slots for ${player.position}s! Check your roster.`);
       return;
     }
 
@@ -1329,10 +1377,14 @@ const SnakeDraftPage = ({ team, tournament, players, allTeams, onDraftComplete, 
   const executePick = useCallback((teamId, player) => {
     const pickingTeam = teams.find(t => t.id === teamId);
     
+    // Determine the best slot for this player
+    const assignedSlot = getBestSlotForPosition(player.position, pickingTeam.roster);
+    const playerWithSlot = { ...player, slot: assignedSlot };
+    
     // Update teams
     const updatedTeams = teams.map(t => {
       if (t.id === teamId) {
-        return { ...t, roster: [...t.roster, player] };
+        return { ...t, roster: [...t.roster, playerWithSlot] };
       }
       return t;
     });
@@ -1373,15 +1425,9 @@ const SnakeDraftPage = ({ team, tournament, players, allTeams, onDraftComplete, 
       const otherTeam = teams.find(t => t.id === currentPickData.teamId);
       if (!otherTeam) return;
       
-      // Find best available player for needed position
-      const neededPositions = Object.entries(SQUAD_CONFIG)
-        .filter(([key, config]) => {
-          const pos = key === 'keepers' ? 'keeper' : key.slice(0, -1);
-          return getRosterCount(otherTeam.roster, pos) < config.max;
-        })
-        .map(([key]) => key === 'keepers' ? 'keeper' : key.slice(0, -1));
-
-      const eligiblePlayers = availablePlayers.filter(p => neededPositions.includes(p.position));
+      // Find best available player that can be drafted (has available slot)
+      const eligiblePlayers = availablePlayers.filter(p => canDraftPosition(p.position, otherTeam.roster));
+      
       // Sort by totalPoints (descending), then by name as tiebreaker
       const bestPlayer = eligiblePlayers.sort((a, b) => {
         const pointsDiff = (b.totalPoints || 0) - (a.totalPoints || 0);
@@ -1571,7 +1617,7 @@ const AdminPanel = ({ user, tournament, onUpdateTournament, onLogout, onBackToTo
   const [players, setPlayers] = useState([]);
   const [playersLoading, setPlayersLoading] = useState(false);
   
-  // Fetch players from API when tournament changes or on mount
+  // Fetch players from API when tournament changes, with local data fallback
   useEffect(() => {
     const fetchPlayersForAdmin = async () => {
       setPlayersLoading(true);
@@ -1579,10 +1625,23 @@ const AdminPanel = ({ user, tournament, onUpdateTournament, onLogout, onBackToTo
         const response = await fetch(`/api/players?tournament=${tournament.id}`);
         if (response.ok) {
           const data = await response.json();
-          setPlayers(data.players || []);
+          if (data.players && data.players.length > 0) {
+            setPlayers(data.players);
+          } else {
+            // Fallback to local player data if API returns empty
+            const localPlayers = getPlayersForTournament(tournament.id);
+            setPlayers(localPlayers);
+          }
+        } else {
+          // Fallback to local player data if API fails
+          const localPlayers = getPlayersForTournament(tournament.id);
+          setPlayers(localPlayers);
         }
       } catch (error) {
-        console.error('Failed to fetch players:', error);
+        console.error('Failed to fetch players from API, using local data:', error);
+        // Fallback to local player data
+        const localPlayers = getPlayersForTournament(tournament.id);
+        setPlayers(localPlayers);
       } finally {
         setPlayersLoading(false);
       }
@@ -1591,16 +1650,28 @@ const AdminPanel = ({ user, tournament, onUpdateTournament, onLogout, onBackToTo
     fetchPlayersForAdmin();
   }, [tournament.id]);
   
-  // Refetch players after sync
+  // Refetch players after sync, with local data fallback
   const refetchPlayers = async () => {
     try {
       const response = await fetch(`/api/players?tournament=${tournament.id}`);
       if (response.ok) {
         const data = await response.json();
-        setPlayers(data.players || []);
+        if (data.players && data.players.length > 0) {
+          setPlayers(data.players);
+        } else {
+          // Fallback to local player data
+          const localPlayers = getPlayersForTournament(tournament.id);
+          setPlayers(localPlayers);
+        }
+      } else {
+        // Fallback to local player data
+        const localPlayers = getPlayersForTournament(tournament.id);
+        setPlayers(localPlayers);
       }
     } catch (error) {
-      console.error('Failed to refetch players:', error);
+      console.error('Failed to refetch players, using local data:', error);
+      const localPlayers = getPlayersForTournament(tournament.id);
+      setPlayers(localPlayers);
     }
   };
   
@@ -2677,20 +2748,57 @@ const Dashboard = ({ user, team, tournament, onLogout, onUpdateTeam, onBackToTou
   const rosterBySlot = {
     batters: team.roster.filter(p => p.slot === 'batters'),
     keepers: team.roster.filter(p => p.slot === 'keepers'),
-    allrounders: team.roster.filter(p => p.slot === 'allrounders'),
     bowlers: team.roster.filter(p => p.slot === 'bowlers'),
+    flex: team.roster.filter(p => p.slot === 'flex'),
   };
   
   // For backward compatibility - old rosters without slots
   // Auto-assign slots based on position
   const migrateRosterToSlots = (roster) => {
+    // Track slot counts during migration
+    const slotCounts = { batters: 0, keepers: 0, bowlers: 0, flex: 0 };
+    
     return roster.map(p => {
       if (p.slot) return p;
-      if (p.position === 'batter') return { ...p, slot: 'batters' };
-      if (p.position === 'keeper') return { ...p, slot: 'keepers' };
-      if (p.position === 'bowler') return { ...p, slot: 'bowlers' };
-      if (p.position === 'allrounder') return { ...p, slot: 'allrounders' };
-      return { ...p, slot: 'batters' }; // Default fallback
+      
+      // Assign based on position and available slots
+      if (p.position === 'keeper') {
+        if (slotCounts.keepers < SQUAD_CONFIG.keepers.max) {
+          slotCounts.keepers++;
+          return { ...p, slot: 'keepers' };
+        } else if (slotCounts.batters < SQUAD_CONFIG.batters.max) {
+          slotCounts.batters++;
+          return { ...p, slot: 'batters' };
+        }
+      }
+      if (p.position === 'batter') {
+        if (slotCounts.batters < SQUAD_CONFIG.batters.max) {
+          slotCounts.batters++;
+          return { ...p, slot: 'batters' };
+        }
+      }
+      if (p.position === 'bowler') {
+        if (slotCounts.bowlers < SQUAD_CONFIG.bowlers.max) {
+          slotCounts.bowlers++;
+          return { ...p, slot: 'bowlers' };
+        }
+      }
+      if (p.position === 'allrounder') {
+        // Allrounders can go to batters or bowlers slots
+        if (slotCounts.batters < SQUAD_CONFIG.batters.max) {
+          slotCounts.batters++;
+          return { ...p, slot: 'batters' };
+        } else if (slotCounts.bowlers < SQUAD_CONFIG.bowlers.max) {
+          slotCounts.bowlers++;
+          return { ...p, slot: 'bowlers' };
+        }
+      }
+      // Fallback to flex
+      if (slotCounts.flex < SQUAD_CONFIG.flex.max) {
+        slotCounts.flex++;
+        return { ...p, slot: 'flex' };
+      }
+      return { ...p, slot: 'batters' }; // Final fallback
     });
   };
   
