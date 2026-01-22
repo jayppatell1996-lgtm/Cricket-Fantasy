@@ -2389,7 +2389,12 @@ button {
 .game-status-dot.green {
   background: #22c55e;
   box-shadow: 0 0 8px rgba(34, 197, 94, 0.5);
-  animation: pulse-green 2s infinite;
+}
+
+.game-status-dot.yellow {
+  background: #f59e0b;
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.5);
+  animation: pulse-yellow 2s infinite;
 }
 
 .game-status-dot.blue {
@@ -2402,6 +2407,11 @@ button {
 
 .game-status-dot.gray {
   background: #6b7280;
+}
+
+@keyframes pulse-yellow {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
 }
 
 @keyframes pulse-green {

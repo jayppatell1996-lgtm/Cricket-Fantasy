@@ -224,64 +224,117 @@ const canPlaceInSlot = (playerPosition, slotKey) => {
 };
 
 // Game status for a player on a specific date
+// Team name mapping for matching
+const TEAM_NAME_MAP = {
+  'IND': ['IND', 'India', 'INDIA'],
+  'NZ': ['NZ', 'New Zealand', 'NEW ZEALAND'],
+  'AUS': ['AUS', 'Australia', 'AUSTRALIA'],
+  'ENG': ['ENG', 'England', 'ENGLAND'],
+  'PAK': ['PAK', 'Pakistan', 'PAKISTAN'],
+  'SA': ['SA', 'South Africa', 'SOUTH AFRICA'],
+  'WI': ['WI', 'West Indies', 'WEST INDIES'],
+  'SL': ['SL', 'Sri Lanka', 'SRI LANKA'],
+  'BAN': ['BAN', 'Bangladesh', 'BANGLADESH'],
+  'AFG': ['AFG', 'Afghanistan', 'AFGHANISTAN'],
+};
+
+const teamsMatch = (playerTeam, matchTeam) => {
+  if (!playerTeam || !matchTeam) return false;
+  const pTeam = playerTeam.toUpperCase().trim();
+  const mTeam = matchTeam.toUpperCase().trim();
+  
+  // Direct match
+  if (pTeam === mTeam) return true;
+  if (mTeam.includes(pTeam) || pTeam.includes(mTeam)) return true;
+  
+  // Check aliases
+  for (const [abbrev, aliases] of Object.entries(TEAM_NAME_MAP)) {
+    const upperAliases = aliases.map(a => a.toUpperCase());
+    if (upperAliases.includes(pTeam) && upperAliases.includes(mTeam)) return true;
+    if (upperAliases.includes(pTeam) && mTeam.includes(abbrev)) return true;
+  }
+  
+  return false;
+};
+
+const normalizeDate = (dateStr) => {
+  if (!dateStr) return '';
+  // Handle ISO format "2026-01-21T13:30:00.000Z" or simple "2026-01-21"
+  return dateStr.split('T')[0];
+};
+
 const getPlayerGameStatus = (player, matches, selectedDate = new Date()) => {
   if (!matches || matches.length === 0) {
-    return { status: 'no_game', message: 'No Game', color: 'red' };
+    return { status: 'no_game', message: 'No Game', color: 'gray' };
   }
   
   const playerTeam = player.team;
-  const dateStr = selectedDate.toISOString().split('T')[0];
+  
+  // Normalize selected date to YYYY-MM-DD
+  const selectedDateStr = selectedDate.toISOString().split('T')[0];
   
   for (const match of matches) {
     // Check if player's team is in this match
-    const teamsInMatch = Array.isArray(match.teams) ? match.teams : (match.teams || '').split(' vs ').map(t => t.trim());
-    if (!teamsInMatch.some(t => t === playerTeam || t.includes(playerTeam))) continue;
+    const teamsInMatch = Array.isArray(match.teams) 
+      ? match.teams 
+      : (match.teams || '').split(' vs ').map(t => t.trim());
     
-    // Check if match is on selected date
-    const matchDate = match.date;
-    if (matchDate !== dateStr) continue;
+    const playerTeamInMatch = teamsInMatch.some(t => teamsMatch(playerTeam, t));
+    if (!playerTeamInMatch) continue;
     
-    // Found a match for this player on this date
+    // Normalize and compare dates
+    const matchDateStr = normalizeDate(match.date);
+    if (matchDateStr !== selectedDateStr) continue;
+    
+    // Found a match for this player on this date!
+    const opponent = teamsInMatch.find(t => !teamsMatch(playerTeam, t)) || '?';
     const matchTime = match.startTime || '19:00';
-    const [hours, minutes] = matchTime.split(':').map(Number);
-    const matchDateTime = new Date(match.date);
-    matchDateTime.setHours(hours, minutes, 0, 0);
     
-    const now = new Date();
-    
-    if (match.status === 'live' || match.status === 'in_progress') {
+    // Determine status based on match.status first, then time
+    if (match.status === 'completed') {
       return { 
-        status: 'live', 
-        message: `LIVE vs ${teamsInMatch.find(t => t !== playerTeam)}`,
+        status: 'played', 
+        message: `Played vs ${opponent}`,
         matchTime: matchTime,
         color: 'green'
       };
-    } else if (match.status === 'completed') {
+    } else if (match.status === 'live' || match.status === 'in_progress') {
       return { 
-        status: 'completed', 
-        message: `Final vs ${teamsInMatch.find(t => t !== playerTeam)}`,
+        status: 'live', 
+        message: `LIVE vs ${opponent}`,
         matchTime: matchTime,
-        color: 'gray'
-      };
-    } else if (now < matchDateTime) {
-      return { 
-        status: 'upcoming', 
-        message: `${matchTime} vs ${teamsInMatch.find(t => t !== playerTeam)}`,
-        matchTime: matchTime,
-        venue: match.venue,
-        color: 'blue'
+        color: 'yellow'
       };
     } else {
-      return { 
-        status: 'live', 
-        message: `LIVE vs ${teamsInMatch.find(t => t !== playerTeam)}`,
-        matchTime: matchTime,
-        color: 'green'
-      };
+      // Check if match time has passed (for upcoming matches without explicit status)
+      const [hours, minutes] = matchTime.split(':').map(Number);
+      const matchDateTime = new Date(matchDateStr + 'T00:00:00');
+      matchDateTime.setHours(hours || 19, minutes || 0, 0, 0);
+      
+      const now = new Date();
+      
+      if (now > matchDateTime) {
+        // Match time passed but status not updated - likely live or just finished
+        return { 
+          status: 'live', 
+          message: `In Progress vs ${opponent}`,
+          matchTime: matchTime,
+          color: 'yellow'
+        };
+      } else {
+        return { 
+          status: 'upcoming', 
+          message: `${matchTime} vs ${opponent}`,
+          matchTime: matchTime,
+          venue: match.venue,
+          color: 'blue'
+        };
+      }
     }
   }
   
-  return { status: 'no_game', message: 'No Game', color: 'red' };
+  // No match found for this player on this date
+  return { status: 'no_game', message: 'No Game', color: 'gray' };
 };
 
 const FREE_AGENCY_LIMIT = 4;
@@ -2014,7 +2067,7 @@ const SnakeDraftPage = ({ team, tournament, players, allTeams, onDraftComplete, 
 };
 
 // Admin Panel Component
-const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament, onLogout, onBackToTournaments, onSwitchTournament, allTeams, allUsers, onStartDraft, onDeleteTeam, onUpdateTeam, onDeleteUser }) => {
+const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament, onRefreshPlayers, onLogout, onBackToTournaments, onSwitchTournament, allTeams, allUsers, onStartDraft, onDeleteTeam, onUpdateTeam, onDeleteUser }) => {
   const [activeTab, setActiveTab] = useState('overview');
   
   // Local fantasy points calculator (mirrors backend rules)
@@ -2400,6 +2453,11 @@ const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament
         
         // Refetch players to show updated stats
         await refetchPlayers();
+        
+        // Also refresh main App's player pool for Dashboard
+        if (onRefreshPlayers) {
+          await onRefreshPlayers();
+        }
         
         // Update tournament match status
         if (onUpdateTournament) {
@@ -4335,6 +4393,7 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
   const [selectedPlayerProfile, setSelectedPlayerProfile] = useState(null); // Player profile modal
   const [localDraftOpen, setLocalDraftOpen] = useState(isDraftOpen); // Local state for auto-refresh
   const [selectedSlotToFill, setSelectedSlotToFill] = useState(null); // For moving players from bench to lineup
+  const [viewingTeam, setViewingTeam] = useState(null); // For viewing other team's roster
   
   // Enhanced Test Mode State
   const [selectedMatch, setSelectedMatch] = useState(null);
@@ -5190,6 +5249,113 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
         );
       })()}
 
+      {/* View Other Team Modal */}
+      {viewingTeam && (() => {
+        // Get roster for this team - we need to enrich it with player data
+        const teamRoster = (viewingTeam.roster || []).map(p => {
+          const poolPlayer = playerPool.find(pp => pp.id === p.id || pp.id === p.playerId);
+          if (poolPlayer) {
+            return { ...poolPlayer, slot: p.slot || p.position };
+          }
+          return { ...p, name: p.name || 'Unknown Player' };
+        });
+        
+        const teamRosterBySlot = {
+          batters: teamRoster.filter(p => p.slot === 'batters'),
+          keepers: teamRoster.filter(p => p.slot === 'keepers'),
+          bowlers: teamRoster.filter(p => p.slot === 'bowlers'),
+          flex: teamRoster.filter(p => p.slot === 'flex'),
+          bench: teamRoster.filter(p => p.slot === 'bench' || !p.slot),
+        };
+        
+        const activeCount = teamRosterBySlot.batters.length + teamRosterBySlot.keepers.length + 
+                           teamRosterBySlot.bowlers.length + teamRosterBySlot.flex.length;
+        
+        return (
+          <div className="player-profile-modal" onClick={() => setViewingTeam(null)}>
+            <div className="player-profile-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '600px' }}>
+              <button className="close-btn" onClick={() => setViewingTeam(null)}>×</button>
+              
+              <div className="profile-header" style={{ marginBottom: '20px' }}>
+                <div className="player-avatar">👥</div>
+                <div className="profile-info">
+                  <h2>{viewingTeam.name}</h2>
+                  <div className="profile-meta">
+                    <span className="team-badge">Owner: {viewingTeam.owner || viewingTeam.ownerName}</span>
+                    <span className="position-badge" style={{ background: '#3b82f6' }}>{Math.round(viewingTeam.totalPoints || 0)} PTS</span>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="roster-section-yahoo starters-section">
+                <div className="section-label">Starting Lineup ({activeCount}/12)</div>
+                <div className="stat-headers">
+                  <span className="stat-header">PTS</span>
+                </div>
+                
+                {Object.entries(SQUAD_CONFIG)
+                  .filter(([key, config]) => config.isPlaying)
+                  .map(([slotKey, config]) => (
+                    <React.Fragment key={slotKey}>
+                      {teamRosterBySlot[slotKey]?.map(player => {
+                        const gameStatus = getPlayerGameStatus(player, tournament.matches, selectedDate);
+                        const slotLabel = slotKey === 'keepers' ? 'WK' : slotKey === 'batters' ? 'BAT' : slotKey === 'bowlers' ? 'BWL' : 'UTIL';
+                        
+                        return (
+                          <div 
+                            key={player.id} 
+                            className={`player-row ${gameStatus.status}`}
+                          >
+                            <div className="slot-indicator">{slotLabel}</div>
+                            <div className={`game-status-dot ${gameStatus.color}`}></div>
+                            <div className="player-info-yahoo">
+                              <div className="player-main">
+                                <span className="player-name-yahoo">{player.name}</span>
+                              </div>
+                              <div className="player-sub">
+                                <span className="player-team-yahoo">{player.team}</span>
+                                <span className="player-positions">• {player.position?.toUpperCase()}</span>
+                              </div>
+                            </div>
+                            <div className="player-stats-yahoo">
+                              <span className="stat-value">{player.totalPoints || 0}</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </React.Fragment>
+                  ))}
+              </div>
+              
+              {/* Bench */}
+              {teamRosterBySlot.bench.length > 0 && (
+                <div className="roster-section-yahoo bench-section" style={{ marginTop: '15px' }}>
+                  <div className="section-label">Bench ({teamRosterBySlot.bench.length})</div>
+                  {teamRosterBySlot.bench.map(player => (
+                    <div key={player.id} className="player-row bench">
+                      <div className="slot-indicator">BN</div>
+                      <div className="game-status-dot gray"></div>
+                      <div className="player-info-yahoo">
+                        <div className="player-main">
+                          <span className="player-name-yahoo">{player.name}</span>
+                        </div>
+                        <div className="player-sub">
+                          <span className="player-team-yahoo">{player.team}</span>
+                          <span className="player-positions">• {player.position?.toUpperCase()}</span>
+                        </div>
+                      </div>
+                      <div className="player-stats-yahoo">
+                        <span className="stat-value">{player.totalPoints || 0}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
       <header className="dashboard-header">
         <div className="header-left">
           {team.logo ? (
@@ -5674,9 +5840,15 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
                 }
                 
                 return tournamentTeams.map((t, i) => (
-                  <div key={t.id} className={`standings-row ${t.isUser ? 'user-team' : ''}`}>
+                  <div 
+                    key={t.id} 
+                    className={`standings-row ${t.isUser ? 'user-team' : ''} clickable`}
+                    onClick={() => !t.isUser && setViewingTeam(t)}
+                    style={{ cursor: t.isUser ? 'default' : 'pointer' }}
+                    title={t.isUser ? 'Your team' : `Click to view ${t.name}'s roster`}
+                  >
                     <span className="rank">{i + 1}</span>
-                    <span className="team-name">{t.name}</span>
+                    <span className="team-name">{t.name} {!t.isUser && <span style={{ fontSize: '0.7rem', opacity: 0.6 }}>👁</span>}</span>
                     <span className="owner">{t.owner}</span>
                     <span className="points">{Math.round(t.totalPoints || 0)}</span>
                   </div>
@@ -6549,6 +6721,12 @@ export default function App() {
             
             // Update local state
             setSelectedTournament(updatedTournament);
+          }}
+          onRefreshPlayers={async () => {
+            console.log('🔄 Refreshing players from database...');
+            if (selectedTournament?.id) {
+              await loadPlayers(selectedTournament.id);
+            }
           }}
           onLogout={handleLogout}
           onBackToTournaments={handleBackToTournaments}
