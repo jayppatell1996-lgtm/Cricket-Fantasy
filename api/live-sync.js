@@ -1,15 +1,18 @@
 /**
  * Live Match Sync API
  * ====================
- * Fetches live match data and updates fantasy points
+ * Syncs real match data from Cricket API (cricapi.com/cricketdata.org)
+ * 
+ * API Flow:
+ *   1. Series Search: /v1/series?search=SERIES_NAME → Get series ID
+ *   2. Series Info: /v1/series_info?id=SERIES_ID → Get match list with match IDs
+ *   3. Fantasy Scorecard: /v1/match_scorecard?id=MATCH_ID → Get player stats
  * 
  * Endpoints:
- *   GET /api/live-sync - Get current live matches and sync scores
- *   POST /api/live-sync - Sync scores for a specific match (live or completed)
- *   POST /api/live-sync?action=simulate - Simulate match scores (for testing)
- *   POST /api/live-sync?action=complete - Complete a match and finalize scores
+ *   GET /api/live-sync?tournamentId=X - Get matches for tournament from Cricket API
+ *   POST /api/live-sync - Sync specific match scorecard
  * 
- * Deploy to: api/live-sync.js (Vercel serverless function)
+ * Required env: CRICKET_API_KEY from cricapi.com
  */
 
 import { createClient } from '@libsql/client';
@@ -24,62 +27,46 @@ function getDb() {
 const CRICKET_API_BASE = 'https://api.cricapi.com/v1';
 
 // ============================================
+// TOURNAMENT TO SERIES MAPPING
+// ============================================
+// Maps our tournament IDs to Cricket API series search names
+const TOURNAMENT_SERIES_MAP = {
+  'test_ind_nz': 'New Zealand tour of India, 2026',
+  't20_wc_2026': 'ICC Mens T20 World Cup 2026',
+  'ipl_2026': 'Indian Premier League 2026',
+};
+
+// ============================================
 // FANTASY POINTS CALCULATION
 // ============================================
 
 const FANTASY_RULES = {
-  // Batting
-  runPoints: 1,           // +1 per run
-  fourBonus: 1,           // +1 per boundary
-  sixBonus: 2,            // +2 per six
-  thirtyBonus: 4,         // +4 for scoring 30+
-  fiftyBonus: 8,          // +8 for scoring 50+
-  centuryBonus: 16,       // +16 for scoring 100+
-  duckPenalty: -2,        // -2 for duck (batters only)
-  strikeRateBonus150: 6,  // +6 for SR > 150
-  strikeRateBonus170: 10, // +10 for SR > 170
-  
-  // Bowling
-  wicketPoints: 25,       // +25 per wicket
-  maidenPoints: 12,       // +12 per maiden
-  threeWicketBonus: 8,    // +8 for 3+ wickets
-  fourWicketBonus: 12,    // +12 for 4+ wickets
-  fiveWicketBonus: 16,    // +16 for 5+ wickets
-  economyBonusBelow6: 6,  // +6 for ER < 6
-  economyBonusBelow5: 10, // +10 for ER < 5
-  economyPenaltyOver10: -4, // -4 for ER > 10
-  economyPenaltyOver12: -8, // -8 for ER > 12
-  
-  // Fielding
-  catchPoints: 8,         // +8 per catch
-  stumpingPoints: 12,     // +12 per stumping
-  runOutDirect: 12,       // +12 for direct run out
-  runOutIndirect: 6,      // +6 for indirect run out
+  runPoints: 1, fourBonus: 1, sixBonus: 2,
+  thirtyBonus: 4, fiftyBonus: 8, centuryBonus: 16,
+  duckPenalty: -2, strikeRateBonus150: 6, strikeRateBonus170: 10,
+  wicketPoints: 25, maidenPoints: 12,
+  threeWicketBonus: 8, fourWicketBonus: 12, fiveWicketBonus: 16,
+  economyBonusBelow6: 6, economyBonusBelow5: 10,
+  economyPenaltyOver10: -4, economyPenaltyOver12: -8,
+  catchPoints: 8, stumpingPoints: 12, runOutDirect: 12, runOutIndirect: 6,
 };
 
-/**
- * Calculate fantasy points from player stats
- */
 function calculateFantasyPoints(stats, position = 'batter') {
   let points = 0;
   
-  // Batting points
   if (stats.runs !== undefined && stats.runs !== null) {
     points += stats.runs * FANTASY_RULES.runPoints;
     points += (stats.fours || 0) * FANTASY_RULES.fourBonus;
     points += (stats.sixes || 0) * FANTASY_RULES.sixBonus;
     
-    // Milestone bonuses
     if (stats.runs >= 100) points += FANTASY_RULES.centuryBonus;
     else if (stats.runs >= 50) points += FANTASY_RULES.fiftyBonus;
     else if (stats.runs >= 30) points += FANTASY_RULES.thirtyBonus;
     
-    // Duck penalty (only for non-bowlers who faced a ball)
     if (stats.runs === 0 && stats.ballsFaced > 0 && position !== 'bowler') {
       points += FANTASY_RULES.duckPenalty;
     }
     
-    // Strike rate bonus (min 10 balls faced)
     if (stats.ballsFaced >= 10) {
       const sr = (stats.runs / stats.ballsFaced) * 100;
       if (sr >= 170) points += FANTASY_RULES.strikeRateBonus170;
@@ -87,17 +74,14 @@ function calculateFantasyPoints(stats, position = 'batter') {
     }
   }
   
-  // Bowling points
   if (stats.wickets !== undefined && stats.wickets !== null) {
     points += stats.wickets * FANTASY_RULES.wicketPoints;
     points += (stats.maidens || 0) * FANTASY_RULES.maidenPoints;
     
-    // Wicket bonuses
     if (stats.wickets >= 5) points += FANTASY_RULES.fiveWicketBonus;
     else if (stats.wickets >= 4) points += FANTASY_RULES.fourWicketBonus;
     else if (stats.wickets >= 3) points += FANTASY_RULES.threeWicketBonus;
     
-    // Economy rate (min 2 overs bowled)
     const overs = stats.oversBowled || stats.overs || 0;
     const runsConceded = stats.runsConceded || 0;
     if (overs >= 2) {
@@ -109,7 +93,6 @@ function calculateFantasyPoints(stats, position = 'batter') {
     }
   }
   
-  // Fielding points
   points += (stats.catches || 0) * FANTASY_RULES.catchPoints;
   points += (stats.stumpings || 0) * FANTASY_RULES.stumpingPoints;
   points += (stats.runOutsDirect || 0) * FANTASY_RULES.runOutDirect;
@@ -118,156 +101,236 @@ function calculateFantasyPoints(stats, position = 'batter') {
   return Math.round(points);
 }
 
-/**
- * Generate simulated stats for a player (for testing)
- */
-function generateSimulatedStats(player) {
-  const isBatter = player.position === 'batter' || player.position === 'keeper' || player.position === 'allrounder';
-  const isBowler = player.position === 'bowler' || player.position === 'allrounder';
-  
-  // Use player name as seed for consistent results
-  const seed = (player.id || player.name || '').split('').reduce((a, c) => a + c.charCodeAt(0), 0);
-  const seededRandom = (offset = 0) => {
-    const x = Math.sin(seed + offset + Date.now() % 1000) * 10000;
-    return x - Math.floor(x);
-  };
-  
-  const stats = {
-    runs: null,
-    ballsFaced: null,
-    fours: null,
-    sixes: null,
-    wickets: null,
-    oversBowled: null,
-    runsConceded: null,
-    maidens: null,
-    catches: seededRandom(20) > 0.7 ? Math.floor(seededRandom(21) * 2) + 1 : 0,
-    runOuts: seededRandom(22) > 0.9 ? 1 : 0,
-    stumpings: 0,
-  };
-  
-  if (isBatter) {
-    stats.runs = Math.floor(seededRandom(1) * 70) + (seededRandom(2) > 0.3 ? 10 : 0);
-    stats.ballsFaced = Math.max(stats.runs, Math.floor(stats.runs * (0.7 + seededRandom(3) * 0.6)));
-    stats.fours = Math.floor(seededRandom(4) * (stats.runs / 10));
-    stats.sixes = Math.floor(seededRandom(5) * (stats.runs / 20));
-  }
-  
-  if (isBowler) {
-    stats.oversBowled = Math.floor(seededRandom(6) * 4) + 1;
-    stats.wickets = seededRandom(7) > 0.4 ? Math.floor(seededRandom(8) * 3) + 1 : 0;
-    stats.runsConceded = Math.floor(stats.oversBowled * (5 + seededRandom(9) * 5));
-    stats.maidens = seededRandom(10) > 0.85 ? 1 : 0;
-  }
-  
-  if (player.position === 'keeper') {
-    stats.stumpings = seededRandom(11) > 0.85 ? 1 : 0;
-  }
-  
-  return stats;
-}
-
 // ============================================
-// API FUNCTIONS
+// CRICKET API FUNCTIONS
 // ============================================
 
-/**
- * Fetch current matches from CricketData.org API
- */
-async function fetchCurrentMatches() {
-  const apiKey = process.env.CRICKET_API_KEY;
-  
+async function cricketApiCall(endpoint, apiKey) {
   if (!apiKey) {
-    console.log('CRICKET_API_KEY not configured - using mock data');
-    return [];
+    return { success: false, error: 'CRICKET_API_KEY not configured in Vercel environment variables' };
   }
+  
+  const url = `${CRICKET_API_BASE}/${endpoint}${endpoint.includes('?') ? '&' : '?'}apikey=${apiKey}`;
+  console.log(`Cricket API: ${endpoint.split('?')[0]}`);
   
   try {
-    const response = await fetch(
-      `${CRICKET_API_BASE}/currentMatches?apikey=${apiKey}`
-    );
+    const response = await fetch(url);
+    const contentType = response.headers.get('content-type') || '';
+    
+    if (!contentType.includes('application/json')) {
+      const text = await response.text();
+      console.error('Non-JSON response:', text.substring(0, 200));
+      return { success: false, error: 'Cricket API returned non-JSON response' };
+    }
+    
     const data = await response.json();
     
     if (data.status !== 'success') {
-      console.error('Cricket API error:', data.reason);
-      return [];
+      return { success: false, error: data.reason || data.status || 'API error' };
     }
     
-    return data.data || [];
+    return { success: true, data: data.data, info: data.info };
   } catch (error) {
-    console.error('Failed to fetch from Cricket API:', error);
-    return [];
+    console.error('Cricket API error:', error);
+    return { success: false, error: error.message };
   }
 }
 
 /**
- * Fetch scorecard for a specific match from Cricket API
+ * Step 1: Search for series by name
+ * Returns series ID that matches the search name
  */
-async function fetchMatchScorecard(matchId) {
-  const apiKey = process.env.CRICKET_API_KEY;
+async function searchSeries(apiKey, seriesName) {
+  const encoded = encodeURIComponent(seriesName);
+  const result = await cricketApiCall(`series?offset=0&search=${encoded}`, apiKey);
   
-  if (!apiKey) {
-    return null;
+  if (!result.success) return result;
+  
+  // Find exact or closest match
+  const series = result.data.find(s => 
+    s.name.toLowerCase() === seriesName.toLowerCase()
+  ) || result.data[0];
+  
+  if (!series) {
+    return { success: false, error: `Series not found: ${seriesName}`, searched: result.data };
   }
   
-  try {
-    const response = await fetch(
-      `${CRICKET_API_BASE}/match_scorecard?apikey=${apiKey}&id=${matchId}`
-    );
-    const data = await response.json();
-    
-    if (data.status !== 'success') {
-      return null;
-    }
-    
-    return data.data;
-  } catch (error) {
-    console.error('Failed to fetch scorecard:', error);
-    return null;
-  }
+  return { 
+    success: true, 
+    seriesId: series.id, 
+    seriesName: series.name,
+    matchCount: series.matches || series.t20 || 0
+  };
 }
 
 /**
- * Sync player stats and update fantasy team points
+ * Step 2: Get series info with match list
+ * Returns all matches in the series with their Cricket API match IDs
  */
-async function syncMatchScores(db, matchId, tournamentId, playerStats) {
-  console.log(`Syncing ${playerStats.length} player stats for match: ${matchId}`);
+async function getSeriesMatches(apiKey, seriesId) {
+  const result = await cricketApiCall(`series_info?id=${seriesId}`, apiKey);
+  
+  if (!result.success) return result;
+  
+  const matchList = result.data.matchList || result.data.matches || [];
+  
+  return {
+    success: true,
+    seriesInfo: result.data.info || {},
+    matches: matchList.map(m => ({
+      cricketApiId: m.id,
+      name: m.name,
+      date: m.date || m.dateTimeGMT,
+      venue: m.venue,
+      teams: m.teams || extractTeamsFromName(m.name),
+      status: m.status,
+      matchType: m.matchType,
+      matchStarted: m.matchStarted,
+      matchEnded: m.matchEnded,
+    }))
+  };
+}
+
+function extractTeamsFromName(name) {
+  if (!name) return [];
+  // "India vs New Zealand, 1st T20I" -> ["India", "New Zealand"]
+  const vsMatch = name.match(/^(.+?)\s+vs\s+(.+?),/i);
+  if (vsMatch) return [vsMatch[1].trim(), vsMatch[2].trim()];
+  return [];
+}
+
+/**
+ * Step 3: Get fantasy scorecard for a specific match
+ * Returns detailed player statistics
+ */
+async function getMatchScorecard(apiKey, cricketApiMatchId) {
+  const result = await cricketApiCall(`match_scorecard?id=${cricketApiMatchId}`, apiKey);
+  
+  if (!result.success) return result;
+  
+  return {
+    success: true,
+    matchInfo: {
+      name: result.data.name,
+      status: result.data.status,
+      venue: result.data.venue,
+      date: result.data.date,
+      matchEnded: result.data.matchEnded,
+    },
+    scorecard: result.data.scorecard || [],
+    score: result.data.score || [],
+  };
+}
+
+/**
+ * Parse scorecard into player stats for fantasy points
+ */
+function parseScorecardToStats(scorecard) {
+  const playerStats = [];
+  
+  if (!scorecard || !Array.isArray(scorecard)) return playerStats;
+  
+  for (const innings of scorecard) {
+    // Process batting
+    for (const batter of (innings.batting || [])) {
+      const name = batter.batsman?.name || batter.batsman;
+      if (!name) continue;
+      
+      playerStats.push({
+        playerName: name,
+        playerId: batter.batsman?.id,
+        runs: batter.r || 0,
+        ballsFaced: batter.b || 0,
+        fours: batter['4s'] || 0,
+        sixes: batter['6s'] || 0,
+      });
+    }
+    
+    // Process bowling
+    for (const bowler of (innings.bowling || [])) {
+      const name = bowler.bowler?.name || bowler.bowler;
+      if (!name) continue;
+      
+      // Check if player already exists (was also a batter)
+      const existing = playerStats.find(p => 
+        p.playerName?.toLowerCase() === name.toLowerCase()
+      );
+      
+      const bowlStats = {
+        wickets: bowler.w || 0,
+        oversBowled: parseFloat(bowler.o) || 0,
+        runsConceded: bowler.r || 0,
+        maidens: bowler.m || 0,
+      };
+      
+      if (existing) {
+        Object.assign(existing, bowlStats);
+      } else {
+        playerStats.push({
+          playerName: name,
+          playerId: bowler.bowler?.id,
+          ...bowlStats
+        });
+      }
+    }
+    
+    // Process catches from fielding data if available
+    for (const catcher of (innings.catching || innings.fielding || [])) {
+      const name = catcher.catcher?.name || catcher.fielder?.name || catcher.name;
+      if (!name) continue;
+      
+      const existing = playerStats.find(p => 
+        p.playerName?.toLowerCase() === name.toLowerCase()
+      );
+      
+      if (existing) {
+        existing.catches = (existing.catches || 0) + (catcher.catches || catcher.catch || 1);
+        existing.stumpings = (existing.stumpings || 0) + (catcher.stumped || 0);
+        existing.runOuts = (existing.runOuts || 0) + (catcher.runOut || catcher.runout || 0);
+      }
+    }
+  }
+  
+  return playerStats;
+}
+
+// ============================================
+// DATABASE SYNC FUNCTIONS
+// ============================================
+
+const normalizeTeam = (t) => (t || '').toLowerCase().replace(/[^a-z]/g, '');
+
+async function syncMatchScores(db, tournamentId, playerStats) {
+  console.log(`Syncing ${playerStats.length} player stats for tournament: ${tournamentId}`);
   
   const results = [];
   
   for (const stat of playerStats) {
-    if (!stat.playerId) continue;
+    if (!stat.playerName) continue;
     
     const points = calculateFantasyPoints(stat, stat.position);
     
-    // Update player in players table
-    await db.execute({
+    // Update player by name (fuzzy match)
+    const updateResult = await db.execute({
       sql: `UPDATE players 
             SET total_points = COALESCE(total_points, 0) + ?,
                 matches_played = COALESCE(matches_played, 0) + 1
-            WHERE id = ? AND tournament_id = ?`,
-      args: [points, stat.playerId, tournamentId]
-    });
-    
-    // Also try to update by name if ID doesn't match
-    await db.execute({
-      sql: `UPDATE players 
-            SET total_points = COALESCE(total_points, 0) + ?,
-                matches_played = COALESCE(matches_played, 0) + 1
-            WHERE name = ? AND tournament_id = ? AND id != ?`,
-      args: [points, stat.playerName, tournamentId, stat.playerId]
+            WHERE tournament_id = ? AND (
+              LOWER(TRIM(name)) = LOWER(TRIM(?)) OR 
+              LOWER(TRIM(name)) LIKE LOWER(?)
+            )`,
+      args: [points, tournamentId, stat.playerName, `%${stat.playerName}%`]
     });
     
     results.push({
-      playerId: stat.playerId,
       playerName: stat.playerName,
       points,
+      updated: updateResult.rowsAffected > 0,
       stats: stat
     });
   }
   
   // Update fantasy team totals
-  // Get all teams in this tournament
   const teamsResult = await db.execute({
     sql: `SELECT id, roster FROM fantasy_teams WHERE tournament_id = ?`,
     args: [tournamentId]
@@ -275,18 +338,15 @@ async function syncMatchScores(db, matchId, tournamentId, playerStats) {
   
   for (const team of teamsResult.rows) {
     let roster = [];
-    try {
-      roster = JSON.parse(team.roster || '[]');
-    } catch (e) {
-      continue;
-    }
+    try { roster = JSON.parse(team.roster || '[]'); } catch (e) { continue; }
     
     let teamMatchPoints = 0;
     const updatedRoster = roster.map(rosterPlayer => {
-      const matchStat = results.find(r => 
-        r.playerId === rosterPlayer.id || 
-        r.playerName === rosterPlayer.name
-      );
+      const matchStat = results.find(r => {
+        const rName = normalizeTeam(r.playerName);
+        const pName = normalizeTeam(rosterPlayer.name);
+        return rName === pName || rName.includes(pName) || pName.includes(rName);
+      });
       
       if (matchStat) {
         teamMatchPoints += matchStat.points;
@@ -299,13 +359,10 @@ async function syncMatchScores(db, matchId, tournamentId, playerStats) {
       return rosterPlayer;
     });
     
-    // Update team roster and total points
     if (teamMatchPoints > 0) {
       await db.execute({
         sql: `UPDATE fantasy_teams 
-              SET roster = ?, 
-                  total_points = COALESCE(total_points, 0) + ?,
-                  matches_processed = COALESCE(matches_processed, 0) + 1
+              SET roster = ?, total_points = COALESCE(total_points, 0) + ?
               WHERE id = ?`,
         args: [JSON.stringify(updatedRoster), teamMatchPoints, team.id]
       });
@@ -315,11 +372,7 @@ async function syncMatchScores(db, matchId, tournamentId, playerStats) {
   return results;
 }
 
-/**
- * Update match status in tournament
- */
-async function updateMatchStatus(db, tournamentId, matchId, newStatus) {
-  // Get current tournament
+async function updateMatchInTournament(db, tournamentId, ourMatchId, cricketApiId, status) {
   const result = await db.execute({
     sql: `SELECT matches FROM tournaments WHERE id = ?`,
     args: [tournamentId]
@@ -328,16 +381,11 @@ async function updateMatchStatus(db, tournamentId, matchId, newStatus) {
   if (result.rows.length === 0) return;
   
   let matches = [];
-  try {
-    matches = JSON.parse(result.rows[0].matches || '[]');
-  } catch (e) {
-    return;
-  }
+  try { matches = JSON.parse(result.rows[0].matches || '[]'); } catch (e) { return; }
   
-  // Update the specific match
   const updatedMatches = matches.map(m => {
-    if (m.id === matchId) {
-      return { ...m, status: newStatus };
+    if (m.id === ourMatchId) {
+      return { ...m, cricketApiId, status: status || m.status };
     }
     return m;
   });
@@ -353,198 +401,218 @@ async function updateMatchStatus(db, tournamentId, matchId, newStatus) {
 // ============================================
 
 export default async function handler(req, res) {
-  // CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
+  if (req.method === 'OPTIONS') return res.status(200).end();
   
   const db = getDb();
-  const action = req.query.action;
+  const apiKey = process.env.CRICKET_API_KEY;
+  
+  if (!apiKey) {
+    return res.status(500).json({ 
+      success: false, 
+      error: 'CRICKET_API_KEY not configured in Vercel environment variables' 
+    });
+  }
   
   try {
-    // GET - Fetch current live matches
+    // ========== GET: Fetch matches for tournament from Cricket API ==========
     if (req.method === 'GET') {
-      const matches = await fetchCurrentMatches();
+      const { tournamentId, seriesName: customSeriesName } = req.query;
       
-      // Filter to only T20 matches
-      const t20Matches = matches.filter(m => 
-        m.matchType === 't20' || 
-        m.name?.toLowerCase().includes('t20') ||
-        m.name?.toLowerCase().includes('ipl')
-      );
+      // Determine series name to search
+      const seriesName = customSeriesName || TOURNAMENT_SERIES_MAP[tournamentId];
+      
+      if (!seriesName) {
+        return res.status(400).json({ 
+          error: 'Unknown tournament. Provide seriesName query param or use known tournamentId',
+          knownTournaments: Object.keys(TOURNAMENT_SERIES_MAP),
+          example: '?tournamentId=test_ind_nz or ?seriesName=New%20Zealand%20tour%20of%20India%2C%202026'
+        });
+      }
+      
+      // Step 1: Search for series
+      const seriesResult = await searchSeries(apiKey, seriesName);
+      if (!seriesResult.success) {
+        return res.status(404).json(seriesResult);
+      }
+      
+      // Step 2: Get matches in series
+      const matchesResult = await getSeriesMatches(apiKey, seriesResult.seriesId);
+      if (!matchesResult.success) {
+        return res.status(404).json(matchesResult);
+      }
       
       return res.json({
         success: true,
-        count: t20Matches.length,
-        matches: t20Matches.map(m => ({
-          id: m.id,
-          name: m.name,
-          status: m.status,
-          venue: m.venue,
-          date: m.date,
-          teams: m.teams,
-          score: m.score,
-          matchStarted: m.matchStarted,
-          matchEnded: m.matchEnded,
-        })),
+        seriesId: seriesResult.seriesId,
+        seriesName: seriesResult.seriesName,
+        matchCount: matchesResult.matches.length,
+        matches: matchesResult.matches
       });
     }
     
-    // POST - Sync match scores
+    // ========== POST: Sync specific match scorecard ==========
     if (req.method === 'POST') {
-      const { matchId, tournamentId, playerStats, players } = req.body;
+      const { 
+        tournamentId, 
+        matchId,           // Our internal match ID (match1, match2, etc)
+        cricketApiMatchId, // Cricket API match ID (if known)
+        teams,             // e.g., "IND vs NZ" to help find match
+        matchDate,         // e.g., "2026-01-15" to help find match
+        seriesName: customSeriesName
+      } = req.body;
       
       if (!tournamentId) {
         return res.status(400).json({ error: 'tournamentId required' });
       }
       
-      // SIMULATE action - Generate simulated stats for players
-      if (action === 'simulate') {
-        if (!players || players.length === 0) {
-          return res.status(400).json({ error: 'players array required for simulation' });
-        }
-        
-        const simulatedStats = players.map(player => {
-          const stats = generateSimulatedStats(player);
-          const points = calculateFantasyPoints(stats, player.position);
-          return {
-            playerId: player.id,
-            playerName: player.name,
-            position: player.position,
-            ...stats,
-            fantasyPoints: points
-          };
-        });
-        
-        // Sync the simulated stats
-        const results = await syncMatchScores(db, matchId || 'simulated', tournamentId, simulatedStats);
-        
-        // Update match status to completed if matchId provided
-        if (matchId) {
-          await updateMatchStatus(db, tournamentId, matchId, 'completed');
-        }
-        
-        return res.json({
-          success: true,
-          matchId: matchId || 'simulated',
-          playersUpdated: results.length,
-          totalPoints: results.reduce((sum, r) => sum + r.points, 0),
-          stats: results
-        });
-      }
+      let actualCricketApiId = cricketApiMatchId;
+      let matchInfo = null;
       
-      // COMPLETE action - Mark match as completed and sync any provided stats
-      if (action === 'complete') {
-        if (!matchId) {
-          return res.status(400).json({ error: 'matchId required to complete match' });
-        }
+      // If no Cricket API ID provided, find it from series
+      if (!actualCricketApiId) {
+        const seriesName = customSeriesName || TOURNAMENT_SERIES_MAP[tournamentId];
         
-        await updateMatchStatus(db, tournamentId, matchId, 'completed');
-        
-        // If player stats provided, sync them
-        if (playerStats && playerStats.length > 0) {
-          const results = await syncMatchScores(db, matchId, tournamentId, playerStats);
-          return res.json({
-            success: true,
-            matchId,
-            status: 'completed',
-            playersUpdated: results.length,
-            stats: results
+        if (!seriesName) {
+          return res.status(400).json({ 
+            error: 'Cannot determine series. Provide cricketApiMatchId or seriesName',
+            knownTournaments: Object.keys(TOURNAMENT_SERIES_MAP)
           });
         }
         
-        return res.json({
-          success: true,
-          matchId,
-          status: 'completed',
-          message: 'Match marked as completed'
-        });
-      }
-      
-      // Default POST - Sync provided player stats
-      if (playerStats && playerStats.length > 0) {
-        const results = await syncMatchScores(db, matchId || 'manual', tournamentId, playerStats);
-        
-        return res.json({
-          success: true,
-          matchId,
-          playersUpdated: results.length,
-          stats: results
-        });
-      }
-      
-      // Try to fetch from Cricket API if matchId provided
-      if (matchId) {
-        const scorecard = await fetchMatchScorecard(matchId);
-        
-        if (!scorecard) {
+        // Step 1: Search series
+        const seriesResult = await searchSeries(apiKey, seriesName);
+        if (!seriesResult.success) {
           return res.status(404).json({ 
-            error: 'Could not fetch match scorecard. Provide playerStats manually or use ?action=simulate',
-            suggestion: 'Use POST with action=simulate and players array for testing'
+            success: false, 
+            error: `Series not found: ${seriesName}`,
+            details: seriesResult 
           });
         }
         
-        // Parse scorecard and sync
-        const parsedStats = [];
-        for (const innings of (scorecard.scorecard || [])) {
-          for (const batter of (innings.batting || [])) {
-            parsedStats.push({
-              playerId: batter.batsman?.id,
-              playerName: batter.batsman?.name,
-              runs: batter.r || 0,
-              ballsFaced: batter.b || 0,
-              fours: batter['4s'] || 0,
-              sixes: batter['6s'] || 0,
-            });
-          }
-          
-          for (const bowler of (innings.bowling || [])) {
-            const existing = parsedStats.find(p => p.playerId === bowler.bowler?.id);
-            if (existing) {
-              existing.wickets = bowler.w || 0;
-              existing.oversBowled = bowler.o || 0;
-              existing.runsConceded = bowler.r || 0;
-              existing.maidens = bowler.m || 0;
-            } else {
-              parsedStats.push({
-                playerId: bowler.bowler?.id,
-                playerName: bowler.bowler?.name,
-                wickets: bowler.w || 0,
-                oversBowled: bowler.o || 0,
-                runsConceded: bowler.r || 0,
-                maidens: bowler.m || 0,
-              });
-            }
-          }
+        // Step 2: Get matches
+        const matchesResult = await getSeriesMatches(apiKey, seriesResult.seriesId);
+        if (!matchesResult.success) {
+          return res.status(404).json({ 
+            success: false, 
+            error: 'Could not get series matches',
+            details: matchesResult 
+          });
         }
         
-        const results = await syncMatchScores(db, matchId, tournamentId, parsedStats);
+        // Find the right match by teams or date
+        let targetMatch = null;
         
-        return res.json({
-          success: true,
-          matchId,
-          source: 'cricket-api',
-          playersUpdated: results.length,
-          stats: results
+        if (teams) {
+          // Parse teams (e.g., "IND vs NZ" or ["India", "New Zealand"])
+          const teamList = Array.isArray(teams) 
+            ? teams 
+            : teams.split(/\s+vs\s+|,/).map(t => t.trim());
+          
+          const normalizeTeam = t => t.toLowerCase().replace(/[^a-z]/g, '');
+          const t1 = normalizeTeam(teamList[0]);
+          const t2 = normalizeTeam(teamList[1]);
+          
+          targetMatch = matchesResult.matches.find(m => {
+            const mTeams = (m.teams || []).map(normalizeTeam);
+            const mName = normalizeTeam(m.name);
+            
+            const hasT1 = mTeams.some(mt => mt.includes(t1) || t1.includes(mt)) || mName.includes(t1);
+            const hasT2 = mTeams.some(mt => mt.includes(t2) || t2.includes(mt)) || mName.includes(t2);
+            
+            // If date provided, also match on date
+            if (matchDate && m.date) {
+              const mDate = new Date(m.date).toISOString().split('T')[0];
+              const targetDate = new Date(matchDate).toISOString().split('T')[0];
+              return hasT1 && hasT2 && mDate === targetDate;
+            }
+            
+            return hasT1 && hasT2;
+          });
+        } else if (matchDate) {
+          // Find by date only
+          targetMatch = matchesResult.matches.find(m => {
+            if (!m.date) return false;
+            const mDate = new Date(m.date).toISOString().split('T')[0];
+            const targetDate = new Date(matchDate).toISOString().split('T')[0];
+            return mDate === targetDate;
+          });
+        }
+        
+        if (!targetMatch) {
+          return res.status(404).json({
+            success: false,
+            error: 'Match not found in series',
+            searched: { teams, matchDate },
+            availableMatches: matchesResult.matches.map(m => ({
+              name: m.name,
+              date: m.date,
+              cricketApiId: m.cricketApiId,
+              teams: m.teams
+            }))
+          });
+        }
+        
+        actualCricketApiId = targetMatch.cricketApiId;
+        matchInfo = targetMatch;
+        console.log(`Found match: ${targetMatch.name} (${actualCricketApiId})`);
+      }
+      
+      // Step 3: Fetch scorecard
+      const scorecardResult = await getMatchScorecard(apiKey, actualCricketApiId);
+      
+      if (!scorecardResult.success) {
+        return res.status(404).json({
+          success: false,
+          error: scorecardResult.error,
+          cricketApiId: actualCricketApiId,
+          matchInfo,
+          tip: 'Scorecard may not be available yet if match has not started'
         });
       }
       
-      return res.status(400).json({ 
-        error: 'Provide matchId with playerStats, or use action=simulate with players array'
+      // Parse scorecard to player stats
+      const playerStats = parseScorecardToStats(scorecardResult.scorecard);
+      
+      if (playerStats.length === 0) {
+        return res.json({
+          success: true,
+          warning: 'No player stats found in scorecard',
+          cricketApiId: actualCricketApiId,
+          matchInfo: scorecardResult.matchInfo,
+          scorecard: scorecardResult.scorecard
+        });
+      }
+      
+      // Sync to database
+      const results = await syncMatchScores(db, tournamentId, playerStats);
+      
+      // Update match in tournament with Cricket API ID
+      if (matchId) {
+        const status = scorecardResult.matchInfo?.matchEnded ? 'completed' : 'live';
+        await updateMatchInTournament(db, tournamentId, matchId, actualCricketApiId, status);
+      }
+      
+      return res.json({
+        success: true,
+        matchId,
+        cricketApiId: actualCricketApiId,
+        matchInfo: scorecardResult.matchInfo || matchInfo,
+        source: 'cricket-api',
+        playersUpdated: results.filter(r => r.updated).length,
+        playersNotFound: results.filter(r => !r.updated).length,
+        totalPoints: results.reduce((sum, r) => sum + r.points, 0),
+        stats: results.slice(0, 25) // Limit response
       });
     }
     
     return res.status(405).json({ error: 'Method not allowed' });
     
   } catch (error) {
-    console.error('API Error:', error);
-    return res.status(500).json({
-      success: false,
-      error: error.message,
-    });
+    console.error('Live Sync API Error:', error);
+    return res.status(500).json({ success: false, error: error.message });
   }
 }

@@ -34,13 +34,23 @@ async function apiCall(endpoint, options = {}) {
     const data = await response.json();
     
     if (!response.ok) {
-      throw new Error(data.error || data.message || 'API request failed');
+      // Return the error data with success: false so caller can check specific error types
+      return { 
+        success: false, 
+        error: data.error || data.message || 'API request failed',
+        ...data  // Include any additional error properties like noApiKey, noScorecard
+      };
     }
     
     return data;
   } catch (error) {
     console.error(`API Error [${endpoint}]:`, error);
-    throw error;
+    // Return a standardized error response
+    return { 
+      success: false, 
+      error: error.message || 'Network error',
+      networkError: true
+    };
   }
 }
 
@@ -316,35 +326,35 @@ export const usersAPI = {
 };
 
 // ============================================
-// LIVE SYNC API
+// LIVE SYNC API - CricketData.org Integration
 // ============================================
 export const liveSyncAPI = {
-  // Get current live matches from Cricket API
-  async getLiveMatches() {
-    return apiCall('/live-sync');
+  /**
+   * Get all matches for a tournament from Cricket API
+   * Uses series search → series info flow
+   */
+  async getMatchesForTournament(tournamentId) {
+    return apiCall(`/live-sync?tournamentId=${encodeURIComponent(tournamentId)}`);
   },
 
-  // Sync scores for a specific match
-  async syncMatch(matchId, tournamentId, playerStats = null) {
+  /**
+   * Sync real scorecard from CricketData.org API
+   * Flow: series search → series info → match scorecard
+   * 
+   * @param {string} matchId - Our internal match ID (match1, match2, etc)
+   * @param {string} tournamentId - Our tournament ID (test_ind_nz, ipl_2026, etc)
+   * @param {object} options - { teams, matchDate, cricketApiMatchId }
+   */
+  async syncMatch(matchId, tournamentId, { teams, matchDate, cricketApiMatchId } = {}) {
     return apiCall('/live-sync', {
       method: 'POST',
-      body: { matchId, tournamentId, playerStats }
-    });
-  },
-
-  // Simulate match scores (for testing)
-  async simulateMatch(matchId, tournamentId, players) {
-    return apiCall('/live-sync?action=simulate', {
-      method: 'POST',
-      body: { matchId, tournamentId, players }
-    });
-  },
-
-  // Complete a match and optionally sync final scores
-  async completeMatch(matchId, tournamentId, playerStats = null) {
-    return apiCall('/live-sync?action=complete', {
-      method: 'POST',
-      body: { matchId, tournamentId, playerStats }
+      body: { 
+        matchId, 
+        tournamentId, 
+        teams,              // e.g., "India vs New Zealand" helps find the match
+        matchDate,          // e.g., "2026-01-15" helps find the match
+        cricketApiMatchId   // If known, pass directly to skip search
+      }
     });
   }
 };

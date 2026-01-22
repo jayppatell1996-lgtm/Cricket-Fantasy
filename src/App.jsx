@@ -2227,51 +2227,59 @@ const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament
   };
   
   // Sync specific match scores to database
-  const handleSyncMatch = async (match, simulate = false) => {
+  const handleSyncMatch = async (match) => {
     setIsSyncing(prev => ({ ...prev, match: match.id }));
-    setSyncStatus(prev => ({ ...prev, match: `Syncing ${match.name}...` }));
+    setSyncStatus(prev => ({ ...prev, match: `Syncing ${match.name || match.teams}...` }));
     
     try {
-      let response;
+      // Get teams from match
+      const matchTeams = Array.isArray(match.teams) ? match.teams.join(' vs ') : match.teams;
       
-      if (simulate) {
-        // Get players for this tournament to simulate stats for
-        const tournamentPlayers = players.filter(p => {
-          const teamsInMatch = Array.isArray(match.teams) ? match.teams : (match.teams || '').split(' vs ').map(t => t.trim());
-          return teamsInMatch.some(t => t === p.team || t.includes(p.team) || p.team.includes(t));
-        });
-        
-        if (tournamentPlayers.length === 0) {
-          throw new Error('No players found for this match teams');
-        }
-        
-        response = await liveSyncAPI.simulateMatch(match.id, tournament.id, tournamentPlayers);
-      } else {
-        response = await liveSyncAPI.syncMatch(match.id, tournament.id);
-      }
+      // Call API to sync real scorecard
+      const response = await liveSyncAPI.syncMatch(match.id, tournament.id, {
+        teams: matchTeams,
+        matchDate: match.date,
+        cricketApiMatchId: match.cricketApiId
+      });
       
       if (response.success) {
-        const totalPoints = response.totalPoints || response.stats?.reduce((sum, s) => sum + (s.points || 0), 0) || 0;
+        const totalPoints = response.totalFantasyPoints || response.totalPoints || 0;
+        const playersUpdated = response.playersUpdatedInDb || response.playersUpdated || 0;
+        const matchName = match.name || matchTeams || match.id;
+        
         setSyncStatus(prev => ({ 
           ...prev, 
-          match: `✅ ${match.name}: ${response.playersUpdated} players updated, ${totalPoints} total points` 
+          match: `✅ ${matchName}: ${playersUpdated} players synced, ${totalPoints} total points` 
         }));
         
         // Refetch players to get updated stats
         await refetchPlayers();
         
-        // Update tournament if using onUpdateTournament
-        if (onUpdateTournament && simulate) {
-          const updatedMatches = (tournament.matches || []).map(m => 
-            m.id === match.id ? { ...m, status: 'completed' } : m
-          );
+        // Update tournament with cricketApiId and status
+        if (onUpdateTournament) {
+          const updatedMatches = (tournament.matches || []).map(m => {
+            if (m.id === match.id) {
+              return { 
+                ...m, 
+                status: response.matchInfo?.matchEnded ? 'completed' : (m.status === 'upcoming' ? 'live' : m.status),
+                cricketApiId: response.cricketApiId || m.cricketApiId
+              };
+            }
+            return m;
+          });
           onUpdateTournament({ ...tournament, matches: updatedMatches });
         }
       } else {
-        setSyncStatus(prev => ({ ...prev, match: `❌ ${match.name}: ${response.error}` }));
+        const errorMsg = response.error || 'Unknown error';
+        const tip = response.tip || '';
+        setSyncStatus(prev => ({ 
+          ...prev, 
+          match: `❌ ${errorMsg}${tip ? ` - ${tip}` : ''}` 
+        }));
       }
     } catch (error) {
-      setSyncStatus(prev => ({ ...prev, match: `❌ Error: ${error.message}` }));
+      const errorMsg = error.message || 'Unknown error';
+      setSyncStatus(prev => ({ ...prev, match: `❌ Error: ${errorMsg}` }));
     } finally {
       setIsSyncing(prev => ({ ...prev, match: null }));
     }
@@ -2866,8 +2874,36 @@ const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament
             <div className="match-sync-section" style={{ marginTop: '30px' }}>
               <h3>🏏 Match Scoring Sync</h3>
               <p className="sync-info">
-                Sync scores for individual matches. Use "Simulate" for test data or "Sync API" if Cricket API is configured.
+                Sync real scorecard data from CricketData.org using series search → series info → match scorecard flow.
+                <br />
+                Requires <code>CRICKET_API_KEY</code> environment variable in Vercel.
+                Get your API key at <a href="https://cricketdata.org" target="_blank" rel="noopener noreferrer">cricketdata.org</a>
               </p>
+              
+              <div style={{ marginBottom: '20px' }}>
+                <button 
+                  className="btn-secondary"
+                  onClick={async () => {
+                    setSyncStatus(prev => ({ ...prev, match: '🔍 Fetching matches from Cricket API...' }));
+                    try {
+                      const result = await liveSyncAPI.getMatchesForTournament(tournament.id);
+                      if (result.success) {
+                        setSyncStatus(prev => ({ 
+                          ...prev, 
+                          match: `✅ Found ${result.matchCount} matches in "${result.seriesName}" series` 
+                        }));
+                        console.log('Cricket API Matches:', result.matches);
+                      } else {
+                        setSyncStatus(prev => ({ ...prev, match: `❌ ${result.error}` }));
+                      }
+                    } catch (err) {
+                      setSyncStatus(prev => ({ ...prev, match: `❌ ${err.message}` }));
+                    }
+                  }}
+                >
+                  🔍 Test API Connection / Fetch Matches
+                </button>
+              </div>
               
               {syncStatus.match && (
                 <div className={`sync-result ${syncStatus.match.startsWith('✅') ? 'success' : syncStatus.match.startsWith('❌') ? 'error' : ''}`} style={{ marginBottom: '15px' }}>
@@ -2910,20 +2946,12 @@ const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament
                       {match.status !== 'completed' && (
                         <>
                           <button 
-                            className="btn-secondary btn-small"
-                            onClick={() => handleSyncMatch(match, true)}
-                            disabled={isSyncing.match === match.id}
-                            title="Simulate match with random stats"
-                          >
-                            {isSyncing.match === match.id ? '⏳' : '🎲'} Simulate
-                          </button>
-                          <button 
                             className="btn-primary btn-small"
-                            onClick={() => handleSyncMatch(match, false)}
+                            onClick={() => handleSyncMatch(match)}
                             disabled={isSyncing.match === match.id}
-                            title="Sync from Cricket API (requires API key)"
+                            title="Sync real scorecard from CricketData.org API"
                           >
-                            {isSyncing.match === match.id ? '⏳' : '📡'} Sync API
+                            {isSyncing.match === match.id ? '⏳ Syncing...' : '📡 Sync Scorecard'}
                           </button>
                           {match.status === 'live' && (
                             <button 
