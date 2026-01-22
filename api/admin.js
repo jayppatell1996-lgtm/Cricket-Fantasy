@@ -498,6 +498,74 @@ export default async function handler(req, res) {
     }
     
     // ============================================
+    // BACKDATE-ROSTER - Change acquired_date for a team's roster
+    // ============================================
+    if (action === 'backdate-roster') {
+      const { teamId, date } = req.query;
+      
+      if (!teamId || !date) {
+        return res.status(400).json({ error: 'teamId and date required (format: YYYY-MM-DD)' });
+      }
+      
+      // Update all roster entries for this team that don't have a dropped_date
+      const result = await db.execute({
+        sql: `UPDATE roster SET acquired_date = ? WHERE fantasy_team_id = ? AND dropped_date IS NULL`,
+        args: [date + ' 00:00:00', teamId]
+      });
+      
+      return res.status(200).json({
+        success: true,
+        message: `Backdated roster for team ${teamId} to ${date}`,
+        rowsAffected: result.rowsAffected
+      });
+    }
+    
+    // ============================================
+    // DEDUPE-ROSTER - Remove duplicate roster entries
+    // ============================================
+    if (action === 'dedupe-roster') {
+      const { teamId } = req.query;
+      
+      // Get all roster entries, optionally for a specific team
+      let sql = `SELECT id, fantasy_team_id, player_id, acquired_date, dropped_date FROM roster`;
+      let args = [];
+      if (teamId) {
+        sql += ` WHERE fantasy_team_id = ?`;
+        args.push(teamId);
+      }
+      
+      const rosterResult = await db.execute({ sql, args });
+      
+      // Track unique entries and duplicates to delete
+      const seen = new Map(); // key: teamId-playerId-acquiredDate-droppedDate
+      const toDelete = [];
+      
+      for (const row of rosterResult.rows) {
+        const key = `${row.fantasy_team_id}-${row.player_id}-${row.acquired_date || 'null'}-${row.dropped_date || 'null'}`;
+        if (seen.has(key)) {
+          toDelete.push(row.id);
+        } else {
+          seen.set(key, row.id);
+        }
+      }
+      
+      // Delete duplicates
+      for (const id of toDelete) {
+        await db.execute({
+          sql: `DELETE FROM roster WHERE id = ?`,
+          args: [id]
+        });
+      }
+      
+      return res.status(200).json({
+        success: true,
+        message: `Removed ${toDelete.length} duplicate roster entries`,
+        duplicatesRemoved: toDelete.length,
+        uniqueEntries: seen.size
+      });
+    }
+    
+    // ============================================
     // DEBUG-DB - View database state for debugging
     // ============================================
     if (action === 'debug-db') {
@@ -691,7 +759,7 @@ export default async function handler(req, res) {
       });
     }
 
-    return res.status(400).json({ error: 'Invalid action. Use ?action=health, seed, users, tournaments, dedupe, reset-points, roster-history, recalc-points, or debug-db' });
+    return res.status(400).json({ error: 'Invalid action. Use ?action=health, seed, users, tournaments, dedupe, reset-points, roster-history, recalc-points, debug-db, backdate-roster, or dedupe-roster' });
 
   } catch (error) {
     console.error('Admin API error:', error);
