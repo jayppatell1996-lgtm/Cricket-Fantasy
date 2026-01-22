@@ -519,18 +519,36 @@ async function syncMatchScores(db, tournamentId, playerStats) {
     if (!stat.playerName) continue;
     
     const points = calculateFantasyPoints(stat, stat.position);
+    const playerName = stat.playerName.trim();
     
-    // Update player by name (fuzzy match)
-    const updateResult = await db.execute({
+    // First try EXACT match
+    let updateResult = await db.execute({
       sql: `UPDATE players 
             SET total_points = COALESCE(total_points, 0) + ?,
                 matches_played = COALESCE(matches_played, 0) + 1
-            WHERE tournament_id = ? AND (
-              LOWER(TRIM(name)) = LOWER(TRIM(?)) OR 
-              LOWER(TRIM(name)) LIKE LOWER(?)
-            )`,
-      args: [points, tournamentId, stat.playerName, `%${stat.playerName}%`]
+            WHERE tournament_id = ? AND LOWER(TRIM(name)) = LOWER(?)`,
+      args: [points, tournamentId, playerName]
     });
+    
+    // If no exact match, try starts-with (for names like "V Kohli" vs "Virat Kohli")
+    if (updateResult.rowsAffected === 0) {
+      // Try matching last name (take last word)
+      const nameParts = playerName.split(' ');
+      const lastName = nameParts[nameParts.length - 1];
+      
+      updateResult = await db.execute({
+        sql: `UPDATE players 
+              SET total_points = COALESCE(total_points, 0) + ?,
+                  matches_played = COALESCE(matches_played, 0) + 1
+              WHERE tournament_id = ? 
+                AND LOWER(TRIM(name)) LIKE LOWER(?)
+                AND id NOT IN (
+                  SELECT id FROM players WHERE tournament_id = ? AND LOWER(TRIM(name)) = LOWER(?)
+                )
+              LIMIT 1`,
+        args: [points, tournamentId, `%${lastName}`, tournamentId, playerName]
+      });
+    }
     
     results.push({
       playerName: stat.playerName,

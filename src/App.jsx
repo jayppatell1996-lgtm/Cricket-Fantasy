@@ -4379,7 +4379,7 @@ const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament
 };
 
 // Main Dashboard Component  
-const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = [], onLogout, onUpdateTeam, onBackToTournaments, onSwitchTournament, isDraftComplete, isDraftOpen, onGoToDraft }) => {
+const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = [], onLogout, onUpdateTeam, onBackToTournaments, onSwitchTournament, isDraftComplete, isDraftOpen, onGoToDraft, onRefreshPlayers }) => {
   const [activeTab, setActiveTab] = useState('roster');
   const [showPlayerModal, setShowPlayerModal] = useState(false);
   const [selectedPosition, setSelectedPosition] = useState(null);
@@ -4394,6 +4394,7 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
   const [localDraftOpen, setLocalDraftOpen] = useState(isDraftOpen); // Local state for auto-refresh
   const [selectedSlotToFill, setSelectedSlotToFill] = useState(null); // For moving players from bench to lineup
   const [viewingTeam, setViewingTeam] = useState(null); // For viewing other team's roster
+  const [localPlayers, setLocalPlayers] = useState(playersProp || []); // Local copy of players
   
   // Enhanced Test Mode State
   const [selectedMatch, setSelectedMatch] = useState(null);
@@ -4405,10 +4406,45 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
   const [isTestingDb, setIsTestingDb] = useState(false);
   const [pointsVerification, setPointsVerification] = useState(null);
   
-  // Use passed players prop, fallback to getPlayersForTournament
-  const playerPool = playersProp && playersProp.length > 0 
-    ? playersProp 
-    : getPlayersForTournament(tournament.id);
+  // Refresh player data on mount and when tournament changes
+  useEffect(() => {
+    const refreshPlayers = async () => {
+      try {
+        console.log('🔄 Dashboard: Refreshing player data...');
+        const response = await playersAPI.getByTournament(tournament.id);
+        if (response.players && response.players.length > 0) {
+          const formattedPlayers = response.players.map(p => ({
+            id: p.id,
+            name: p.name,
+            team: p.team,
+            position: p.position,
+            totalPoints: p.totalPoints || p.total_points || 0,
+            matchesPlayed: p.matchesPlayed || p.matches_played || 0,
+            avgPoints: p.avgPoints || p.avg_points || 0,
+            gameLog: []
+          }));
+          console.log('✅ Dashboard: Loaded', formattedPlayers.length, 'players with points');
+          setLocalPlayers(formattedPlayers);
+        }
+      } catch (err) {
+        console.log('⚠️ Dashboard: Could not refresh players:', err.message);
+      }
+    };
+    
+    refreshPlayers();
+  }, [tournament?.id]);
+  
+  // Update localPlayers when prop changes
+  useEffect(() => {
+    if (playersProp && playersProp.length > 0) {
+      setLocalPlayers(playersProp);
+    }
+  }, [playersProp]);
+  
+  // Use local players (refreshed from API) or prop
+  const playerPool = localPlayers.length > 0 
+    ? localPlayers 
+    : (playersProp && playersProp.length > 0 ? playersProp : getPlayersForTournament(tournament.id));
   
   // Detect if this is a test/demo tournament (never lock players)
   const isTestMode = tournament?.id?.includes('test') || 
@@ -4597,6 +4633,9 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
   // Also deduplicate by player ID to prevent duplicate rendering
   const enrichedRoster = useMemo(() => {
     const seenIds = new Set();
+    console.log('🔄 Enriching roster:', team.roster?.length, 'players');
+    console.log('📊 PlayerPool has:', playerPool?.length, 'players');
+    
     return (team.roster || [])
       .filter(p => {
         // Deduplicate by ID
@@ -4609,17 +4648,25 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
         return true;
       })
       .map(p => {
-        // If player already has name, use as-is
-        if (p.name && p.name !== 'Unknown Player') {
-          return p;
-        }
-        // Try to find player in player pool by ID
-        const poolPlayer = playerPool.find(pp => pp.id === p.id);
+        const playerId = p.id || p.playerId;
+        // ALWAYS try to find player in player pool to get latest points
+        const poolPlayer = playerPool.find(pp => pp.id === playerId);
+        
         if (poolPlayer) {
-          return { ...poolPlayer, slot: p.slot || p.position };
+          console.log(`✅ Found ${poolPlayer.name} in pool with ${poolPlayer.totalPoints} pts`);
+          // Merge pool data (including totalPoints) with roster slot info
+          return { 
+            ...poolPlayer, 
+            slot: p.slot || p.position,
+            // Keep any roster-specific data
+            fantasyPoints: poolPlayer.totalPoints || p.fantasyPoints || 0,
+            totalPoints: poolPlayer.totalPoints || 0
+          };
         }
+        
+        console.log(`❌ Player ${p.name || playerId} NOT found in pool (roster ID: ${playerId})`);
         // Fallback - use what we have
-        return { ...p, name: p.name || 'Unknown Player' };
+        return { ...p, name: p.name || 'Unknown Player', totalPoints: p.totalPoints || p.fantasyPoints || 0 };
       });
   }, [team.roster, playerPool]);
   
@@ -5251,13 +5298,13 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
 
       {/* View Other Team Modal */}
       {viewingTeam && (() => {
-        // Get roster for this team - we need to enrich it with player data
+        // Get roster for this team - enrich with player pool data
         const teamRoster = (viewingTeam.roster || []).map(p => {
           const poolPlayer = playerPool.find(pp => pp.id === p.id || pp.id === p.playerId);
           if (poolPlayer) {
             return { ...poolPlayer, slot: p.slot || p.position };
           }
-          return { ...p, name: p.name || 'Unknown Player' };
+          return { ...p, name: p.name || 'Unknown Player', totalPoints: p.totalPoints || p.fantasyPoints || 0 };
         });
         
         const teamRosterBySlot = {
@@ -5271,20 +5318,33 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
         const activeCount = teamRosterBySlot.batters.length + teamRosterBySlot.keepers.length + 
                            teamRosterBySlot.bowlers.length + teamRosterBySlot.flex.length;
         
+        // Calculate total points for active lineup
+        const activeRoster = [...teamRosterBySlot.batters, ...teamRosterBySlot.keepers, ...teamRosterBySlot.bowlers, ...teamRosterBySlot.flex];
+        const rosterTotalPoints = activeRoster.reduce((sum, p) => sum + (p.totalPoints || 0), 0);
+        
         return (
           <div className="player-profile-modal" onClick={() => setViewingTeam(null)}>
-            <div className="player-profile-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '600px' }}>
+            <div className="player-profile-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '650px', maxHeight: '85vh', overflow: 'auto' }}>
               <button className="close-btn" onClick={() => setViewingTeam(null)}>×</button>
               
-              <div className="profile-header" style={{ marginBottom: '20px' }}>
+              <div className="profile-header" style={{ marginBottom: '15px' }}>
                 <div className="player-avatar">👥</div>
                 <div className="profile-info">
-                  <h2>{viewingTeam.name}</h2>
+                  <h2>{viewingTeam.name} {viewingTeam.id === team.id && <span style={{ fontSize: '0.8rem', color: '#22c55e' }}>(You)</span>}</h2>
                   <div className="profile-meta">
                     <span className="team-badge">Owner: {viewingTeam.owner || viewingTeam.ownerName}</span>
-                    <span className="position-badge" style={{ background: '#3b82f6' }}>{Math.round(viewingTeam.totalPoints || 0)} PTS</span>
+                    <span className="position-badge" style={{ background: '#3b82f6' }}>{Math.round(rosterTotalPoints)} PTS</span>
                   </div>
                 </div>
+              </div>
+              
+              {/* Date Navigator */}
+              <div className="date-nav-bar" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '15px', marginBottom: '15px', padding: '10px', background: 'var(--bg-card)', borderRadius: '8px' }}>
+                <button className="date-nav-btn" onClick={goToPreviousDay} style={{ background: '#d4a017', border: 'none', borderRadius: '50%', width: '32px', height: '32px', cursor: 'pointer', fontSize: '1.2rem' }}>‹</button>
+                <div className="date-display" style={{ textAlign: 'center' }}>
+                  <span className="current-date" style={{ fontWeight: '600' }}>{formatDateDisplay(selectedDate)}</span>
+                </div>
+                <button className="date-nav-btn" onClick={goToNextDay} style={{ background: '#d4a017', border: 'none', borderRadius: '50%', width: '32px', height: '32px', cursor: 'pointer', fontSize: '1.2rem' }}>›</button>
               </div>
               
               <div className="roster-section-yahoo starters-section">
@@ -5422,6 +5482,44 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
               </div>
               <button className="date-nav-btn" onClick={goToNextDay}>›</button>
             </div>
+            
+            {/* Match Info for Selected Date */}
+            {(() => {
+              const selectedDateStr = selectedDate.toISOString().split('T')[0];
+              const todaysMatches = (tournament.matches || []).filter(m => {
+                const matchDateStr = normalizeDate(m.date);
+                return matchDateStr === selectedDateStr;
+              });
+              
+              if (todaysMatches.length === 0) {
+                return (
+                  <div style={{ textAlign: 'center', padding: '8px', background: 'rgba(107, 114, 128, 0.2)', borderRadius: '8px', marginBottom: '10px', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                    No matches scheduled for {formatDateDisplay(selectedDate)}
+                  </div>
+                );
+              }
+              
+              return todaysMatches.map(m => (
+                <div key={m.id} style={{ 
+                  textAlign: 'center', 
+                  padding: '10px', 
+                  background: m.status === 'completed' ? 'rgba(34, 197, 94, 0.2)' : m.status === 'live' ? 'rgba(245, 158, 11, 0.2)' : 'rgba(59, 130, 246, 0.2)', 
+                  borderRadius: '8px', 
+                  marginBottom: '10px',
+                  border: `1px solid ${m.status === 'completed' ? '#22c55e' : m.status === 'live' ? '#f59e0b' : '#3b82f6'}`
+                }}>
+                  <div style={{ fontWeight: '600', marginBottom: '4px' }}>
+                    {m.status === 'completed' ? '✅' : m.status === 'live' ? '🔴' : '📅'} {m.name}
+                  </div>
+                  <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                    {m.teams?.join(' vs ') || 'TBD'} • {m.venue || 'TBD'} • {m.startTime || '19:00'}
+                  </div>
+                  <div style={{ fontSize: '0.75rem', marginTop: '4px' }}>
+                    Status: <strong style={{ color: m.status === 'completed' ? '#22c55e' : m.status === 'live' ? '#f59e0b' : '#3b82f6' }}>{m.status?.toUpperCase() || 'SCHEDULED'}</strong>
+                  </div>
+                </div>
+              ));
+            })()}
             
             <div className="roster-header-row">
               <div className="pickup-counter">
@@ -5843,12 +5941,12 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
                   <div 
                     key={t.id} 
                     className={`standings-row ${t.isUser ? 'user-team' : ''} clickable`}
-                    onClick={() => !t.isUser && setViewingTeam(t)}
-                    style={{ cursor: t.isUser ? 'default' : 'pointer' }}
-                    title={t.isUser ? 'Your team' : `Click to view ${t.name}'s roster`}
+                    onClick={() => setViewingTeam(t)}
+                    style={{ cursor: 'pointer' }}
+                    title={`Click to view ${t.name}'s roster`}
                   >
                     <span className="rank">{i + 1}</span>
-                    <span className="team-name">{t.name} {!t.isUser && <span style={{ fontSize: '0.7rem', opacity: 0.6 }}>👁</span>}</span>
+                    <span className="team-name">{t.name} <span style={{ fontSize: '0.7rem', opacity: 0.6 }}>👁</span></span>
                     <span className="owner">{t.owner}</span>
                     <span className="points">{Math.round(t.totalPoints || 0)}</span>
                   </div>
@@ -6753,6 +6851,12 @@ export default function App() {
           isDraftComplete={isDraftComplete}
           isDraftOpen={isDraftOpen}
           onGoToDraft={handleGoToDraft}
+          onRefreshPlayers={async () => {
+            console.log('🔄 Refreshing players from Dashboard request...');
+            if (selectedTournament?.id) {
+              await loadPlayers(selectedTournament.id);
+            }
+          }}
         />
       )}
     </>
