@@ -189,9 +189,12 @@ const SQUAD_CONFIG = {
   keepers: { min: 0, max: 1, label: 'Wicketkeeper', icon: '🧤', isPlaying: true },
   bowlers: { min: 0, max: 5, label: 'Bowlers', icon: '🎯', isPlaying: true },
   flex: { min: 0, max: 1, label: 'Utility', icon: '🔄', isPlaying: true },
-  // Bench is only for overflow during free agency - not counted in TOTAL_ROSTER_SIZE
-  bench: { min: 0, max: 0, label: 'Bench', icon: '📋', isPlaying: false },
+  // Bench for players waiting to be assigned to starting lineup
+  bench: { min: 0, max: 4, label: 'Bench', icon: '📋', isPlaying: false },
 };
+
+const TOTAL_ROSTER_SIZE = 12; // Only starting lineup counts
+const MAX_TOTAL_PLAYERS = 16; // Starting lineup (12) + bench (4)
 
 // Position compatibility rules
 // Batters slot: batters, allrounders, or keepers
@@ -332,7 +335,6 @@ const getPlayerGameStatus = (player, matches, selectedDate = new Date()) => {
 };
 
 const FREE_AGENCY_LIMIT = 4;
-const TOTAL_ROSTER_SIZE = 12; // 5 batters + 1 keeper + 5 bowlers + 1 flex
 
 // Get start of current week (Monday at midnight)
 const getStartOfWeek = (date = new Date()) => {
@@ -5010,12 +5012,12 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
       return;
     }
     
-    // Count unique players on roster
-    const uniquePlayerIds = new Set(team.roster.map(p => p.id || p.playerId));
+    // Count players
+    const totalPlayers = (team.roster || []).length;
     
-    // Check if roster is full (using unique count)
-    if (uniquePlayerIds.size >= TOTAL_ROSTER_SIZE) {
-      alert(`Roster is full (${TOTAL_ROSTER_SIZE} players). Drop a player first.`);
+    // Check if total roster is full
+    if (totalPlayers >= MAX_TOTAL_PLAYERS) {
+      alert(`Roster is full (${MAX_TOTAL_PLAYERS} total players). Drop a player first.`);
       return;
     }
     
@@ -5041,54 +5043,25 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
       return;
     }
 
-    // Get available slots for this player
-    const availableSlots = getAvailableSlotsForPlayer(player);
-    
-    if (availableSlots.length === 0) {
-      alert(`No available slots for ${player.name} (${player.position}). All compatible slots are full.`);
-      return;
-    }
-    
-    // If targetSlot is provided, use it
-    let slotToUse = targetSlot;
-    
-    // If no target slot and multiple options, show selector
-    if (!slotToUse && availableSlots.length > 1) {
-      setPlayerToAdd(player);
-      setSelectedSlotForAdd(null);
-      return; // Wait for user to select slot
-    }
-    
-    // If only one option, use it
-    if (!slotToUse) {
-      slotToUse = availableSlots[0];
-    }
-    
-    // Validate the slot is valid for this position
-    if (!canPlaceInSlot(player.position, slotToUse)) {
-      alert(`${player.position} cannot be placed in ${SQUAD_CONFIG[slotToUse].label} slot.`);
-      return;
-    }
-    
-    // Check if slot is full
-    if (isSlotFull(slotToUse)) {
-      alert(`${SQUAD_CONFIG[slotToUse].label} slot is full.`);
-      return;
-    }
-
-    const playerWithSlot = { ...player, slot: slotToUse };
+    // ALWAYS add to bench first - user can move to active lineup later
+    const newPlayer = { 
+      ...player, 
+      slot: 'bench',
+      acquiredVia: 'pickup' 
+    };
+    const updatedRoster = [...team.roster, newPlayer];
     const updatedTeam = {
-      ...team,
-      roster: [...team.roster, playerWithSlot],
-      weeklyPickups: (team.weeklyPickups || 0) + 1,
+      ...currentTeam,
+      roster: updatedRoster,
+      weeklyPickups: pickupsUsed + 1
     };
     onUpdateTeam(updatedTeam);
     
-    // Remove from free agents and dropped players pool
-    setFreeAgents(freeAgents.filter(p => p.id !== player.id));
+    // Remove from free agents
+    setFreeAgents(prev => prev.filter(p => p.id !== player.id));
     removeFromDroppedPlayers(player.id);
-    setShowPlayerModal(false);
-    setPlayerToAdd(null);
+    
+    alert(`${player.name} added to bench! Go to your roster to move them to your starting lineup.`);
   };
   
   // Drop a player back to free agency
@@ -5138,19 +5111,38 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
     }
   };
 
+  // Fetch game log when player profile is opened
+  useEffect(() => {
+    if (selectedPlayerProfile) {
+      loadPlayerGameLog(selectedPlayerProfile.id);
+    }
+  }, [selectedPlayerProfile?.id]);
+
   return (
     <div className="dashboard">
       {/* Player Profile Modal */}
       {selectedPlayerProfile && (() => {
-        // Generate game log for this player based on tournament matches
-        const playerGameLog = selectedPlayerProfile.gameLog && selectedPlayerProfile.gameLog.length > 0 
-          ? selectedPlayerProfile.gameLog 
-          : generatePlayerGameLog(selectedPlayerProfile, tournament.matches);
+        // Use real game log from API if available, otherwise empty array
+        const apiGameLog = playerGameLogs[selectedPlayerProfile.id] || [];
+        
+        // Map API response to display format
+        const playerGameLog = apiGameLog.map(g => ({
+          date: g.matchDate,
+          opponent: g.opponent || 'OPP',
+          runs: g.runs,
+          strikeRate: g.strikeRate,
+          wickets: g.wickets,
+          economy: g.economy,
+          catches: g.catches,
+          runOuts: g.runOuts,
+          stumpings: g.stumpings,
+          points: g.fantasyPoints
+        }));
         
         // Calculate totals from game log
         const totalFromGames = playerGameLog.reduce((sum, g) => sum + (g.points || 0), 0);
-        const displayTotalPoints = selectedPlayerProfile.totalPoints || totalFromGames || 0;
-        const displayMatches = selectedPlayerProfile.matchesPlayed || playerGameLog.length || 0;
+        const displayTotalPoints = totalFromGames || selectedPlayerProfile.totalPoints || 0;
+        const displayMatches = playerGameLog.length || selectedPlayerProfile.matchesPlayed || 0;
         
         return (
         <div className="player-profile-modal" onClick={() => setSelectedPlayerProfile(null)}>
@@ -5380,8 +5372,11 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
           <div className="points-display">
             <span className="points-value">
               {(() => {
-                // Calculate today's points from game logs
-                const dateStr = selectedDate.toISOString().split('T')[0];
+                // Calculate today's points from game logs using local date
+                const year = selectedDate.getFullYear();
+                const month = String(selectedDate.getMonth() + 1).padStart(2, '0');
+                const day = String(selectedDate.getDate()).padStart(2, '0');
+                const dateStr = `${year}-${month}-${day}`;
                 let todayPoints = 0;
                 
                 (team.roster || []).forEach(p => {
@@ -5396,7 +5391,7 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
                 return Math.round(todayPoints);
               })()}
             </span>
-            <span className="points-label">Today's Pts</span>
+            <span className="points-label">{formatDateDisplay(selectedDate)} Pts</span>
           </div>
           <div className="points-display" style={{ marginLeft: '10px' }}>
             <span className="points-value" style={{ fontSize: '1.2rem', color: 'var(--text-muted)' }}>{Math.round(team.totalPoints)}</span>
@@ -5442,7 +5437,12 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
             
             {/* Match Info for Selected Date */}
             {(() => {
-              const selectedDateStr = selectedDate.toISOString().split('T')[0];
+              // Use local date format for comparison
+              const year = selectedDate.getFullYear();
+              const month = String(selectedDate.getMonth() + 1).padStart(2, '0');
+              const day = String(selectedDate.getDate()).padStart(2, '0');
+              const selectedDateStr = `${year}-${month}-${day}`;
+              
               const todaysMatches = (tournament.matches || []).filter(m => {
                 const matchDateStr = normalizeDate(m.date);
                 return matchDateStr === selectedDateStr;
@@ -5610,9 +5610,17 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
                             <span className="stat-value">
                               {(() => {
                                 // Get match-specific points for selected date
-                                const dateStr = selectedDate.toISOString().split('T')[0];
+                                // Use local date format (YYYY-MM-DD) for comparison
+                                const year = selectedDate.getFullYear();
+                                const month = String(selectedDate.getMonth() + 1).padStart(2, '0');
+                                const day = String(selectedDate.getDate()).padStart(2, '0');
+                                const dateStr = `${year}-${month}-${day}`;
+                                
                                 const gameLog = playerGameLogs[player.id] || [];
-                                const matchEntry = gameLog.find(g => g.matchDate?.split('T')[0] === dateStr);
+                                const matchEntry = gameLog.find(g => {
+                                  const matchDateStr = g.matchDate?.split('T')[0];
+                                  return matchDateStr === dateStr;
+                                });
                                 
                                 if (matchEntry) {
                                   return matchEntry.fantasyPoints || 0;
@@ -5623,24 +5631,45 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
                               })()}
                             </span>
                           </div>
-                          <button 
-                            className="drop-btn" 
-                            onClick={(e) => { e.stopPropagation(); handleDropPlayer(player); }}
-                            title="Drop to free agency"
-                            style={{ 
-                              marginLeft: '8px', 
-                              background: '#ef4444', 
-                              color: 'white', 
-                              border: 'none', 
-                              borderRadius: '4px', 
-                              padding: '6px 10px', 
-                              cursor: 'pointer', 
-                              fontSize: '0.8rem',
-                              fontWeight: '500'
-                            }}
-                          >
-                            Drop
-                          </button>
+                          <div style={{ display: 'flex', gap: '4px' }}>
+                            <button 
+                              className="bench-btn" 
+                              onClick={(e) => { 
+                                e.stopPropagation(); 
+                                movePlayerToSlot(player.id, 'bench');
+                              }}
+                              title="Move to bench"
+                              style={{ 
+                                background: '#f59e0b', 
+                                color: 'white', 
+                                border: 'none', 
+                                borderRadius: '4px', 
+                                padding: '6px 8px', 
+                                cursor: 'pointer', 
+                                fontSize: '0.75rem',
+                                fontWeight: '500'
+                              }}
+                            >
+                              📋
+                            </button>
+                            <button 
+                              className="drop-btn" 
+                              onClick={(e) => { e.stopPropagation(); handleDropPlayer(player); }}
+                              title="Drop to free agency"
+                              style={{ 
+                                background: '#ef4444', 
+                                color: 'white', 
+                                border: 'none', 
+                                borderRadius: '4px', 
+                                padding: '6px 10px', 
+                                cursor: 'pointer', 
+                                fontSize: '0.8rem',
+                                fontWeight: '500'
+                              }}
+                            >
+                              Drop
+                            </button>
+                          </div>
                         </div>
                       );
                     })}
@@ -5848,7 +5877,7 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
                     <div 
                       className="player-header" 
                       style={{ cursor: 'pointer' }}
-                      onClick={() => setSelectedPlayer(player)}
+                      onClick={() => setSelectedPlayerProfile(player)}
                     >
                       <span className="player-name">
                         {isLocked && <span className="lock-icon">🔒</span>}
@@ -5859,7 +5888,7 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
                     <div 
                       className="player-details"
                       style={{ cursor: 'pointer' }}
-                      onClick={() => setSelectedPlayer(player)}
+                      onClick={() => setSelectedPlayerProfile(player)}
                     >
                       <span className="player-team">{player.team}</span>
                       {player.droppedAt && (
