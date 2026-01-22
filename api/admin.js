@@ -566,6 +566,71 @@ export default async function handler(req, res) {
     }
     
     // ============================================
+    // FIX-OPPONENTS - Update opponent field in player_stats based on player team and match teams
+    // ============================================
+    if (action === 'fix-opponents') {
+      const { tournamentId, matchId } = req.query;
+      
+      if (!tournamentId) {
+        return res.status(400).json({ error: 'tournamentId required' });
+      }
+      
+      // Get tournament matches
+      const tournamentResult = await db.execute({
+        sql: `SELECT matches FROM tournaments WHERE id = ?`,
+        args: [tournamentId]
+      });
+      
+      if (tournamentResult.rows.length === 0) {
+        return res.status(404).json({ error: 'Tournament not found' });
+      }
+      
+      let matches = [];
+      try {
+        matches = JSON.parse(tournamentResult.rows[0].matches || '[]');
+      } catch (e) {
+        return res.status(500).json({ error: 'Could not parse tournament matches' });
+      }
+      
+      // Get all player_stats with player team info
+      let sql = `SELECT ps.id, ps.match_id, ps.player_id, p.team as player_team
+                 FROM player_stats ps
+                 JOIN players p ON ps.player_id = p.id
+                 WHERE p.tournament_id = ?`;
+      let args = [tournamentId];
+      
+      if (matchId) {
+        sql += ` AND ps.match_id = ?`;
+        args.push(matchId);
+      }
+      
+      const statsResult = await db.execute({ sql, args });
+      
+      let updated = 0;
+      for (const stat of statsResult.rows) {
+        // Find the match
+        const match = matches.find(m => m.id === stat.match_id);
+        if (!match || !match.teams || match.teams.length !== 2) continue;
+        
+        // Determine opponent
+        const opponent = match.teams.find(t => t !== stat.player_team) || match.teams[0];
+        
+        // Update the record
+        await db.execute({
+          sql: `UPDATE player_stats SET opponent = ? WHERE id = ?`,
+          args: [opponent, stat.id]
+        });
+        updated++;
+      }
+      
+      return res.status(200).json({
+        success: true,
+        message: `Updated ${updated} player_stats records with opponent info`,
+        updated
+      });
+    }
+    
+    // ============================================
     // DEBUG-DB - View database state for debugging
     // ============================================
     if (action === 'debug-db') {

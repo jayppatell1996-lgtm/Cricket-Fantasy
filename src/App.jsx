@@ -2020,6 +2020,7 @@ const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament
           match,
           matchId: match.id,
           matchDate: match.date, // IMPORTANT: Include match date for player_stats
+          teams: match.teams, // IMPORTANT: Include teams for opponent detection
           cricketApiId: response.cricketApiId,
           matchInfo: response.matchInfo,
           playerStats: response.playerStats,
@@ -2050,11 +2051,12 @@ const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament
   const handleApplyPoints = async () => {
     if (!pendingSyncPreview) return;
     
-    const { match, matchId, matchDate, cricketApiId, playerStats, totalPoints } = pendingSyncPreview;
+    const { match, matchId, matchDate, teams, cricketApiId, playerStats, totalPoints } = pendingSyncPreview;
     
     console.log('📊 handleApplyPoints called:');
     console.log('   - matchId:', matchId);
     console.log('   - matchDate:', matchDate);
+    console.log('   - teams:', teams);
     console.log('   - match.date:', match?.date);
     console.log('   - playerStats count:', playerStats?.length);
     
@@ -2067,10 +2069,12 @@ const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament
     
     // Use match.date as fallback if matchDate not set
     const dateToUse = matchDate || match?.date;
+    const teamsToUse = teams || match?.teams;
     console.log('   - dateToUse:', dateToUse);
+    console.log('   - teamsToUse:', teamsToUse);
     
     try {
-      const response = await liveSyncAPI.applyPoints(matchId, tournament.id, cricketApiId, playerStats, dateToUse);
+      const response = await liveSyncAPI.applyPoints(matchId, tournament.id, cricketApiId, playerStats, dateToUse, teamsToUse);
       
       if (response.success && response.applied) {
         setSyncStatus(prev => ({ 
@@ -3355,6 +3359,7 @@ const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament
                                 match: manualEntryMatch,
                                 matchId: manualEntryMatch.id,
                                 matchDate: manualEntryMatch.date, // IMPORTANT: Include match date for player_stats
+                                teams: manualEntryMatch.teams, // IMPORTANT: Include teams for opponent detection
                                 cricketApiId: 'manual-entry',
                                 matchInfo: { name: manualEntryMatch.name },
                                 playerStats: statsWithPoints,

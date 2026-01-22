@@ -362,7 +362,7 @@ export const liveSyncAPI = {
    * Apply points - save previously previewed stats to database
    * Call this after admin approves the preview
    */
-  async applyPoints(matchId, tournamentId, cricketApiMatchId, playerStats, matchDate) {
+  async applyPoints(matchId, tournamentId, cricketApiMatchId, playerStats, matchDate, teams) {
     return apiCall('/live-sync?action=apply', {
       method: 'POST',
       body: { 
@@ -370,7 +370,8 @@ export const liveSyncAPI = {
         tournamentId, 
         cricketApiMatchId,
         playerStats,
-        matchDate // IMPORTANT: Include date for player_stats
+        matchDate, // IMPORTANT: Include date for player_stats
+        teams // IMPORTANT: Include teams for opponent detection
       }
     });
   }
