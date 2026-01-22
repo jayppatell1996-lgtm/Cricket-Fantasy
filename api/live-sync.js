@@ -540,42 +540,33 @@ async function syncMatchScores(db, tournamentId, playerStats) {
     });
   }
   
-  // Update fantasy team totals
+  // Update fantasy team totals by summing player points from roster table
   const teamsResult = await db.execute({
-    sql: `SELECT id, roster FROM fantasy_teams WHERE tournament_id = ?`,
+    sql: `SELECT id FROM fantasy_teams WHERE tournament_id = ?`,
     args: [tournamentId]
   });
   
   for (const team of teamsResult.rows) {
-    let roster = [];
-    try { roster = JSON.parse(team.roster || '[]'); } catch (e) { continue; }
-    
-    let teamMatchPoints = 0;
-    const updatedRoster = roster.map(rosterPlayer => {
-      const matchStat = results.find(r => {
-        const rName = normalizeTeam(r.playerName);
-        const pName = normalizeTeam(rosterPlayer.name);
-        return rName === pName || rName.includes(pName) || pName.includes(rName);
+    try {
+      // Get total points from all players on this team's roster
+      const rosterPointsResult = await db.execute({
+        sql: `SELECT COALESCE(SUM(p.total_points), 0) as team_total
+              FROM roster r
+              JOIN players p ON r.player_id = p.id
+              WHERE r.fantasy_team_id = ?`,
+        args: [team.id]
       });
       
-      if (matchStat) {
-        teamMatchPoints += matchStat.points;
-        return {
-          ...rosterPlayer,
-          totalPoints: (rosterPlayer.totalPoints || 0) + matchStat.points,
-          matchesPlayed: (rosterPlayer.matchesPlayed || 0) + 1
-        };
-      }
-      return rosterPlayer;
-    });
-    
-    if (teamMatchPoints > 0) {
+      const teamTotal = rosterPointsResult.rows[0]?.team_total || 0;
+      
       await db.execute({
-        sql: `UPDATE fantasy_teams 
-              SET roster = ?, total_points = COALESCE(total_points, 0) + ?
-              WHERE id = ?`,
-        args: [JSON.stringify(updatedRoster), teamMatchPoints, team.id]
+        sql: `UPDATE fantasy_teams SET total_points = ? WHERE id = ?`,
+        args: [teamTotal, team.id]
       });
+      
+      console.log(`   Updated team ${team.id} total: ${teamTotal}`);
+    } catch (e) {
+      console.error('Error updating team total:', e);
     }
   }
   

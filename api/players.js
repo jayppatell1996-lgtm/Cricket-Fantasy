@@ -172,46 +172,46 @@ export default async function handler(req, res) {
         const playerName = currentResult.rows[0].name;
         const pointsDiff = newPointsNum - currentPoints;
         
-        // Update player points
+        // Update player points in players table
         await db.execute({
           sql: 'UPDATE players SET total_points = ? WHERE id = ?',
           args: [newPointsNum, playerId]
         });
         
-        // Also update fantasy_teams rosters that have this player
-        // Get all teams that have this player in their roster
-        const teamsResult = await db.execute({
-          sql: `SELECT id, roster, total_points FROM fantasy_teams WHERE tournament_id = ?`,
-          args: [tournamentId || 'test_ind_nz']
+        // Find all teams that have this player in their roster and recalculate team totals
+        // Get teams from roster table that have this player
+        const teamsWithPlayer = await db.execute({
+          sql: `SELECT DISTINCT r.fantasy_team_id, ft.id as team_id
+                FROM roster r
+                JOIN fantasy_teams ft ON r.fantasy_team_id = ft.id
+                WHERE r.player_id = ? AND ft.tournament_id = ?`,
+          args: [playerId, tournamentId || 'test_ind_nz']
         });
         
-        for (const team of teamsResult.rows) {
+        // For each team, recalculate total points from all their players
+        for (const teamRow of teamsWithPlayer.rows) {
           try {
-            const roster = JSON.parse(team.roster || '[]');
-            const playerInRoster = roster.find(p => p.id === playerId || p.playerId === playerId);
+            // Get all players on this team's roster with their current points
+            const rosterResult = await db.execute({
+              sql: `SELECT p.total_points
+                    FROM roster r
+                    JOIN players p ON r.player_id = p.id
+                    WHERE r.fantasy_team_id = ?`,
+              args: [teamRow.fantasy_team_id]
+            });
             
-            if (playerInRoster) {
-              // Update player points in roster
-              const updatedRoster = roster.map(p => {
-                if (p.id === playerId || p.playerId === playerId) {
-                  return { ...p, fantasyPoints: newPointsNum };
-                }
-                return p;
-              });
-              
-              // Recalculate team total points based on active lineup
-              const activeSlots = ['batter1', 'batter2', 'batter3', 'batter4', 'batter5', 'wicketkeeper', 'bowler1', 'bowler2', 'bowler3', 'bowler4', 'bowler5', 'flex'];
-              const teamTotal = updatedRoster
-                .filter(p => activeSlots.includes(p.slot))
-                .reduce((sum, p) => sum + (p.fantasyPoints || 0), 0);
-              
-              await db.execute({
-                sql: 'UPDATE fantasy_teams SET roster = ?, total_points = ? WHERE id = ?',
-                args: [JSON.stringify(updatedRoster), teamTotal, team.id]
-              });
-            }
+            // Sum up all player points
+            const teamTotal = rosterResult.rows.reduce((sum, p) => sum + (p.total_points || 0), 0);
+            
+            // Update team total
+            await db.execute({
+              sql: 'UPDATE fantasy_teams SET total_points = ? WHERE id = ?',
+              args: [teamTotal, teamRow.fantasy_team_id]
+            });
+            
+            console.log(`   Updated team ${teamRow.fantasy_team_id} total: ${teamTotal}`);
           } catch (e) {
-            console.error('Error updating team roster:', e);
+            console.error('Error updating team total:', e);
           }
         }
         
@@ -222,7 +222,8 @@ export default async function handler(req, res) {
           message: `Updated ${playerName} points: ${currentPoints} → ${newPointsNum}`,
           oldPoints: currentPoints,
           newPoints: newPointsNum,
-          diff: pointsDiff
+          diff: pointsDiff,
+          teamsUpdated: teamsWithPlayer.rows.length
         });
       }
       
