@@ -2015,6 +2015,96 @@ const SnakeDraftPage = ({ team, tournament, players, allTeams, onDraftComplete, 
 const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament, onLogout, onBackToTournaments, onSwitchTournament, allTeams, allUsers, onStartDraft, onDeleteTeam, onUpdateTeam, onDeleteUser }) => {
   const [activeTab, setActiveTab] = useState('overview');
   
+  // Local fantasy points calculator (mirrors backend rules)
+  // Accepts SR (strike rate) and ER (economy rate) directly
+  const calculateFantasyPointsLocal = (stats) => {
+    let points = 0;
+    
+    // Batting: +1 per run
+    const runs = stats.runs || 0;
+    points += runs;
+    
+    // Strike Rate bonus (min 20 runs AND SR must be provided/valid)
+    const sr = stats.SR || stats.strikeRate || 0;
+    if (runs >= 20 && sr > 0) {
+      if (sr >= 160) points += 25;
+      else if (sr >= 150) points += 20;
+      else if (sr >= 140) points += 15;
+      else if (sr >= 130) points += 10;
+      else if (sr >= 120) points += 5;
+    }
+    
+    // Bowling: +25 per wicket, +20 per maiden
+    points += (stats.wickets || 0) * 25;
+    points += (stats.maidens || 0) * 20;
+    
+    // Economy bonus (min 3 overs AND ER must be provided/valid)
+    const overs = stats.overs || stats.oversBowled || 0;
+    const er = stats.ER || stats.economy || 0;
+    if (overs >= 3 && er > 0) {
+      if (er <= 5) points += 25;
+      else if (er <= 6) points += 20;
+      else if (er <= 7) points += 15;
+      else if (er <= 8) points += 10;
+    }
+    
+    // Fielding: +12 catch, +20 run out, +15 stumping
+    points += (stats.catches || 0) * 12;
+    points += (stats.runouts || stats.runOuts || 0) * 20;
+    points += (stats.stumpings || 0) * 15;
+    
+    return Math.round(points);
+  };
+  
+  // Get points breakdown for manual entry
+  const getPointsBreakdownLocal = (stats) => {
+    const breakdown = [];
+    const runs = stats.runs || 0;
+    const sr = stats.SR || stats.strikeRate || 0;
+    
+    // Batting
+    if (runs > 0) {
+      breakdown.push({ label: `${runs} runs`, points: runs });
+      
+      // SR bonus only if runs >= 20 AND SR > 0
+      if (runs >= 20 && sr > 0) {
+        if (sr >= 160) breakdown.push({ label: `SR ${sr} (≥160)`, points: 25 });
+        else if (sr >= 150) breakdown.push({ label: `SR ${sr} (150-159)`, points: 20 });
+        else if (sr >= 140) breakdown.push({ label: `SR ${sr} (140-149)`, points: 15 });
+        else if (sr >= 130) breakdown.push({ label: `SR ${sr} (130-139)`, points: 10 });
+        else if (sr >= 120) breakdown.push({ label: `SR ${sr} (120-129)`, points: 5 });
+      }
+    }
+    
+    // Bowling
+    if ((stats.wickets || 0) > 0) {
+      breakdown.push({ label: `${stats.wickets} wkt${stats.wickets > 1 ? 's' : ''}`, points: stats.wickets * 25 });
+    }
+    if ((stats.maidens || 0) > 0) {
+      breakdown.push({ label: `${stats.maidens} maiden${stats.maidens > 1 ? 's' : ''}`, points: stats.maidens * 20 });
+    }
+    
+    // ER bonus only if overs >= 3 AND ER > 0
+    const overs = stats.overs || stats.oversBowled || 0;
+    const er = stats.ER || stats.economy || 0;
+    if (overs >= 3 && er > 0) {
+      if (er <= 5) breakdown.push({ label: `ER ${er} (≤5)`, points: 25 });
+      else if (er <= 6) breakdown.push({ label: `ER ${er} (5-6)`, points: 20 });
+      else if (er <= 7) breakdown.push({ label: `ER ${er} (6-7)`, points: 15 });
+      else if (er <= 8) breakdown.push({ label: `ER ${er} (7-8)`, points: 10 });
+    }
+    
+    // Fielding
+    const catches = stats.catches || 0;
+    const runouts = stats.runouts || stats.runOuts || 0;
+    const stumpings = stats.stumpings || 0;
+    if (catches > 0) breakdown.push({ label: `${catches} catch${catches > 1 ? 'es' : ''}`, points: catches * 12 });
+    if (runouts > 0) breakdown.push({ label: `${runouts} run out${runouts > 1 ? 's' : ''}`, points: runouts * 20 });
+    if (stumpings > 0) breakdown.push({ label: `${stumpings} stumping${stumpings > 1 ? 's' : ''}`, points: stumpings * 15 });
+    
+    return breakdown;
+  };
+  
   // Tournament editing state
   const [editingTournament, setEditingTournament] = useState(false);
   const [tournamentForm, setTournamentForm] = useState({
@@ -2132,6 +2222,12 @@ const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament
   const [syncStatus, setSyncStatus] = useState({ players: null, scores: null, clearing: null, match: null });
   const [pendingSyncPreview, setPendingSyncPreview] = useState(null); // Holds preview data before admin approval
   const [isSyncing, setIsSyncing] = useState({ players: false, scores: false, clearing: false });
+  const [apiMatchesInfo, setApiMatchesInfo] = useState(null); // Stores fetched matches with fantasyEnabled info
+  const [showManualEntry, setShowManualEntry] = useState(false); // Toggle manual entry form
+  const [manualEntryMatch, setManualEntryMatch] = useState(null); // Match to enter manual stats for
+  const [showPointsAdjust, setShowPointsAdjust] = useState(false); // Toggle points adjustment
+  const [pointsAdjustPlayer, setPointsAdjustPlayer] = useState(null); // Player being adjusted
+  const [pointsAdjustValue, setPointsAdjustValue] = useState(''); // New points value
   const [editingTeam, setEditingTeam] = useState(null);
   const [editTeamForm, setEditTeamForm] = useState({ name: '', ownerName: '', totalPoints: 0 });
   const [userFilter, setUserFilter] = useState('all'); // all, with_team, without_team
@@ -2904,12 +3000,47 @@ const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament
             {/* Match-by-Match Sync */}
             <div className="match-sync-section" style={{ marginTop: '30px' }}>
               <h3>🏏 Match Scoring Sync</h3>
-              <p className="sync-info">
-                Sync real scorecard data from CricketData.org using series search → series info → match scorecard flow.
-                <br />
-                Requires <code>CRICKET_API_KEY</code> environment variable in Vercel.
-                Get your API key at <a href="https://cricketdata.org" target="_blank" rel="noopener noreferrer">cricketdata.org</a>
-              </p>
+              
+              {/* Tournament-specific guidance */}
+              {tournament.id === 'ipl_2026' ? (
+                <div style={{ 
+                  padding: '15px', 
+                  marginBottom: '15px', 
+                  background: 'rgba(34, 197, 94, 0.1)', 
+                  borderRadius: '8px',
+                  border: '1px solid rgba(34, 197, 94, 0.3)'
+                }}>
+                  <strong>✅ IPL 2026 - Full API Support</strong>
+                  <p style={{ margin: '8px 0 0 0', fontSize: '0.875rem' }}>
+                    IPL matches have <code>fantasyEnabled: true</code>. Use "Sync Scorecard" to automatically fetch player stats.
+                  </p>
+                  <div style={{ 
+                    marginTop: '10px', 
+                    padding: '10px', 
+                    background: 'rgba(251, 191, 36, 0.2)', 
+                    borderRadius: '4px',
+                    fontSize: '0.8rem',
+                    border: '1px solid rgba(251, 191, 36, 0.4)'
+                  }}>
+                    ⚠️ <strong>REMINDER:</strong> Test the sync flow once IPL 2026 matches are available in the Cricket API.
+                    Verify the scorecard parsing works correctly with real data.
+                  </div>
+                </div>
+              ) : (
+                <div style={{ 
+                  padding: '15px', 
+                  marginBottom: '15px', 
+                  background: 'rgba(251, 191, 36, 0.1)', 
+                  borderRadius: '8px',
+                  border: '1px solid rgba(251, 191, 36, 0.3)'
+                }}>
+                  <strong>📝 {tournament.name} - Manual Entry Required</strong>
+                  <p style={{ margin: '8px 0 0 0', fontSize: '0.875rem' }}>
+                    This tournament does not have <code>fantasyEnabled</code> in the Cricket API.
+                    Use <strong>Manual Entry</strong> below to add player stats.
+                  </p>
+                </div>
+              )}
               
               <div style={{ marginBottom: '20px' }}>
                 <button 
@@ -2919,15 +3050,28 @@ const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament
                     try {
                       const result = await liveSyncAPI.getMatchesForTournament(tournament.id);
                       if (result.success) {
-                        setSyncStatus(prev => ({ 
-                          ...prev, 
-                          match: `✅ Found ${result.matchCount} matches in "${result.seriesName}" series` 
-                        }));
+                        // Store API matches info for later use
+                        setApiMatchesInfo(result);
+                        
+                        // Count fantasy-enabled matches
+                        const fantasyCount = (result.matches || []).filter(m => m.fantasyEnabled).length;
+                        const totalCount = result.matchCount || 0;
+                        
+                        let message = `✅ Found ${totalCount} T20 matches in "${result.seriesName}"`;
+                        if (fantasyCount > 0) {
+                          message += ` (${fantasyCount} with detailed fantasy data)`;
+                        } else if (totalCount > 0) {
+                          message += ` (basic scorecard only - no fantasy data)`;
+                        }
+                        
+                        setSyncStatus(prev => ({ ...prev, match: message }));
                         console.log('Cricket API Matches:', result.matches);
                       } else {
+                        setApiMatchesInfo(null);
                         setSyncStatus(prev => ({ ...prev, match: `❌ ${result.error}` }));
                       }
                     } catch (err) {
+                      setApiMatchesInfo(null);
                       setSyncStatus(prev => ({ ...prev, match: `❌ ${err.message}` }));
                     }
                   }}
@@ -2935,6 +3079,47 @@ const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament
                   🔍 Test API Connection / Fetch Matches
                 </button>
               </div>
+              
+              {/* API Matches Info */}
+              {apiMatchesInfo && apiMatchesInfo.matches && apiMatchesInfo.matches.length > 0 && (
+                <div style={{ 
+                  marginBottom: '20px', 
+                  padding: '15px', 
+                  background: 'var(--bg-card)', 
+                  borderRadius: '8px',
+                  border: '1px solid var(--border-color)'
+                }}>
+                  <h5 style={{ margin: '0 0 10px 0' }}>📡 Available from Cricket API:</h5>
+                  <div style={{ display: 'grid', gap: '8px', fontSize: '0.875rem' }}>
+                    {apiMatchesInfo.matches.slice(0, 8).map((m, i) => (
+                      <div key={i} style={{ 
+                        display: 'flex', 
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        padding: '6px 10px',
+                        background: 'var(--bg-primary)',
+                        borderRadius: '4px'
+                      }}>
+                        <span>{m.name}</span>
+                        <span style={{ 
+                          fontSize: '0.75rem',
+                          padding: '2px 6px',
+                          borderRadius: '4px',
+                          background: m.fantasyEnabled ? '#22c55e' : m.matchEnded ? '#3b82f6' : '#f59e0b',
+                          color: 'white'
+                        }}>
+                          {m.fantasyEnabled ? '✓ Fantasy' : m.matchEnded ? 'Scorecard' : 'Upcoming'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  {apiMatchesInfo.matches.length > 8 && (
+                    <div style={{ marginTop: '8px', fontSize: '0.875rem', color: 'var(--text-muted)' }}>
+                      + {apiMatchesInfo.matches.length - 8} more matches
+                    </div>
+                  )}
+                </div>
+              )}
               
               {syncStatus.match && (
                 <div className={`sync-result ${syncStatus.match.startsWith('✅') ? 'success' : syncStatus.match.startsWith('❌') ? 'error' : ''}`} style={{ marginBottom: '15px' }}>
@@ -3075,8 +3260,8 @@ const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament
                         </span>
                       </div>
                     </div>
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                      {match.status !== 'completed' && (
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                      {match.status !== 'completed' && tournament.id === 'ipl_2026' && (
                         <>
                           <button 
                             className="btn-primary btn-small"
@@ -3099,6 +3284,11 @@ const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament
                           )}
                         </>
                       )}
+                      {match.status !== 'completed' && tournament.id !== 'ipl_2026' && (
+                        <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                          Use Manual Entry ↓
+                        </span>
+                      )}
                       {match.status === 'completed' && (
                         <span style={{ color: '#22c55e', fontWeight: '600' }}>✓ Completed</span>
                       )}
@@ -3112,35 +3302,434 @@ const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament
                   </div>
                 )}
               </div>
+              
+              {/* Manual Entry Section */}
+              <div style={{ marginTop: '20px' }}>
+                {tournament.id === 'ipl_2026' ? (
+                  <button 
+                    className="btn-secondary btn-small"
+                    onClick={() => setShowManualEntry(!showManualEntry)}
+                    style={{ marginBottom: '10px' }}
+                  >
+                    {showManualEntry ? '➖ Hide Manual Entry' : '➕ Manual Entry (backup option)'}
+                  </button>
+                ) : (
+                  <h4 style={{ margin: '0 0 15px 0', color: 'var(--accent-color)' }}>📝 Manual Stats Entry</h4>
+                )}
+                
+                {(showManualEntry || tournament.id !== 'ipl_2026') && (
+                  <div style={{ 
+                    padding: '20px', 
+                    background: 'var(--bg-card)', 
+                    borderRadius: '8px',
+                    border: tournament.id !== 'ipl_2026' ? '2px solid var(--accent-color)' : '1px solid var(--border-color)'
+                  }}>
+                    {tournament.id === 'ipl_2026' && <h4 style={{ margin: '0 0 15px 0' }}>📝 Manual Stats Entry</h4>}
+                    <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginBottom: '15px' }}>
+                      {tournament.id === 'ipl_2026' 
+                        ? 'Use this as a backup when API sync fails.'
+                        : 'Enter player stats manually for each match. This is the primary method for this tournament.'}
+                    </p>
+                    
+                    <div style={{ marginBottom: '15px' }}>
+                      <label style={{ display: 'block', marginBottom: '5px', fontWeight: '500' }}>Select Match:</label>
+                      <select 
+                        value={manualEntryMatch?.id || ''}
+                        onChange={(e) => {
+                          const match = (tournament.matches || []).find(m => m.id === e.target.value);
+                          setManualEntryMatch(match);
+                        }}
+                        style={{ width: '100%', padding: '8px', borderRadius: '4px' }}
+                      >
+                        <option value="">-- Select a match --</option>
+                        {(tournament.matches || []).map(m => (
+                          <option key={m.id} value={m.id}>{m.name} ({m.date})</option>
+                        ))}
+                      </select>
+                    </div>
+                    
+                    {manualEntryMatch && (
+                      <div>
+                        <p style={{ fontSize: '0.875rem', marginBottom: '10px' }}>
+                          Enter stats in JSON format for: <strong>{manualEntryMatch.name}</strong>
+                        </p>
+                        
+                        {/* Help Section - Sample JSON */}
+                        <details open style={{ marginBottom: '15px', fontSize: '0.85rem' }}>
+                          <summary style={{ cursor: 'pointer', fontWeight: '600', color: 'var(--accent-color)' }}>
+                            📋 Sample JSON Structure (click to copy)
+                          </summary>
+                          <div style={{ 
+                            marginTop: '10px', 
+                            padding: '12px', 
+                            background: 'var(--bg-primary)', 
+                            borderRadius: '6px',
+                            border: '1px solid var(--border-color)',
+                            position: 'relative'
+                          }}>
+                            <button
+                              onClick={() => {
+                                const sample = `[
+  { "playerName": "Virat Kohli", "runs": 82, "SR": 156.25, "wickets": 0, "overs": 0, "maidens": 0, "ER": 0, "catches": 1, "runouts": 0, "stumpings": 0 },
+  { "playerName": "Rohit Sharma", "runs": 45, "SR": 140.62, "wickets": 0, "overs": 0, "maidens": 0, "ER": 0, "catches": 0, "runouts": 0, "stumpings": 0 },
+  { "playerName": "Jasprit Bumrah", "runs": 0, "SR": 0, "wickets": 3, "overs": 4, "maidens": 1, "ER": 5.25, "catches": 0, "runouts": 0, "stumpings": 0 },
+  { "playerName": "Ravindra Jadeja", "runs": 28, "SR": 127.27, "wickets": 2, "overs": 4, "maidens": 0, "ER": 6.50, "catches": 2, "runouts": 1, "stumpings": 0 }
+]`;
+                                navigator.clipboard.writeText(sample);
+                                alert('Sample JSON copied to clipboard!');
+                              }}
+                              style={{
+                                position: 'absolute',
+                                top: '8px',
+                                right: '8px',
+                                padding: '4px 8px',
+                                fontSize: '0.75rem',
+                                background: 'var(--accent-color)',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '4px',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              📋 Copy
+                            </button>
+                            <pre style={{ 
+                              margin: 0, 
+                              fontSize: '0.75rem', 
+                              whiteSpace: 'pre-wrap',
+                              fontFamily: 'monospace',
+                              lineHeight: '1.5'
+                            }}>{`[
+  {
+    "playerName": "Player Name",  // Required
+    "runs": 45,                   // Batting runs
+    "SR": 150.00,                 // Strike Rate (for SR bonus)
+    "wickets": 0,                 // Bowling wickets
+    "overs": 0,                   // Overs bowled (for ER bonus)
+    "maidens": 0,                 // Maiden overs
+    "ER": 0,                      // Economy Rate
+    "catches": 1,                 // Catches taken
+    "runouts": 0,                 // Run outs
+    "stumpings": 0                // Stumpings (WK)
+  }
+]`}</pre>
+                          </div>
+                        </details>
+
+                        {/* Scoring Rules */}
+                        <details style={{ marginBottom: '15px', fontSize: '0.85rem' }}>
+                          <summary style={{ cursor: 'pointer', fontWeight: '600' }}>📖 Scoring Rules Reference</summary>
+                          <div style={{ 
+                            marginTop: '8px', 
+                            padding: '12px', 
+                            background: 'var(--bg-primary)', 
+                            borderRadius: '6px',
+                            lineHeight: '1.8'
+                          }}>
+                            <div style={{ marginBottom: '10px' }}>
+                              <strong>🏏 Batting:</strong><br/>
+                              • +1 per run<br/>
+                              • SR Bonus (min 20 runs): ≥160 (+25) | 150-159 (+20) | 140-149 (+15) | 130-139 (+10) | 120-129 (+5)
+                            </div>
+                            <div style={{ marginBottom: '10px' }}>
+                              <strong>🎳 Bowling:</strong><br/>
+                              • +25 per wicket | +20 per maiden<br/>
+                              • ER Bonus (min 3 overs): ≤5 (+25) | 5.01-6 (+20) | 6.01-7 (+15) | 7.01-8 (+10)
+                            </div>
+                            <div>
+                              <strong>🧤 Fielding:</strong><br/>
+                              • +12 per catch | +20 per run out | +15 per stumping
+                            </div>
+                          </div>
+                        </details>
+                        
+                        <textarea
+                          id="manual-stats-json"
+                          placeholder='Paste your JSON array here...'
+                          style={{ 
+                            width: '100%', 
+                            height: '180px', 
+                            padding: '12px', 
+                            fontFamily: 'monospace',
+                            fontSize: '0.8rem',
+                            borderRadius: '6px',
+                            border: '1px solid var(--border-color)',
+                            background: 'var(--bg-primary)'
+                          }}
+                        />
+                        
+                        <button
+                          className="btn-primary"
+                          style={{ marginTop: '10px' }}
+                          onClick={async () => {
+                            const textarea = document.getElementById('manual-stats-json');
+                            try {
+                              const stats = JSON.parse(textarea.value);
+                              if (!Array.isArray(stats) || stats.length === 0) {
+                                alert('Please enter an array of player stats');
+                                return;
+                              }
+                              
+                              // Calculate fantasy points and breakdown for each
+                              const statsWithPoints = stats.map(s => ({
+                                ...s,
+                                fantasyPoints: calculateFantasyPointsLocal(s),
+                                pointsBreakdown: getPointsBreakdownLocal(s)
+                              }));
+                              
+                              // Sort by points descending
+                              statsWithPoints.sort((a, b) => b.fantasyPoints - a.fantasyPoints);
+                              
+                              // Set as pending preview
+                              setPendingSyncPreview({
+                                match: manualEntryMatch,
+                                matchId: manualEntryMatch.id,
+                                cricketApiId: 'manual-entry',
+                                matchInfo: { name: manualEntryMatch.name },
+                                playerStats: statsWithPoints,
+                                totalPoints: statsWithPoints.reduce((sum, s) => sum + s.fantasyPoints, 0),
+                                totalPlayers: statsWithPoints.length
+                              });
+                              
+                              setSyncStatus(prev => ({ 
+                                ...prev, 
+                                match: `📋 Manual entry preview: ${statsWithPoints.length} players, ${statsWithPoints.reduce((sum, s) => sum + s.fantasyPoints, 0)} total points` 
+                              }));
+                              
+                              setShowManualEntry(false);
+                            } catch (e) {
+                              alert('Invalid JSON format: ' + e.message);
+                            }
+                          }}
+                        >
+                          Preview Points
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
             
-            <div className="sync-schedule" style={{ marginTop: '30px' }}>
-              <h4>⏰ Automatic Sync Setup</h4>
-              <p className="cron-info">
-                For automatic syncing, use <a href="https://cron-job.org" target="_blank" rel="noopener noreferrer">cron-job.org</a> (free) to schedule API calls.
+            {/* Points Adjustment Section */}
+            <div className="points-adjust-section" style={{ marginTop: '30px' }}>
+              <h3>🔧 Adjust Player Points</h3>
+              <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginBottom: '15px' }}>
+                Made a mistake? Adjust individual player fantasy points here.
               </p>
-              <table className="schedule-table">
-                <thead>
-                  <tr>
-                    <th>Sync Type</th>
-                    <th>Recommended Schedule</th>
-                    <th>API Endpoint</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td>Player Roster</td>
-                    <td>Daily at 7 PM MST</td>
-                    <td><code>/api/sync/players</code></td>
-                  </tr>
-                  <tr>
-                    <td>Live Scores</td>
-                    <td>Every 15 min during matches</td>
-                    <td><code>/api/live-sync</code></td>
-                  </tr>
-                </tbody>
-              </table>
+              
+              <button 
+                className="btn-secondary btn-small"
+                onClick={() => setShowPointsAdjust(!showPointsAdjust)}
+                style={{ marginBottom: '15px' }}
+              >
+                {showPointsAdjust ? '➖ Hide Points Adjustment' : '➕ Adjust Player Points'}
+              </button>
+              
+              {showPointsAdjust && (
+                <div style={{ 
+                  padding: '20px', 
+                  background: 'var(--bg-card)', 
+                  borderRadius: '8px',
+                  border: '1px solid var(--border-color)'
+                }}>
+                  <div style={{ marginBottom: '15px' }}>
+                    <label style={{ display: 'block', marginBottom: '5px', fontWeight: '500' }}>Select Player:</label>
+                    <select 
+                      value={pointsAdjustPlayer?.id || ''}
+                      onChange={(e) => {
+                        const player = players.find(p => p.id === e.target.value);
+                        setPointsAdjustPlayer(player);
+                        setPointsAdjustValue(player?.fantasyPoints?.toString() || '0');
+                      }}
+                      style={{ width: '100%', padding: '10px', borderRadius: '4px' }}
+                    >
+                      <option value="">-- Select a player --</option>
+                      {players
+                        .filter(p => (p.fantasyPoints || 0) > 0)
+                        .sort((a, b) => (b.fantasyPoints || 0) - (a.fantasyPoints || 0))
+                        .map(p => (
+                          <option key={p.id} value={p.id}>
+                            {p.name} ({p.team}) - {p.fantasyPoints || 0} pts
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                  
+                  {pointsAdjustPlayer && (
+                    <div style={{ 
+                      padding: '15px', 
+                      background: 'var(--bg-primary)', 
+                      borderRadius: '6px',
+                      marginBottom: '15px'
+                    }}>
+                      <div style={{ marginBottom: '10px' }}>
+                        <strong>{pointsAdjustPlayer.name}</strong> ({pointsAdjustPlayer.team})
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+                        <div>
+                          <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: '4px' }}>Current Points:</label>
+                          <span style={{ fontSize: '1.2rem', fontWeight: '600' }}>{pointsAdjustPlayer.fantasyPoints || 0}</span>
+                        </div>
+                        <span style={{ fontSize: '1.5rem' }}>→</span>
+                        <div>
+                          <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: '4px' }}>New Points:</label>
+                          <input
+                            type="number"
+                            value={pointsAdjustValue}
+                            onChange={(e) => setPointsAdjustValue(e.target.value)}
+                            style={{ 
+                              width: '100px', 
+                              padding: '8px', 
+                              fontSize: '1.1rem',
+                              fontWeight: '600',
+                              borderRadius: '4px',
+                              border: '1px solid var(--border-color)'
+                            }}
+                          />
+                        </div>
+                        <button
+                          className="btn-primary"
+                          onClick={async () => {
+                            const newPoints = parseInt(pointsAdjustValue);
+                            if (isNaN(newPoints)) {
+                              alert('Please enter a valid number');
+                              return;
+                            }
+                            
+                            const diff = newPoints - (pointsAdjustPlayer.fantasyPoints || 0);
+                            
+                            if (!confirm(`Update ${pointsAdjustPlayer.name}'s points from ${pointsAdjustPlayer.fantasyPoints || 0} to ${newPoints}? (${diff >= 0 ? '+' : ''}${diff})`)) {
+                              return;
+                            }
+                            
+                            try {
+                              const response = await fetch(`/api/players?action=adjust-points`, {
+                                method: 'PUT',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                  playerId: pointsAdjustPlayer.id,
+                                  newPoints: newPoints,
+                                  tournamentId: tournament.id
+                                })
+                              });
+                              
+                              const result = await response.json();
+                              
+                              if (result.success) {
+                                // Update local state
+                                setPlayers(prev => prev.map(p => 
+                                  p.id === pointsAdjustPlayer.id 
+                                    ? { ...p, fantasyPoints: newPoints }
+                                    : p
+                                ));
+                                setPointsAdjustPlayer(null);
+                                setPointsAdjustValue('');
+                                setSyncStatus(prev => ({ 
+                                  ...prev, 
+                                  match: `✅ Updated ${pointsAdjustPlayer.name}'s points to ${newPoints}` 
+                                }));
+                              } else {
+                                alert('Failed to update: ' + (result.error || 'Unknown error'));
+                              }
+                            } catch (err) {
+                              alert('Error updating points: ' + err.message);
+                            }
+                          }}
+                        >
+                          💾 Save
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Quick view of all players with points */}
+                  <details style={{ marginTop: '15px' }}>
+                    <summary style={{ cursor: 'pointer', fontWeight: '500' }}>
+                      📊 All Players with Points ({players.filter(p => (p.fantasyPoints || 0) > 0).length})
+                    </summary>
+                    <div style={{ 
+                      marginTop: '10px', 
+                      maxHeight: '300px', 
+                      overflowY: 'auto',
+                      fontSize: '0.85rem'
+                    }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                        <thead>
+                          <tr style={{ borderBottom: '2px solid var(--border-color)' }}>
+                            <th style={{ padding: '8px', textAlign: 'left' }}>Player</th>
+                            <th style={{ padding: '8px', textAlign: 'left' }}>Team</th>
+                            <th style={{ padding: '8px', textAlign: 'right' }}>Points</th>
+                            <th style={{ padding: '8px', textAlign: 'center' }}>Action</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {players
+                            .filter(p => (p.fantasyPoints || 0) > 0)
+                            .sort((a, b) => (b.fantasyPoints || 0) - (a.fantasyPoints || 0))
+                            .map(p => (
+                              <tr key={p.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                                <td style={{ padding: '8px' }}>{p.name}</td>
+                                <td style={{ padding: '8px' }}>{p.team}</td>
+                                <td style={{ padding: '8px', textAlign: 'right', fontWeight: '600' }}>{p.fantasyPoints}</td>
+                                <td style={{ padding: '8px', textAlign: 'center' }}>
+                                  <button
+                                    onClick={() => {
+                                      setPointsAdjustPlayer(p);
+                                      setPointsAdjustValue(p.fantasyPoints?.toString() || '0');
+                                    }}
+                                    style={{
+                                      padding: '4px 8px',
+                                      fontSize: '0.75rem',
+                                      background: 'var(--accent-color)',
+                                      color: 'white',
+                                      border: 'none',
+                                      borderRadius: '4px',
+                                      cursor: 'pointer'
+                                    }}
+                                  >
+                                    ✏️ Edit
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </details>
+                </div>
+              )}
             </div>
+            
+            {tournament.id === 'ipl_2026' && (
+              <div className="sync-schedule" style={{ marginTop: '30px' }}>
+                <h4>⏰ Automatic Sync Setup (IPL only)</h4>
+                <p className="cron-info">
+                  For automatic syncing during IPL, use <a href="https://cron-job.org" target="_blank" rel="noopener noreferrer">cron-job.org</a> (free) to schedule API calls.
+                </p>
+                <table className="schedule-table">
+                  <thead>
+                    <tr>
+                      <th>Sync Type</th>
+                      <th>Recommended Schedule</th>
+                      <th>API Endpoint</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>Player Roster</td>
+                      <td>Daily at 7 PM MST</td>
+                      <td><code>/api/sync/players</code></td>
+                    </tr>
+                    <tr>
+                      <td>Live Scores</td>
+                      <td>Every 15 min during matches</td>
+                      <td><code>/api/live-sync</code></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
         

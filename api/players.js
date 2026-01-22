@@ -143,6 +143,90 @@ export default async function handler(req, res) {
     // PUT - Update player
     // ============================================
     if (req.method === 'PUT') {
+      const { action } = req.query;
+      
+      // Special action: Adjust fantasy points
+      if (action === 'adjust-points') {
+        const { playerId, newPoints, tournamentId } = req.body;
+        
+        if (!playerId || newPoints === undefined) {
+          return res.status(400).json({ error: 'playerId and newPoints required' });
+        }
+        
+        const newPointsNum = parseInt(newPoints);
+        if (isNaN(newPointsNum)) {
+          return res.status(400).json({ error: 'newPoints must be a number' });
+        }
+        
+        // Get current player points for logging
+        const currentResult = await db.execute({
+          sql: 'SELECT name, total_points FROM players WHERE id = ?',
+          args: [playerId]
+        });
+        
+        if (currentResult.rows.length === 0) {
+          return res.status(404).json({ error: 'Player not found' });
+        }
+        
+        const currentPoints = currentResult.rows[0].total_points || 0;
+        const playerName = currentResult.rows[0].name;
+        const pointsDiff = newPointsNum - currentPoints;
+        
+        // Update player points
+        await db.execute({
+          sql: 'UPDATE players SET total_points = ? WHERE id = ?',
+          args: [newPointsNum, playerId]
+        });
+        
+        // Also update fantasy_teams rosters that have this player
+        // Get all teams that have this player in their roster
+        const teamsResult = await db.execute({
+          sql: `SELECT id, roster, total_points FROM fantasy_teams WHERE tournament_id = ?`,
+          args: [tournamentId || 'test_ind_nz']
+        });
+        
+        for (const team of teamsResult.rows) {
+          try {
+            const roster = JSON.parse(team.roster || '[]');
+            const playerInRoster = roster.find(p => p.id === playerId || p.playerId === playerId);
+            
+            if (playerInRoster) {
+              // Update player points in roster
+              const updatedRoster = roster.map(p => {
+                if (p.id === playerId || p.playerId === playerId) {
+                  return { ...p, fantasyPoints: newPointsNum };
+                }
+                return p;
+              });
+              
+              // Recalculate team total points based on active lineup
+              const activeSlots = ['batter1', 'batter2', 'batter3', 'batter4', 'batter5', 'wicketkeeper', 'bowler1', 'bowler2', 'bowler3', 'bowler4', 'bowler5', 'flex'];
+              const teamTotal = updatedRoster
+                .filter(p => activeSlots.includes(p.slot))
+                .reduce((sum, p) => sum + (p.fantasyPoints || 0), 0);
+              
+              await db.execute({
+                sql: 'UPDATE fantasy_teams SET roster = ?, total_points = ? WHERE id = ?',
+                args: [JSON.stringify(updatedRoster), teamTotal, team.id]
+              });
+            }
+          } catch (e) {
+            console.error('Error updating team roster:', e);
+          }
+        }
+        
+        console.log(`✅ Points adjusted: ${playerName} ${currentPoints} → ${newPointsNum} (${pointsDiff >= 0 ? '+' : ''}${pointsDiff})`);
+        
+        return res.status(200).json({ 
+          success: true, 
+          message: `Updated ${playerName} points: ${currentPoints} → ${newPointsNum}`,
+          oldPoints: currentPoints,
+          newPoints: newPointsNum,
+          diff: pointsDiff
+        });
+      }
+      
+      // Regular update
       const { id, totalPoints, avgPoints, matchesPlayed, isActive, isInjured } = req.body;
 
       if (!id) {

@@ -37,6 +37,52 @@ const TOURNAMENT_SERIES_MAP = {
 };
 
 // ============================================
+// TEAM NAME ABBREVIATIONS
+// ============================================
+const TEAM_ABBREV_MAP = {
+  'ind': ['india', 'ind'],
+  'nz': ['new zealand', 'newzealand', 'nz'],
+  'aus': ['australia', 'aus'],
+  'eng': ['england', 'eng'],
+  'pak': ['pakistan', 'pak'],
+  'sa': ['south africa', 'southafrica', 'sa'],
+  'wi': ['west indies', 'westindies', 'wi'],
+  'sl': ['sri lanka', 'srilanka', 'sl'],
+  'ban': ['bangladesh', 'ban'],
+  'afg': ['afghanistan', 'afg'],
+  'ire': ['ireland', 'ire'],
+  'zim': ['zimbabwe', 'zim'],
+  'ned': ['netherlands', 'ned'],
+  'sco': ['scotland', 'sco'],
+  'uae': ['united arab emirates', 'uae'],
+  'nam': ['namibia', 'nam'],
+  'nep': ['nepal', 'nep'],
+  'oma': ['oman', 'oma'],
+  'can': ['canada', 'can'],
+  'usa': ['united states', 'usa'],
+};
+
+// Normalize team name and check if two teams match
+function teamsMatch(team1, team2) {
+  const normalize = t => t.toLowerCase().replace(/[^a-z]/g, '');
+  const n1 = normalize(team1);
+  const n2 = normalize(team2);
+  
+  // Direct match
+  if (n1 === n2 || n1.includes(n2) || n2.includes(n1)) return true;
+  
+  // Check abbreviation map
+  for (const [abbrev, variants] of Object.entries(TEAM_ABBREV_MAP)) {
+    const allVariants = [abbrev, ...variants.map(v => v.replace(/\s/g, ''))];
+    const t1Matches = allVariants.some(v => v === n1 || v.includes(n1) || n1.includes(v));
+    const t2Matches = allVariants.some(v => v === n2 || v.includes(n2) || n2.includes(v));
+    if (t1Matches && t2Matches) return true;
+  }
+  
+  return false;
+}
+
+// ============================================
 // FANTASY POINTS CALCULATION (Your Rules)
 // ============================================
 
@@ -76,14 +122,22 @@ function calculateFantasyPoints(stats, position = 'batter') {
   if (stats.runs !== undefined && stats.runs !== null) {
     points += stats.runs * FANTASY_RULES.runPoints;
     
-    // Strike Rate Bonus (min 20 runs)
-    if (stats.runs >= FANTASY_RULES.srMin20Runs && stats.ballsFaced > 0) {
-      const sr = (stats.runs / stats.ballsFaced) * 100;
-      if (sr >= 160) points += FANTASY_RULES.srBonus160;
-      else if (sr >= 150) points += FANTASY_RULES.srBonus150;
-      else if (sr >= 140) points += FANTASY_RULES.srBonus140;
-      else if (sr >= 130) points += FANTASY_RULES.srBonus130;
-      else if (sr >= 120) points += FANTASY_RULES.srBonus120;
+    // Strike Rate Bonus (min 20 runs AND SR must be valid)
+    // Accept SR directly or calculate from balls faced
+    if (stats.runs >= FANTASY_RULES.srMin20Runs) {
+      let sr = stats.SR || stats.strikeRate || 0;
+      if (!sr && stats.ballsFaced > 0) {
+        sr = (stats.runs / stats.ballsFaced) * 100;
+      }
+      
+      // Only apply bonus if SR is valid (> 0)
+      if (sr > 0) {
+        if (sr >= 160) points += FANTASY_RULES.srBonus160;
+        else if (sr >= 150) points += FANTASY_RULES.srBonus150;
+        else if (sr >= 140) points += FANTASY_RULES.srBonus140;
+        else if (sr >= 130) points += FANTASY_RULES.srBonus130;
+        else if (sr >= 120) points += FANTASY_RULES.srBonus120;
+      }
     }
   }
   
@@ -96,20 +150,27 @@ function calculateFantasyPoints(stats, position = 'batter') {
     points += stats.maidens * FANTASY_RULES.maidenPoints;
   }
   
-  // Economy Rate Bonus (min 3 overs)
+  // Economy Rate Bonus (min 3 overs AND ER must be valid)
+  // Accept ER directly or calculate from runs/overs
   const overs = stats.oversBowled || stats.overs || 0;
-  const runsConceded = stats.runsConceded || 0;
   if (overs >= FANTASY_RULES.erMinOvers) {
-    const economy = runsConceded / overs;
-    if (economy <= 5) points += FANTASY_RULES.erBonus5;
-    else if (economy <= 6) points += FANTASY_RULES.erBonus6;
-    else if (economy <= 7) points += FANTASY_RULES.erBonus7;
-    else if (economy <= 8) points += FANTASY_RULES.erBonus8;
+    let economy = stats.ER || stats.economy || 0;
+    if (!economy && stats.runsConceded !== undefined && overs > 0) {
+      economy = stats.runsConceded / overs;
+    }
+    
+    // Only apply bonus if ER is valid (> 0)
+    if (economy > 0) {
+      if (economy <= 5) points += FANTASY_RULES.erBonus5;
+      else if (economy <= 6) points += FANTASY_RULES.erBonus6;
+      else if (economy <= 7) points += FANTASY_RULES.erBonus7;
+      else if (economy <= 8) points += FANTASY_RULES.erBonus8;
+    }
   }
   
   // Fielding points
   points += (stats.catches || 0) * FANTASY_RULES.catchPoints;
-  points += (stats.runOuts || stats.runOutsDirect || 0) * FANTASY_RULES.runOutPoints;
+  points += (stats.runOuts || stats.runouts || stats.runOutsDirect || 0) * FANTASY_RULES.runOutPoints;
   
   // Stumping (position check - only keepers should get this in practice)
   if (stats.stumpings > 0) {
@@ -129,14 +190,21 @@ function getPointsBreakdown(stats) {
   if (stats.runs !== undefined && stats.runs !== null && stats.runs > 0) {
     breakdown.push({ label: `${stats.runs} runs`, points: stats.runs * FANTASY_RULES.runPoints });
     
-    // Strike Rate Bonus
-    if (stats.runs >= FANTASY_RULES.srMin20Runs && stats.ballsFaced > 0) {
-      const sr = (stats.runs / stats.ballsFaced) * 100;
-      if (sr >= 160) breakdown.push({ label: `SR ${sr.toFixed(1)} (≥160)`, points: FANTASY_RULES.srBonus160 });
-      else if (sr >= 150) breakdown.push({ label: `SR ${sr.toFixed(1)} (150-159)`, points: FANTASY_RULES.srBonus150 });
-      else if (sr >= 140) breakdown.push({ label: `SR ${sr.toFixed(1)} (140-149)`, points: FANTASY_RULES.srBonus140 });
-      else if (sr >= 130) breakdown.push({ label: `SR ${sr.toFixed(1)} (130-139)`, points: FANTASY_RULES.srBonus130 });
-      else if (sr >= 120) breakdown.push({ label: `SR ${sr.toFixed(1)} (120-129)`, points: FANTASY_RULES.srBonus120 });
+    // Strike Rate Bonus - accept SR directly or calculate
+    if (stats.runs >= FANTASY_RULES.srMin20Runs) {
+      let sr = stats.SR || stats.strikeRate || 0;
+      if (!sr && stats.ballsFaced > 0) {
+        sr = (stats.runs / stats.ballsFaced) * 100;
+      }
+      
+      if (sr > 0) {
+        const srDisplay = typeof sr === 'number' ? sr.toFixed(1) : sr;
+        if (sr >= 160) breakdown.push({ label: `SR ${srDisplay} (≥160)`, points: FANTASY_RULES.srBonus160 });
+        else if (sr >= 150) breakdown.push({ label: `SR ${srDisplay} (150-159)`, points: FANTASY_RULES.srBonus150 });
+        else if (sr >= 140) breakdown.push({ label: `SR ${srDisplay} (140-149)`, points: FANTASY_RULES.srBonus140 });
+        else if (sr >= 130) breakdown.push({ label: `SR ${srDisplay} (130-139)`, points: FANTASY_RULES.srBonus130 });
+        else if (sr >= 120) breakdown.push({ label: `SR ${srDisplay} (120-129)`, points: FANTASY_RULES.srBonus120 });
+      }
     }
   }
   
@@ -149,21 +217,27 @@ function getPointsBreakdown(stats) {
     breakdown.push({ label: `${stats.maidens} maidens`, points: stats.maidens * FANTASY_RULES.maidenPoints });
   }
   
-  // Economy Bonus
+  // Economy Bonus - accept ER directly or calculate
   const overs = stats.oversBowled || stats.overs || 0;
-  const runsConceded = stats.runsConceded || 0;
   if (overs >= FANTASY_RULES.erMinOvers) {
-    const economy = runsConceded / overs;
-    if (economy <= 5) breakdown.push({ label: `Econ ${economy.toFixed(2)} (≤5)`, points: FANTASY_RULES.erBonus5 });
-    else if (economy <= 6) breakdown.push({ label: `Econ ${economy.toFixed(2)} (5-6)`, points: FANTASY_RULES.erBonus6 });
-    else if (economy <= 7) breakdown.push({ label: `Econ ${economy.toFixed(2)} (6-7)`, points: FANTASY_RULES.erBonus7 });
-    else if (economy <= 8) breakdown.push({ label: `Econ ${economy.toFixed(2)} (7-8)`, points: FANTASY_RULES.erBonus8 });
+    let economy = stats.ER || stats.economy || 0;
+    if (!economy && stats.runsConceded !== undefined && overs > 0) {
+      economy = stats.runsConceded / overs;
+    }
+    
+    if (economy > 0) {
+      const erDisplay = typeof economy === 'number' ? economy.toFixed(2) : economy;
+      if (economy <= 5) breakdown.push({ label: `ER ${erDisplay} (≤5)`, points: FANTASY_RULES.erBonus5 });
+      else if (economy <= 6) breakdown.push({ label: `ER ${erDisplay} (5-6)`, points: FANTASY_RULES.erBonus6 });
+      else if (economy <= 7) breakdown.push({ label: `ER ${erDisplay} (6-7)`, points: FANTASY_RULES.erBonus7 });
+      else if (economy <= 8) breakdown.push({ label: `ER ${erDisplay} (7-8)`, points: FANTASY_RULES.erBonus8 });
+    }
   }
   
   // Fielding
   if (stats.catches > 0) breakdown.push({ label: `${stats.catches} catches`, points: stats.catches * FANTASY_RULES.catchPoints });
-  if (stats.runOuts > 0 || stats.runOutsDirect > 0) {
-    const runOuts = stats.runOuts || stats.runOutsDirect || 0;
+  const runOuts = stats.runOuts || stats.runouts || stats.runOutsDirect || 0;
+  if (runOuts > 0) {
     breakdown.push({ label: `${runOuts} run outs`, points: runOuts * FANTASY_RULES.runOutPoints });
   }
   if (stats.stumpings > 0) breakdown.push({ label: `${stats.stumpings} stumpings`, points: stats.stumpings * FANTASY_RULES.stumpingPoints });
@@ -253,10 +327,15 @@ async function getSeriesMatches(apiKey, seriesId) {
       date: m.date || m.dateTimeGMT,
       venue: m.venue,
       teams: m.teams || extractTeamsFromName(m.name),
+      teamInfo: m.teamInfo,
       status: m.status,
       matchType: m.matchType,
       matchStarted: m.matchStarted,
       matchEnded: m.matchEnded,
+      // Important flags for data availability
+      fantasyEnabled: m.fantasyEnabled || false,
+      bbbEnabled: m.bbbEnabled || false,
+      hasSquad: m.hasSquad || false,
     }))
   };
 }
@@ -271,12 +350,24 @@ function extractTeamsFromName(name) {
 
 /**
  * Step 3: Get fantasy scorecard for a specific match
- * Returns detailed player statistics
+ * Only works for matches with fantasyEnabled: true (IPL, some domestic leagues)
+ * Returns detailed player statistics for fantasy points calculation
  */
-async function getMatchScorecard(apiKey, cricketApiMatchId) {
+async function getMatchScorecard(apiKey, cricketApiMatchId, matchInfo = {}) {
+  // Use fantasy scorecard endpoint (match_scorecard)
+  // This only returns data for fantasyEnabled matches
   const result = await cricketApiCall(`match_scorecard?id=${cricketApiMatchId}`, apiKey);
   
-  if (!result.success) return result;
+  if (!result.success) {
+    return {
+      success: false,
+      error: result.error || 'Scorecard not available',
+      fantasyEnabled: matchInfo.fantasyEnabled || false,
+      tip: matchInfo.fantasyEnabled === false 
+        ? 'This match does not have fantasy data. Use Manual Entry instead.'
+        : 'Scorecard may not be available yet. Try again after match completes.',
+    };
+  }
   
   return {
     success: true,
@@ -286,6 +377,7 @@ async function getMatchScorecard(apiKey, cricketApiMatchId) {
       venue: result.data.venue,
       date: result.data.date,
       matchEnded: result.data.matchEnded,
+      fantasyEnabled: matchInfo.fantasyEnabled || true,
     },
     scorecard: result.data.scorecard || [],
     score: result.data.score || [],
@@ -294,6 +386,7 @@ async function getMatchScorecard(apiKey, cricketApiMatchId) {
 
 /**
  * Parse scorecard into player stats for fantasy points
+ * Handles both fantasy and regular scorecard formats
  */
 function parseScorecardToStats(scorecard) {
   const playerStats = [];
@@ -309,10 +402,12 @@ function parseScorecardToStats(scorecard) {
       playerStats.push({
         playerName: name,
         playerId: batter.batsman?.id,
-        runs: batter.r || 0,
-        ballsFaced: batter.b || 0,
-        fours: batter['4s'] || 0,
-        sixes: batter['6s'] || 0,
+        runs: parseInt(batter.r) || 0,
+        ballsFaced: parseInt(batter.b) || 0,
+        fours: parseInt(batter['4s']) || 0,
+        sixes: parseInt(batter['6s']) || 0,
+        strikeRate: parseFloat(batter.sr) || 0,
+        dismissal: batter.dismissal || batter['dismissal-text'],
       });
     }
     
@@ -327,10 +422,13 @@ function parseScorecardToStats(scorecard) {
       );
       
       const bowlStats = {
-        wickets: bowler.w || 0,
+        wickets: parseInt(bowler.w) || 0,
         oversBowled: parseFloat(bowler.o) || 0,
-        runsConceded: bowler.r || 0,
-        maidens: bowler.m || 0,
+        runsConceded: parseInt(bowler.r) || 0,
+        maidens: parseInt(bowler.m) || 0,
+        economy: parseFloat(bowler.eco) || 0,
+        noBalls: parseInt(bowler.nb) || 0,
+        wides: parseInt(bowler.wd) || 0,
       };
       
       if (existing) {
@@ -344,7 +442,49 @@ function parseScorecardToStats(scorecard) {
       }
     }
     
-    // Process catches from fielding data if available
+    // Process catches/fielding from dismissal strings or fielding data
+    // Example: "c Kohli b Bumrah" -> Kohli gets a catch
+    for (const batter of (innings.batting || [])) {
+      const dismissal = batter.dismissal || batter['dismissal-text'] || '';
+      
+      // Caught: "c FielderName b BowlerName"
+      const caughtMatch = dismissal.match(/^c\s+([^b]+)\s+b\s+/i);
+      if (caughtMatch) {
+        const catcherName = caughtMatch[1].trim();
+        const existing = playerStats.find(p => 
+          p.playerName?.toLowerCase() === catcherName.toLowerCase()
+        );
+        if (existing) {
+          existing.catches = (existing.catches || 0) + 1;
+        }
+      }
+      
+      // Stumped: "st FielderName b BowlerName"
+      const stumpedMatch = dismissal.match(/^st\s+([^b]+)\s+b\s+/i);
+      if (stumpedMatch) {
+        const keeperName = stumpedMatch[1].trim();
+        const existing = playerStats.find(p => 
+          p.playerName?.toLowerCase() === keeperName.toLowerCase()
+        );
+        if (existing) {
+          existing.stumpings = (existing.stumpings || 0) + 1;
+        }
+      }
+      
+      // Run out: "run out (FielderName)" or "run out FielderName"
+      const runOutMatch = dismissal.match(/run\s+out\s+\(?([^)]+)\)?/i);
+      if (runOutMatch) {
+        const fielderName = runOutMatch[1].trim().split('/')[0].trim(); // Handle "Player1/Player2"
+        const existing = playerStats.find(p => 
+          p.playerName?.toLowerCase() === fielderName.toLowerCase()
+        );
+        if (existing) {
+          existing.runOuts = (existing.runOuts || 0) + 1;
+        }
+      }
+    }
+    
+    // Also check explicit fielding data if available
     for (const catcher of (innings.catching || innings.fielding || [])) {
       const name = catcher.catcher?.name || catcher.fielder?.name || catcher.name;
       if (!name) continue;
@@ -354,7 +494,7 @@ function parseScorecardToStats(scorecard) {
       );
       
       if (existing) {
-        existing.catches = (existing.catches || 0) + (catcher.catches || catcher.catch || 1);
+        existing.catches = (existing.catches || 0) + (catcher.catches || catcher.catch || 0);
         existing.stumpings = (existing.stumpings || 0) + (catcher.stumped || 0);
         existing.runOuts = (existing.runOuts || 0) + (catcher.runOut || catcher.runout || 0);
       }
@@ -515,12 +655,23 @@ export default async function handler(req, res) {
         return res.status(404).json(matchesResult);
       }
       
+      // Filter to T20 matches only (our app is for T20 fantasy)
+      const isT20Match = (matchName) => {
+        if (!matchName) return false;
+        const name = matchName.toLowerCase();
+        return name.includes('t20') || name.includes('twenty20');
+      };
+      const t20Matches = matchesResult.matches.filter(m => isT20Match(m.name) || m.matchType === 't20');
+      
       return res.json({
         success: true,
         seriesId: seriesResult.seriesId,
         seriesName: seriesResult.seriesName,
-        matchCount: matchesResult.matches.length,
-        matches: matchesResult.matches
+        totalMatches: matchesResult.matches.length,
+        t20Matches: t20Matches.length,
+        matchCount: t20Matches.length,
+        matches: t20Matches.length > 0 ? t20Matches : matchesResult.matches,
+        allMatches: matchesResult.matches // Include all for debugging
       });
     }
     
@@ -606,55 +757,103 @@ export default async function handler(req, res) {
         // Find the right match by teams or date
         let targetMatch = null;
         
-        if (teams) {
-          // Parse teams (e.g., "IND vs NZ" or ["India", "New Zealand"])
+        // Normalize date for comparison
+        const normalizeDate = (d) => {
+          if (!d) return null;
+          // Handle various formats: "2026-01-15", "2026-01-15T00:00:00", etc.
+          return String(d).substring(0, 10); // Take first 10 chars (YYYY-MM-DD)
+        };
+        
+        // Check if match name indicates it's a T20
+        const isT20Match = (matchName) => {
+          if (!matchName) return false;
+          const name = matchName.toLowerCase();
+          return name.includes('t20') || name.includes('twenty20');
+        };
+        
+        // Filter to T20 matches only (our app is for T20 fantasy)
+        const t20Matches = matchesResult.matches.filter(m => isT20Match(m.name) || m.matchType === 't20');
+        const matchesToSearch = t20Matches.length > 0 ? t20Matches : matchesResult.matches;
+        
+        console.log('=== MATCH FINDING DEBUG ===');
+        console.log('Looking for:', { teams, matchDate, normalizedDate: normalizeDate(matchDate) });
+        console.log(`All matches: ${matchesResult.matches.length}, T20 matches: ${t20Matches.length}`);
+        matchesToSearch.forEach((m, i) => {
+          console.log(`  ${i}: "${m.name}" | date=${normalizeDate(m.date)} | teams=${JSON.stringify(m.teams)}`);
+        });
+        
+        // Strategy 1: Match by date (most reliable for same series)
+        if (matchDate) {
+          const targetDateNorm = normalizeDate(matchDate);
+          
+          targetMatch = matchesToSearch.find(m => {
+            const matchDateNorm = normalizeDate(m.date);
+            return matchDateNorm === targetDateNorm;
+          });
+          
+          if (targetMatch) {
+            console.log('✅ Found by date:', targetMatch.name);
+          }
+        }
+        
+        // Strategy 2: Match by teams using our smart matching
+        if (!targetMatch && teams) {
           const teamList = Array.isArray(teams) 
             ? teams 
             : teams.split(/\s+vs\s+|,/).map(t => t.trim());
           
-          const normalizeTeam = t => t.toLowerCase().replace(/[^a-z]/g, '');
-          const t1 = normalizeTeam(teamList[0]);
-          const t2 = normalizeTeam(teamList[1]);
+          const t1 = teamList[0];
+          const t2 = teamList[1] || t1;
           
-          targetMatch = matchesResult.matches.find(m => {
-            const mTeams = (m.teams || []).map(normalizeTeam);
-            const mName = normalizeTeam(m.name);
+          console.log('Trying team match:', t1, 'vs', t2);
+          
+          // If we have a date, try to find matches on that date first
+          const candidates = matchDate 
+            ? matchesToSearch.filter(m => normalizeDate(m.date) === normalizeDate(matchDate))
+            : matchesToSearch;
+          
+          targetMatch = candidates.find(m => {
+            const mTeams = m.teams || [];
+            const mName = m.name || '';
             
-            const hasT1 = mTeams.some(mt => mt.includes(t1) || t1.includes(mt)) || mName.includes(t1);
-            const hasT2 = mTeams.some(mt => mt.includes(t2) || t2.includes(mt)) || mName.includes(t2);
-            
-            // If date provided, also match on date
-            if (matchDate && m.date) {
-              const mDate = new Date(m.date).toISOString().split('T')[0];
-              const targetDate = new Date(matchDate).toISOString().split('T')[0];
-              return hasT1 && hasT2 && mDate === targetDate;
-            }
+            const hasT1 = mTeams.some(mt => teamsMatch(t1, mt)) || teamsMatch(t1, mName);
+            const hasT2 = mTeams.some(mt => teamsMatch(t2, mt)) || teamsMatch(t2, mName);
             
             return hasT1 && hasT2;
           });
-        } else if (matchDate) {
-          // Find by date only
-          targetMatch = matchesResult.matches.find(m => {
-            if (!m.date) return false;
-            const mDate = new Date(m.date).toISOString().split('T')[0];
-            const targetDate = new Date(matchDate).toISOString().split('T')[0];
-            return mDate === targetDate;
-          });
+          
+          if (targetMatch) {
+            console.log('✅ Found by teams:', targetMatch.name);
+          }
+        }
+        
+        // Strategy 3: First available T20I match if we're desperate
+        if (!targetMatch && matchesToSearch.length > 0) {
+          // If there's only one match in the series, use it
+          if (matchesToSearch.length === 1) {
+            targetMatch = matchesToSearch[0];
+            console.log('✅ Only one T20 match in series, using it:', targetMatch.name);
+          }
         }
         
         if (!targetMatch) {
+          console.log('❌ No match found');
           return res.status(404).json({
             success: false,
             error: 'Match not found in series',
-            searched: { teams, matchDate },
-            availableMatches: matchesResult.matches.map(m => ({
+            searched: { teams, matchDate, normalizedDate: normalizeDate(matchDate) },
+            t20MatchesFound: t20Matches.length,
+            availableMatches: matchesToSearch.map(m => ({
               name: m.name,
               date: m.date,
+              normalizedDate: normalizeDate(m.date),
               cricketApiId: m.cricketApiId,
               teams: m.teams
             }))
           });
         }
+        
+        console.log('=== MATCH FOUND ===', targetMatch.name, targetMatch.cricketApiId);
         
         actualCricketApiId = targetMatch.cricketApiId;
         matchInfo = targetMatch;
@@ -706,6 +905,7 @@ export default async function handler(req, res) {
         matchInfo: scorecardResult.matchInfo || matchInfo,
         matchStatus: scorecardResult.matchInfo?.status,
         matchEnded: scorecardResult.matchInfo?.matchEnded,
+        fantasyEnabled: scorecardResult.matchInfo?.fantasyEnabled || false,
         totalPlayers: statsWithPoints.length,
         totalFantasyPoints: statsWithPoints.reduce((sum, s) => sum + s.fantasyPoints, 0),
         scoringRules: FANTASY_RULES,
