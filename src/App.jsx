@@ -876,6 +876,8 @@ const TournamentSelectPage = ({ onSelectTournament, user, onLogout }) => {
           const mergedTournaments = { ...TOURNAMENTS };
           response.tournaments.forEach(dbTournament => {
             if (dbTournament.id) {
+              const matchCount = dbTournament.matches?.length || 0;
+              console.log(`   - ${dbTournament.id}: ${matchCount} matches from DB`);
               mergedTournaments[dbTournament.id] = {
                 ...TOURNAMENTS[dbTournament.id], // Start with local defaults
                 ...dbTournament, // Override with DB values
@@ -6223,7 +6225,7 @@ export default function App() {
     console.log(`   User: ${user?.email} (ID: ${user?.id})`);
     
     setSelectedTournament(tournament);
-    localStorage.setItem('t20fantasy_tournament', JSON.stringify(tournament));
+    // No localStorage - everything from DB
     
     // Load players for this tournament
     setIsLoading(true);
@@ -6528,8 +6530,24 @@ export default function App() {
           user={user}
           tournament={selectedTournament || TOURNAMENTS.test_ind_nz}
           players={playerPool}
-          onUpdateTournament={(updatedTournament) => {
+          onUpdateTournament={async (updatedTournament) => {
             console.log('📅 Tournament updated:', updatedTournament);
+            
+            // Save to database
+            try {
+              await tournamentsAPI.update({
+                id: updatedTournament.id,
+                name: updatedTournament.name,
+                startDate: updatedTournament.startDate,
+                endDate: updatedTournament.endDate,
+                matches: updatedTournament.matches
+              });
+              console.log('✅ Tournament saved to database');
+            } catch (err) {
+              console.error('❌ Failed to save tournament to database:', err);
+            }
+            
+            // Update local state
             setSelectedTournament(updatedTournament);
           }}
           onLogout={handleLogout}
