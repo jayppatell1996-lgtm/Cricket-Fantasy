@@ -640,10 +640,22 @@ async function updateTeamTotals(db, tournamentId) {
       
       let teamTotal = 0;
       
+      // Track which player_id + period combinations we've already counted
+      // This prevents double-counting if there are duplicate roster entries
+      const countedPeriods = new Set();
+      
       for (const roster of rosterHistory.rows) {
         // For each roster period, sum the player_stats where match_date is within the period
         const acquiredDate = roster.acquired_date || '2000-01-01'; // Default to old date if not set
         const droppedDate = roster.dropped_date || '2099-12-31'; // Default to future if not dropped
+        
+        // Create a unique key for this player + period to detect duplicates
+        const periodKey = `${roster.player_id}-${acquiredDate}-${droppedDate}`;
+        if (countedPeriods.has(periodKey)) {
+          console.log(`   ⚠️ Skipping duplicate roster entry: ${periodKey}`);
+          continue;
+        }
+        countedPeriods.add(periodKey);
         
         const statsResult = await db.execute({
           sql: `SELECT COALESCE(SUM(fantasy_points), 0) as period_points
@@ -663,7 +675,7 @@ async function updateTeamTotals(db, tournamentId) {
         args: [teamTotal, team.id]
       });
       
-      console.log(`   Updated team ${team.id} total: ${teamTotal} (from ${rosterHistory.rows.length} roster periods)`);
+      console.log(`   Updated team ${team.id} total: ${teamTotal} (from ${rosterHistory.rows.length} roster periods, ${countedPeriods.size} unique)`);
     } catch (e) {
       console.error('Error updating team total:', e);
     }

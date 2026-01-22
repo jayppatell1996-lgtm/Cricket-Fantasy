@@ -498,6 +498,75 @@ export default async function handler(req, res) {
     }
     
     // ============================================
+    // DEBUG-DB - View database state for debugging
+    // ============================================
+    if (action === 'debug-db') {
+      const { tournamentId } = req.query;
+      
+      // Get all player_stats
+      const statsResult = await db.execute({
+        sql: `SELECT ps.*, p.name as player_name 
+              FROM player_stats ps
+              LEFT JOIN players p ON ps.player_id = p.id
+              ${tournamentId ? 'WHERE p.tournament_id = ?' : ''}
+              ORDER BY ps.match_date DESC
+              LIMIT 100`,
+        args: tournamentId ? [tournamentId] : []
+      });
+      
+      // Get all roster entries
+      const rosterResult = await db.execute({
+        sql: `SELECT r.*, p.name as player_name, ft.name as team_name
+              FROM roster r
+              LEFT JOIN players p ON r.player_id = p.id
+              LEFT JOIN fantasy_teams ft ON r.fantasy_team_id = ft.id
+              ${tournamentId ? 'WHERE ft.tournament_id = ?' : ''}
+              ORDER BY r.acquired_date DESC
+              LIMIT 200`,
+        args: tournamentId ? [tournamentId] : []
+      });
+      
+      // Get fantasy teams
+      const teamsResult = await db.execute({
+        sql: `SELECT id, name, total_points, tournament_id FROM fantasy_teams
+              ${tournamentId ? 'WHERE tournament_id = ?' : ''}`,
+        args: tournamentId ? [tournamentId] : []
+      });
+      
+      return res.status(200).json({
+        success: true,
+        playerStats: {
+          count: statsResult.rows.length,
+          rows: statsResult.rows.map(s => ({
+            id: s.id,
+            playerId: s.player_id,
+            playerName: s.player_name,
+            matchId: s.match_id,
+            matchDate: s.match_date,
+            fantasyPoints: s.fantasy_points
+          }))
+        },
+        roster: {
+          count: rosterResult.rows.length,
+          rows: rosterResult.rows.map(r => ({
+            playerId: r.player_id,
+            playerName: r.player_name,
+            teamId: r.fantasy_team_id,
+            teamName: r.team_name,
+            acquiredDate: r.acquired_date,
+            droppedDate: r.dropped_date,
+            acquiredVia: r.acquired_via
+          }))
+        },
+        teams: teamsResult.rows.map(t => ({
+          id: t.id,
+          name: t.name,
+          totalPoints: t.total_points
+        }))
+      });
+    }
+    
+    // ============================================
     // ROSTER-HISTORY - View roster history for a team
     // ============================================
     if (action === 'roster-history') {
@@ -562,9 +631,21 @@ export default async function handler(req, res) {
         let teamTotal = 0;
         const breakdown = [];
         
+        // Track which player_id + period combinations we've already counted
+        // This prevents double-counting if there are duplicate roster entries
+        const countedPeriods = new Set();
+        
         for (const roster of rosterHistory.rows) {
           const acquiredDate = roster.acquired_date || '2000-01-01';
           const droppedDate = roster.dropped_date || '2099-12-31';
+          
+          // Create a unique key for this player + period to detect duplicates
+          const periodKey = `${roster.player_id}-${acquiredDate}-${droppedDate}`;
+          if (countedPeriods.has(periodKey)) {
+            console.log(`Skipping duplicate roster entry: ${periodKey}`);
+            continue;
+          }
+          countedPeriods.add(periodKey);
           
           const statsResult = await db.execute({
             sql: `SELECT COALESCE(SUM(fantasy_points), 0) as period_points
@@ -598,6 +679,7 @@ export default async function handler(req, res) {
           teamId: team.id,
           teamName: team.name,
           totalPoints: teamTotal,
+          rosterEntries: rosterHistory.rows.length,
           breakdown
         });
       }
@@ -609,7 +691,7 @@ export default async function handler(req, res) {
       });
     }
 
-    return res.status(400).json({ error: 'Invalid action. Use ?action=health, seed, users, tournaments, dedupe, reset-points, roster-history, or recalc-points' });
+    return res.status(400).json({ error: 'Invalid action. Use ?action=health, seed, users, tournaments, dedupe, reset-points, roster-history, recalc-points, or debug-db' });
 
   } catch (error) {
     console.error('Admin API error:', error);
