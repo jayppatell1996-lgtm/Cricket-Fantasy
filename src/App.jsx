@@ -3057,15 +3057,119 @@ const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament
                         const fantasyCount = (result.matches || []).filter(m => m.fantasyEnabled).length;
                         const totalCount = result.matchCount || 0;
                         
-                        let message = `✅ Found ${totalCount} T20 matches in "${result.seriesName}"`;
-                        if (fantasyCount > 0) {
-                          message += ` (${fantasyCount} with detailed fantasy data)`;
-                        } else if (totalCount > 0) {
-                          message += ` (basic scorecard only - no fantasy data)`;
+                        // Sync matches with tournament data
+                        const apiMatches = result.matches || [];
+                        const existingMatches = tournament.matches || [];
+                        
+                        // Helper to extract match number from name (e.g., "1st T20I" -> 1, "2nd T20I" -> 2)
+                        const getMatchNumber = (name) => {
+                          const match = name.match(/(\d+)(?:st|nd|rd|th)\s*T20I?/i);
+                          return match ? parseInt(match[1]) : null;
+                        };
+                        
+                        // Helper to extract date from API match
+                        const getMatchDate = (apiMatch) => {
+                          if (apiMatch.date) {
+                            // Handle various date formats
+                            const dateStr = apiMatch.date.split('T')[0];
+                            return dateStr;
+                          }
+                          return null;
+                        };
+                        
+                        // Build updated matches array
+                        const updatedMatches = [];
+                        const processedApiIds = new Set();
+                        
+                        // First, update existing matches with API data
+                        for (const existing of existingMatches) {
+                          const existingNum = getMatchNumber(existing.name);
+                          
+                          // Find matching API match
+                          const apiMatch = apiMatches.find(m => {
+                            const apiNum = getMatchNumber(m.name);
+                            return apiNum === existingNum;
+                          });
+                          
+                          if (apiMatch) {
+                            processedApiIds.add(apiMatch.cricketApiId);
+                            const newDate = getMatchDate(apiMatch);
+                            const newStatus = apiMatch.matchEnded ? 'completed' : 
+                                             apiMatch.matchStarted ? 'live' : 'upcoming';
+                            
+                            updatedMatches.push({
+                              ...existing,
+                              date: newDate || existing.date,
+                              status: newStatus,
+                              cricketApiId: apiMatch.cricketApiId,
+                              fantasyEnabled: apiMatch.fantasyEnabled || false
+                            });
+                          } else {
+                            // Keep existing match as-is if no API match found
+                            updatedMatches.push(existing);
+                          }
                         }
                         
-                        setSyncStatus(prev => ({ ...prev, match: message }));
+                        // Add any new matches from API that don't exist
+                        for (const apiMatch of apiMatches) {
+                          if (!processedApiIds.has(apiMatch.cricketApiId)) {
+                            const matchNum = getMatchNumber(apiMatch.name);
+                            const existsAlready = existingMatches.some(e => getMatchNumber(e.name) === matchNum);
+                            
+                            if (!existsAlready && matchNum) {
+                              const ordinal = matchNum === 1 ? '1st' : matchNum === 2 ? '2nd' : matchNum === 3 ? '3rd' : `${matchNum}th`;
+                              updatedMatches.push({
+                                id: `match_${matchNum}`,
+                                name: `${ordinal} T20I`,
+                                date: getMatchDate(apiMatch) || '',
+                                teams: apiMatch.teams || 'TBD vs TBD',
+                                status: apiMatch.matchEnded ? 'completed' : apiMatch.matchStarted ? 'live' : 'upcoming',
+                                cricketApiId: apiMatch.cricketApiId,
+                                fantasyEnabled: apiMatch.fantasyEnabled || false
+                              });
+                            }
+                          }
+                        }
+                        
+                        // Sort by match number
+                        updatedMatches.sort((a, b) => {
+                          const numA = getMatchNumber(a.name) || 999;
+                          const numB = getMatchNumber(b.name) || 999;
+                          return numA - numB;
+                        });
+                        
+                        // Check if anything changed
+                        const hasChanges = JSON.stringify(updatedMatches) !== JSON.stringify(existingMatches);
+                        
+                        if (hasChanges) {
+                          // Update tournament with new matches
+                          const updatedTournament = {
+                            ...tournament,
+                            matches: updatedMatches
+                          };
+                          
+                          // Save to database
+                          await onUpdateTournament(updatedTournament);
+                          
+                          let message = `✅ Synced ${totalCount} matches from "${result.seriesName}"`;
+                          const addedCount = updatedMatches.length - existingMatches.length;
+                          if (addedCount > 0) {
+                            message += ` (${addedCount} new added)`;
+                          }
+                          if (fantasyCount === 0 && totalCount > 0) {
+                            message += ` - basic scorecard only`;
+                          }
+                          setSyncStatus(prev => ({ ...prev, match: message }));
+                        } else {
+                          let message = `✅ Found ${totalCount} matches in "${result.seriesName}" - already up to date`;
+                          if (fantasyCount === 0 && totalCount > 0) {
+                            message += ` (basic scorecard only - no fantasy data)`;
+                          }
+                          setSyncStatus(prev => ({ ...prev, match: message }));
+                        }
+                        
                         console.log('Cricket API Matches:', result.matches);
+                        console.log('Updated Tournament Matches:', updatedMatches);
                       } else {
                         setApiMatchesInfo(null);
                         setSyncStatus(prev => ({ ...prev, match: `❌ ${result.error}` }));
@@ -3076,7 +3180,7 @@ const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament
                     }
                   }}
                 >
-                  🔍 Test API Connection / Fetch Matches
+                  🔄 Fetch & Sync Matches
                 </button>
               </div>
               
@@ -3100,7 +3204,14 @@ const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament
                         background: 'var(--bg-primary)',
                         borderRadius: '4px'
                       }}>
-                        <span>{m.name}</span>
+                        <div>
+                          <span>{m.name}</span>
+                          {m.date && (
+                            <span style={{ marginLeft: '10px', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                              {m.date.split('T')[0]}
+                            </span>
+                          )}
+                        </div>
                         <span style={{ 
                           fontSize: '0.75rem',
                           padding: '2px 6px',
