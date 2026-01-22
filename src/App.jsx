@@ -1660,7 +1660,7 @@ const SnakeDraftPage = ({ team, tournament, players, allTeams, onDraftComplete, 
 };
 
 // Admin Panel Component
-const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament, onRefreshPlayers, onLogout, onBackToTournaments, onSwitchTournament, allTeams, allUsers, onStartDraft, onDeleteTeam, onUpdateTeam, onDeleteUser }) => {
+const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament, onRefreshPlayers, onRefreshTeams, onLogout, onBackToTournaments, onSwitchTournament, allTeams, allUsers, onStartDraft, onDeleteTeam, onUpdateTeam, onDeleteUser }) => {
   const [activeTab, setActiveTab] = useState('overview');
   
   // Local fantasy points calculator (mirrors backend rules)
@@ -1789,15 +1789,13 @@ const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament
         if (response.players && response.players.length > 0) {
           setPlayers(response.players);
         } else {
-          // Fallback to local player data if API returns empty
-          const localPlayers = getPlayersForTournament(tournament.id);
-          setPlayers(localPlayers);
+          // No fallback - database is required
+          console.log('❌ No players found in database for tournament:', tournament.id);
+          setPlayers([]);
         }
       } catch (error) {
-        console.error('Failed to fetch players from API, using local data:', error);
-        // Fallback to local player data
-        const localPlayers = getPlayersForTournament(tournament.id);
-        setPlayers(localPlayers);
+        console.error('Failed to fetch players from API:', error);
+        setPlayers([]);
       } finally {
         setPlayersLoading(false);
       }
@@ -1813,13 +1811,12 @@ const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament
       if (response.players && response.players.length > 0) {
         setPlayers(response.players);
       } else {
-        const localPlayers = getPlayersForTournament(tournament.id);
-        setPlayers(localPlayers);
+        console.log('❌ No players found in database');
+        setPlayers([]);
       }
     } catch (error) {
-      console.error('Failed to refetch players, using local data:', error);
-      const localPlayers = getPlayersForTournament(tournament.id);
-      setPlayers(localPlayers);
+      console.error('Failed to refetch players:', error);
+      setPlayers([]);
     }
   };
   
@@ -2055,6 +2052,12 @@ const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament
     
     const { match, matchId, matchDate, cricketApiId, playerStats, totalPoints } = pendingSyncPreview;
     
+    console.log('📊 handleApplyPoints called:');
+    console.log('   - matchId:', matchId);
+    console.log('   - matchDate:', matchDate);
+    console.log('   - match.date:', match?.date);
+    console.log('   - playerStats count:', playerStats?.length);
+    
     if (!confirm(`Apply ${totalPoints} fantasy points for ${playerStats.length} players?\n\nThis will update the database.`)) {
       return;
     }
@@ -2062,8 +2065,12 @@ const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament
     setIsSyncing(prev => ({ ...prev, match: matchId }));
     setSyncStatus(prev => ({ ...prev, match: `💾 Applying points to database...` }));
     
+    // Use match.date as fallback if matchDate not set
+    const dateToUse = matchDate || match?.date;
+    console.log('   - dateToUse:', dateToUse);
+    
     try {
-      const response = await liveSyncAPI.applyPoints(matchId, tournament.id, cricketApiId, playerStats, matchDate);
+      const response = await liveSyncAPI.applyPoints(matchId, tournament.id, cricketApiId, playerStats, dateToUse);
       
       if (response.success && response.applied) {
         setSyncStatus(prev => ({ 
@@ -2080,6 +2087,11 @@ const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament
         // Also refresh main App's player pool for Dashboard
         if (onRefreshPlayers) {
           await onRefreshPlayers();
+        }
+        
+        // Also refresh teams to update standings
+        if (onRefreshTeams) {
+          await onRefreshTeams();
         }
         
         // Update tournament match status
@@ -2668,7 +2680,7 @@ const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament
                 <button 
                   className="btn-danger btn-large"
                   onClick={async () => {
-                    if (!confirm('Reset ALL fantasy points for this tournament?\\n\\nThis will:\\n- Clear all player stats from database\\n- Reset all player points to 0\\n- Reset all team points to 0\\n- Clear browser cache\\n- Reload the page\\n\\nYou will need to re-apply match scores.')) {
+                    if (!confirm('Reset ALL fantasy points for this tournament?\\n\\nThis will:\\n- Clear all player stats from database\\n- Reset all player points to 0\\n- Reset all team points to 0\\n\\nYou will need to re-apply match scores.')) {
                       return;
                     }
                     setSyncStatus(prev => ({ ...prev, clearing: '⏳ Resetting points...' }));
@@ -2676,21 +2688,14 @@ const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament
                       const response = await fetch(`${getApiBaseUrl()}/api/admin?action=reset-points&tournamentId=${tournament.id}`);
                       const data = await response.json();
                       if (data.success) {
-                        // Clear localStorage cache
-                        localStorage.removeItem(`t20fantasy_players_${tournament.id}`);
-                        localStorage.removeItem(`t20fantasy_dropped_${tournament.id}`);
+                        setSyncStatus(prev => ({ ...prev, clearing: '✅ Reset complete! Refreshing data...' }));
                         
-                        // Clear all player-related localStorage
-                        Object.keys(localStorage).forEach(key => {
-                          if (key.startsWith('t20fantasy_')) {
-                            localStorage.removeItem(key);
-                          }
-                        });
+                        // Refresh data (onRefreshPlayers will clear game log cache)
+                        await refetchPlayers();
+                        if (onRefreshPlayers) await onRefreshPlayers();
+                        if (onRefreshTeams) await onRefreshTeams();
                         
-                        setSyncStatus(prev => ({ ...prev, clearing: '✅ Reset complete! Reloading page...' }));
-                        
-                        // Reload page to clear React state cache
-                        setTimeout(() => window.location.reload(), 1000);
+                        setSyncStatus(prev => ({ ...prev, clearing: '✅ Reset complete! Data refreshed.' }));
                       } else {
                         setSyncStatus(prev => ({ ...prev, clearing: `❌ Error: ${data.error}` }));
                       }
@@ -3200,6 +3205,8 @@ const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament
                         value={manualEntryMatch?.id || ''}
                         onChange={(e) => {
                           const match = (tournament.matches || []).find(m => m.id === e.target.value);
+                          console.log('📝 Manual entry match selected:', match);
+                          console.log('   - date:', match?.date);
                           setManualEntryMatch(match);
                         }}
                         style={{ width: '100%', padding: '8px', borderRadius: '4px' }}
@@ -4229,15 +4236,17 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
   const [localPlayers, setLocalPlayers] = useState(playersProp || []); // Local copy of players
   const [playerGameLogs, setPlayerGameLogs] = useState({}); // Cache of player game logs: { playerId: [gameLog] }
   
-  // Load game log for a player
-  const loadPlayerGameLog = async (playerId) => {
-    // Check cache first
-    if (playerGameLogs[playerId]) {
+  // Load game log for a player (always fetches fresh data when forceRefresh)
+  const loadPlayerGameLog = async (playerId, forceRefresh = false) => {
+    // Skip cache if forceRefresh is true
+    if (!forceRefresh && playerGameLogs[playerId] && playerGameLogs[playerId].length > 0) {
       return playerGameLogs[playerId];
     }
     
     try {
+      console.log(`📊 Loading game log for player: ${playerId}${forceRefresh ? ' (force refresh)' : ''}`);
       const response = await playersAPI.getGameLog(playerId);
+      console.log(`📊 Game log response:`, response);
       if (response.gameLog) {
         setPlayerGameLogs(prev => ({ ...prev, [playerId]: response.gameLog }));
         return response.gameLog;
@@ -4248,9 +4257,28 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
     return [];
   };
   
+  // Force refresh all game logs (call after applying points)
+  const refreshAllGameLogs = async () => {
+    console.log('🔄 Force refreshing all game logs...');
+    setPlayerGameLogs({}); // Clear cache first
+    const rosterPlayers = team?.roster || [];
+    for (const player of rosterPlayers) {
+      const playerId = player.id || player.playerId;
+      if (playerId) {
+        await loadPlayerGameLog(playerId, true);
+      }
+    }
+    console.log('✅ Game logs refreshed');
+  };
+  
   // Get points for a specific match date
   const getMatchPointsForDate = (playerId, date) => {
-    const dateStr = date.toISOString().split('T')[0];
+    // Use local date format (YYYY-MM-DD) instead of ISO string
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const dateStr = `${year}-${month}-${day}`;
+    
     const gameLog = playerGameLogs[playerId] || [];
     
     const matchEntry = gameLog.find(g => {
@@ -4262,13 +4290,19 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
   };
   
   // Load game logs for all roster players
+  // Refreshes when roster changes OR when players are refreshed (after applying points)
   useEffect(() => {
     const loadAllGameLogs = async () => {
       const rosterPlayers = team?.roster || [];
+      // Clear cache and reload if players have been refreshed
+      if (playersProp && playersProp.length > 0) {
+        // Clear game log cache to force fresh fetch
+        setPlayerGameLogs({});
+      }
       for (const player of rosterPlayers) {
         const playerId = player.id || player.playerId;
-        if (playerId && !playerGameLogs[playerId]) {
-          await loadPlayerGameLog(playerId);
+        if (playerId) {
+          await loadPlayerGameLog(playerId, true); // Always force refresh
         }
       }
     };
@@ -4276,7 +4310,7 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
     if (team?.roster?.length > 0) {
       loadAllGameLogs();
     }
-  }, [team?.roster]);
+  }, [team?.roster, playersProp]); // Also refresh when playersProp changes
   
   // Enhanced Test Mode State
   const [selectedMatch, setSelectedMatch] = useState(null);
@@ -4323,10 +4357,10 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
     }
   }, [playersProp]);
   
-  // Use local players (refreshed from API) or prop
+  // Use local players (refreshed from API) or prop - no fallback, DB is required
   const playerPool = localPlayers.length > 0 
     ? localPlayers 
-    : (playersProp && playersProp.length > 0 ? playersProp : getPlayersForTournament(tournament.id));
+    : (playersProp && playersProp.length > 0 ? playersProp : []);
   
   // Detect if this is a test/demo tournament (never lock players)
   const isTestMode = tournament?.id?.includes('test') || 
@@ -4406,28 +4440,6 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
     return date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
   };
   
-  // Global dropped players pool (persisted in localStorage)
-  const getDroppedPlayers = () => {
-    const key = `t20fantasy_dropped_${tournament.id}`;
-    const saved = localStorage.getItem(key);
-    return saved ? JSON.parse(saved) : [];
-  };
-  
-  const addToDroppedPlayers = (player) => {
-    const key = `t20fantasy_dropped_${tournament.id}`;
-    const dropped = getDroppedPlayers();
-    if (!dropped.find(p => p.id === player.id)) {
-      dropped.push({ ...player, droppedAt: new Date().toISOString() });
-      localStorage.setItem(key, JSON.stringify(dropped));
-    }
-  };
-  
-  const removeFromDroppedPlayers = (playerId) => {
-    const key = `t20fantasy_dropped_${tournament.id}`;
-    const dropped = getDroppedPlayers().filter(p => p.id !== playerId);
-    localStorage.setItem(key, JSON.stringify(dropped));
-  };
-  
   // Get all rostered players across all teams in this tournament
   const getAllRosteredPlayers = () => {
     const tournamentTeams = allTeams.filter(t => t.tournamentId === tournament.id);
@@ -4451,33 +4463,19 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
     return { rosteredIds, rosteredNames };
   };
   
-  // Free agents = pool players not rostered + dropped players not re-rostered
+  // Free agents = pool players not on any roster (DB is source of truth)
   const [freeAgents, setFreeAgents] = useState([]);
   
   // Update free agents when rosters change
   useEffect(() => {
     const { rosteredIds, rosteredNames } = getAllRosteredPlayers();
-    const droppedPlayers = getDroppedPlayers();
     
-    // Start with pool players not rostered (check both ID and name)
+    // Free agents = pool players not rostered (check both ID and name)
     const availableFromPool = playerPool.filter(p => 
       !rosteredIds.has(p.id) && !rosteredNames.has(p.name)
     );
     
-    // Add dropped players that aren't re-rostered
-    const availableDropped = droppedPlayers.filter(p => 
-      !rosteredIds.has(p.id) && !rosteredNames.has(p.name)
-    );
-    
-    // Combine, avoiding duplicates
-    const combined = [...availableFromPool];
-    availableDropped.forEach(dp => {
-      if (!combined.find(p => p.id === dp.id || p.name === dp.name)) {
-        combined.push(dp);
-      }
-    });
-    
-    setFreeAgents(combined);
+    setFreeAgents(availableFromPool);
   }, [team.roster, allTeams, playerPool, tournament.id]);
   
   // Update trading window status periodically
@@ -4998,9 +4996,8 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
     };
     onUpdateTeam(updatedTeam);
     
-    // Remove from free agents
+    // Remove from free agents (will be updated via useEffect when roster changes)
     setFreeAgents(prev => prev.filter(p => p.id !== player.id));
-    removeFromDroppedPlayers(player.id);
     
     alert(`${player.name} added to bench! Go to your roster to move them to your starting lineup.`);
   };
@@ -5052,10 +5049,10 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
     }
   };
 
-  // Fetch game log when player profile is opened
+  // Fetch game log when player profile is opened (always refresh)
   useEffect(() => {
     if (selectedPlayerProfile) {
-      loadPlayerGameLog(selectedPlayerProfile.id);
+      loadPlayerGameLog(selectedPlayerProfile.id, true); // force refresh
     }
   }, [selectedPlayerProfile?.id]);
 
@@ -6349,28 +6346,16 @@ export default function App() {
           gameLog: []
         }));
         setPlayers(formattedPlayers);
-        // Cache in localStorage for offline use
-        localStorage.setItem(`t20fantasy_players_${tournamentId}`, JSON.stringify(formattedPlayers));
         return formattedPlayers;
       }
     } catch (err) {
       console.log('⚠️ Could not load players from API:', err.message);
     }
     
-    // Fallback to localStorage cache
-    const cached = localStorage.getItem(`t20fantasy_players_${tournamentId}`);
-    if (cached) {
-      const cachedPlayers = JSON.parse(cached);
-      console.log('📦 Using cached players:', cachedPlayers.length);
-      setPlayers(cachedPlayers);
-      return cachedPlayers;
-    }
-    
-    // Final fallback to hardcoded data
-    const fallbackPlayers = getPlayersForTournament(tournamentId);
-    console.log('🔄 Using hardcoded fallback:', fallbackPlayers.length, 'players');
-    setPlayers(fallbackPlayers);
-    return fallbackPlayers;
+    // No fallback - database is required
+    console.log('❌ Failed to load players from database');
+    setPlayers([]);
+    return [];
   };
 
   // Check API connectivity
@@ -6534,7 +6519,6 @@ export default function App() {
     localStorage.setItem('t20fantasy_user', JSON.stringify(userData));
     
     // Go to tournament selection
-    localStorage.removeItem('t20fantasy_tournament');
     setSelectedTournament(null);
     setCurrentPage('tournamentSelect');
   };
@@ -6546,7 +6530,6 @@ export default function App() {
     localStorage.setItem('t20fantasy_user', JSON.stringify(userData));
     
     // Go to tournament selection
-    localStorage.removeItem('t20fantasy_tournament');
     setSelectedTournament(null);
     setCurrentPage('tournamentSelect');
   };
@@ -6695,9 +6678,8 @@ export default function App() {
     setIsDraftComplete(false);
     setIsDraftOpen(false);
     
-    // Only remove user session
+    // Remove user session from localStorage
     localStorage.removeItem('t20fantasy_user');
-    localStorage.removeItem('t20fantasy_tournament');
     
     setCurrentPage('login');
   };
@@ -6709,15 +6691,11 @@ export default function App() {
     setIsDraftComplete(false);
     setIsDraftOpen(false);
     
-    localStorage.removeItem('t20fantasy_tournament');
-    
     setCurrentPage('tournamentSelect');
   };
 
-  // Use API-loaded players, fallback to hardcoded if empty
-  const playerPool = players.length > 0 
-    ? players 
-    : (selectedTournament ? getPlayersForTournament(selectedTournament.id) : []);
+  // Use API-loaded players - no fallback, DB is required
+  const playerPool = players.length > 0 ? players : [];
 
   return (
     <>
@@ -6786,6 +6764,12 @@ export default function App() {
             console.log('🔄 Refreshing players from database...');
             if (selectedTournament?.id) {
               await loadPlayers(selectedTournament.id);
+            }
+          }}
+          onRefreshTeams={async () => {
+            console.log('🔄 Refreshing teams from database...');
+            if (selectedTournament?.id) {
+              await loadAllTeams(selectedTournament.id);
             }
           }}
           onLogout={handleLogout}

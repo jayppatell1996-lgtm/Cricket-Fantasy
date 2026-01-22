@@ -511,7 +511,11 @@ function parseScorecardToStats(scorecard) {
 const normalizeTeam = (t) => (t || '').toLowerCase().replace(/[^a-z]/g, '');
 
 async function syncMatchScores(db, tournamentId, playerStats, matchId, matchDate) {
-  console.log(`Syncing ${playerStats.length} player stats for tournament: ${tournamentId}, match: ${matchId}, date: ${matchDate}`);
+  console.log(`📊 syncMatchScores called:`);
+  console.log(`   - tournamentId: ${tournamentId}`);
+  console.log(`   - matchId: ${matchId}`);
+  console.log(`   - matchDate: ${matchDate}`);
+  console.log(`   - playerStats count: ${playerStats?.length || 0}`);
   
   const results = [];
   
@@ -559,6 +563,13 @@ async function syncMatchScores(db, tournamentId, playerStats, matchId, matchDate
     
     // Insert into player_stats for this specific match
     const statsId = `${matchId || 'manual'}-${playerId}-${Date.now()}`;
+    
+    console.log(`   📝 Inserting stats for ${playerName} (${playerId}):`);
+    console.log(`      - matchDate: ${matchDate || new Date().toISOString().split('T')[0]}`);
+    console.log(`      - runs: ${stat.runs}, SR: ${stat.SR || stat.strikeRate || 0}`);
+    console.log(`      - wickets: ${stat.wickets}, overs: ${stat.overs}, ER: ${stat.ER || stat.economy || 0}`);
+    console.log(`      - fantasyPoints: ${points}`);
+    
     await db.execute({
       sql: `INSERT OR REPLACE INTO player_stats (id, player_id, match_id, match_date, opponent, runs, balls_faced, strike_rate, overs_bowled, runs_conceded, wickets, maiden_overs, economy_rate, catches, run_outs, stumpings, fantasy_points)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -775,6 +786,9 @@ export default async function handler(req, res) {
         if (!providedStats || providedStats.length === 0) {
           return res.status(400).json({ error: 'playerStats array required for apply action' });
         }
+        
+        console.log(`📊 APPLY ACTION - matchId: ${matchId}, matchDate: ${matchDate}, tournamentId: ${tournamentId}`);
+        console.log(`📊 Received ${providedStats.length} player stats to apply`);
         
         // Apply stats to database with match context
         const results = await syncMatchScores(db, tournamentId, providedStats, matchId, matchDate);
