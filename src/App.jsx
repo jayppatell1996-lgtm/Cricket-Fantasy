@@ -267,8 +267,11 @@ const getPlayerGameStatus = (player, matches, selectedDate = new Date()) => {
   
   const playerTeam = player.team;
   
-  // Normalize selected date to YYYY-MM-DD
-  const selectedDateStr = selectedDate.toISOString().split('T')[0];
+  // Normalize selected date to YYYY-MM-DD using local timezone
+  const year = selectedDate.getFullYear();
+  const month = String(selectedDate.getMonth() + 1).padStart(2, '0');
+  const day = String(selectedDate.getDate()).padStart(2, '0');
+  const selectedDateStr = `${year}-${month}-${day}`;
   
   for (const match of matches) {
     // Check if player's team is in this match
@@ -2019,6 +2022,7 @@ const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament
         setPendingSyncPreview({
           match,
           matchId: match.id,
+          matchDate: match.date, // IMPORTANT: Include match date for player_stats
           cricketApiId: response.cricketApiId,
           matchInfo: response.matchInfo,
           playerStats: response.playerStats,
@@ -2049,7 +2053,7 @@ const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament
   const handleApplyPoints = async () => {
     if (!pendingSyncPreview) return;
     
-    const { match, matchId, cricketApiId, playerStats, totalPoints } = pendingSyncPreview;
+    const { match, matchId, matchDate, cricketApiId, playerStats, totalPoints } = pendingSyncPreview;
     
     if (!confirm(`Apply ${totalPoints} fantasy points for ${playerStats.length} players?\n\nThis will update the database.`)) {
       return;
@@ -2059,7 +2063,7 @@ const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament
     setSyncStatus(prev => ({ ...prev, match: `💾 Applying points to database...` }));
     
     try {
-      const response = await liveSyncAPI.applyPoints(matchId, tournament.id, cricketApiId, playerStats);
+      const response = await liveSyncAPI.applyPoints(matchId, tournament.id, cricketApiId, playerStats, matchDate);
       
       if (response.success && response.applied) {
         setSyncStatus(prev => ({ 
@@ -3343,6 +3347,7 @@ const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament
                               setPendingSyncPreview({
                                 match: manualEntryMatch,
                                 matchId: manualEntryMatch.id,
+                                matchDate: manualEntryMatch.date, // IMPORTANT: Include match date for player_stats
                                 cricketApiId: 'manual-entry',
                                 matchInfo: { name: manualEntryMatch.name },
                                 playerStats: statsWithPoints,
@@ -5223,6 +5228,11 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
                           <div 
                             key={player.id} 
                             className={`player-row ${gameStatus.status}`}
+                            style={{ cursor: 'pointer' }}
+                            onClick={() => {
+                              setViewingTeam(null); // Close team modal
+                              setSelectedPlayerProfile(player); // Open player profile
+                            }}
                           >
                             <div className="slot-indicator">{slotLabel}</div>
                             <div className={`game-status-dot ${gameStatus.color}`}></div>
@@ -5256,7 +5266,15 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
                 <div className="roster-section-yahoo bench-section" style={{ marginTop: '15px' }}>
                   <div className="section-label">Bench ({teamRosterBySlot.bench.length})</div>
                   {teamRosterBySlot.bench.map(player => (
-                    <div key={player.id} className="player-row bench">
+                    <div 
+                      key={player.id} 
+                      className="player-row bench"
+                      style={{ cursor: 'pointer' }}
+                      onClick={() => {
+                        setViewingTeam(null); // Close team modal
+                        setSelectedPlayerProfile(player); // Open player profile
+                      }}
+                    >
                       <div className="slot-indicator">BN</div>
                       <div className="game-status-dot gray"></div>
                       <div className="player-info-yahoo">
