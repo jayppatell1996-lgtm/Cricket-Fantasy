@@ -510,10 +510,21 @@ function parseScorecardToStats(scorecard) {
 
 const normalizeTeam = (t) => (t || '').toLowerCase().replace(/[^a-z]/g, '');
 
-async function syncMatchScores(db, tournamentId, playerStats) {
-  console.log(`Syncing ${playerStats.length} player stats for tournament: ${tournamentId}`);
+async function syncMatchScores(db, tournamentId, playerStats, matchId, matchDate) {
+  console.log(`Syncing ${playerStats.length} player stats for tournament: ${tournamentId}, match: ${matchId}, date: ${matchDate}`);
   
   const results = [];
+  
+  // First, check if this match has already been scored
+  const existingStats = await db.execute({
+    sql: `SELECT COUNT(*) as count FROM player_stats WHERE match_id = ?`,
+    args: [matchId || 'unknown']
+  });
+  
+  if (existingStats.rows[0]?.count > 0) {
+    console.log(`⚠️ Match ${matchId} already scored - skipping to prevent double points`);
+    return { alreadyScored: true, matchId };
+  }
   
   for (const stat of playerStats) {
     if (!stat.playerName) continue;
@@ -521,44 +532,87 @@ async function syncMatchScores(db, tournamentId, playerStats) {
     const points = calculateFantasyPoints(stat, stat.position);
     const playerName = stat.playerName.trim();
     
-    // First try EXACT match
-    let updateResult = await db.execute({
-      sql: `UPDATE players 
-            SET total_points = COALESCE(total_points, 0) + ?,
-                matches_played = COALESCE(matches_played, 0) + 1
-            WHERE tournament_id = ? AND LOWER(TRIM(name)) = LOWER(?)`,
-      args: [points, tournamentId, playerName]
+    // Find the player ID
+    let playerResult = await db.execute({
+      sql: `SELECT id FROM players WHERE tournament_id = ? AND LOWER(TRIM(name)) = LOWER(?)`,
+      args: [tournamentId, playerName]
     });
     
-    // If no exact match, try starts-with (for names like "V Kohli" vs "Virat Kohli")
-    if (updateResult.rowsAffected === 0) {
-      // Try matching last name (take last word)
+    // Try fuzzy match if exact match fails
+    if (playerResult.rows.length === 0) {
       const nameParts = playerName.split(' ');
       const lastName = nameParts[nameParts.length - 1];
       
-      updateResult = await db.execute({
-        sql: `UPDATE players 
-              SET total_points = COALESCE(total_points, 0) + ?,
-                  matches_played = COALESCE(matches_played, 0) + 1
-              WHERE tournament_id = ? 
-                AND LOWER(TRIM(name)) LIKE LOWER(?)
-                AND id NOT IN (
-                  SELECT id FROM players WHERE tournament_id = ? AND LOWER(TRIM(name)) = LOWER(?)
-                )
-              LIMIT 1`,
-        args: [points, tournamentId, `%${lastName}`, tournamentId, playerName]
+      playerResult = await db.execute({
+        sql: `SELECT id FROM players WHERE tournament_id = ? AND LOWER(TRIM(name)) LIKE LOWER(?) LIMIT 1`,
+        args: [tournamentId, `%${lastName}`]
       });
     }
     
+    if (playerResult.rows.length === 0) {
+      console.log(`   ❌ Player not found: ${playerName}`);
+      results.push({ playerName, points, updated: false, reason: 'not found' });
+      continue;
+    }
+    
+    const playerId = playerResult.rows[0].id;
+    
+    // Insert into player_stats for this specific match
+    const statsId = `${matchId || 'manual'}-${playerId}-${Date.now()}`;
+    await db.execute({
+      sql: `INSERT OR REPLACE INTO player_stats (id, player_id, match_id, match_date, opponent, runs, balls_faced, strike_rate, overs_bowled, runs_conceded, wickets, maiden_overs, economy_rate, catches, run_outs, stumpings, fantasy_points)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [
+        statsId, 
+        playerId, 
+        matchId || 'manual-entry', 
+        matchDate || new Date().toISOString().split('T')[0],
+        stat.opponent || '',
+        stat.runs || 0,
+        stat.ballsFaced || 0,
+        stat.SR || stat.strikeRate || 0,
+        stat.overs || stat.oversBowled || 0,
+        stat.runsConceded || 0,
+        stat.wickets || 0,
+        stat.maidens || 0,
+        stat.ER || stat.economy || 0,
+        stat.catches || 0,
+        stat.runouts || stat.runOuts || 0,
+        stat.stumpings || 0,
+        points
+      ]
+    });
+    
+    // Update player's total_points (for display in free agents)
+    await db.execute({
+      sql: `UPDATE players SET total_points = (
+              SELECT COALESCE(SUM(fantasy_points), 0) FROM player_stats WHERE player_id = ?
+            ), matches_played = (
+              SELECT COUNT(*) FROM player_stats WHERE player_id = ?
+            ) WHERE id = ?`,
+      args: [playerId, playerId, playerId]
+    });
+    
     results.push({
       playerName: stat.playerName,
+      playerId,
       points,
-      updated: updateResult.rowsAffected > 0,
+      updated: true,
       stats: stat
     });
   }
   
-  // Update fantasy team totals by summing player points from roster table
+  // Update fantasy team totals based on roster acquisition dates
+  await updateTeamTotals(db, tournamentId);
+  
+  return results;
+}
+
+// Calculate team totals based on roster-earned points
+// Points only count for matches played WHILE player was on the team
+async function updateTeamTotals(db, tournamentId) {
+  console.log(`📊 Updating team totals for tournament: ${tournamentId}`);
+  
   const teamsResult = await db.execute({
     sql: `SELECT id FROM fantasy_teams WHERE tournament_id = ?`,
     args: [tournamentId]
@@ -566,29 +620,43 @@ async function syncMatchScores(db, tournamentId, playerStats) {
   
   for (const team of teamsResult.rows) {
     try {
-      // Get total points from all players on this team's roster
-      const rosterPointsResult = await db.execute({
-        sql: `SELECT COALESCE(SUM(p.total_points), 0) as team_total
-              FROM roster r
-              JOIN players p ON r.player_id = p.id
-              WHERE r.fantasy_team_id = ?`,
+      // Get ALL roster entries for this team (including dropped players - they earned points)
+      // Each roster entry represents a period when a player was on the team
+      const rosterHistory = await db.execute({
+        sql: `SELECT player_id, acquired_date, dropped_date FROM roster WHERE fantasy_team_id = ?`,
         args: [team.id]
       });
       
-      const teamTotal = rosterPointsResult.rows[0]?.team_total || 0;
+      let teamTotal = 0;
+      
+      for (const roster of rosterHistory.rows) {
+        // For each roster period, sum the player_stats where match_date is within the period
+        const acquiredDate = roster.acquired_date || '2000-01-01'; // Default to old date if not set
+        const droppedDate = roster.dropped_date || '2099-12-31'; // Default to future if not dropped
+        
+        const statsResult = await db.execute({
+          sql: `SELECT COALESCE(SUM(fantasy_points), 0) as period_points
+                FROM player_stats 
+                WHERE player_id = ?
+                  AND DATE(match_date) >= DATE(?)
+                  AND DATE(match_date) <= DATE(?)`,
+          args: [roster.player_id, acquiredDate, droppedDate]
+        });
+        
+        const periodPoints = statsResult.rows[0]?.period_points || 0;
+        teamTotal += periodPoints;
+      }
       
       await db.execute({
         sql: `UPDATE fantasy_teams SET total_points = ? WHERE id = ?`,
         args: [teamTotal, team.id]
       });
       
-      console.log(`   Updated team ${team.id} total: ${teamTotal}`);
+      console.log(`   Updated team ${team.id} total: ${teamTotal} (from ${rosterHistory.rows.length} roster periods)`);
     } catch (e) {
       console.error('Error updating team total:', e);
     }
   }
-  
-  return results;
 }
 
 async function updateMatchInTournament(db, tournamentId, ourMatchId, cricketApiId, status) {
@@ -708,8 +776,17 @@ export default async function handler(req, res) {
           return res.status(400).json({ error: 'playerStats array required for apply action' });
         }
         
-        // Apply stats to database
-        const results = await syncMatchScores(db, tournamentId, providedStats);
+        // Apply stats to database with match context
+        const results = await syncMatchScores(db, tournamentId, providedStats, matchId, matchDate);
+        
+        // Check if already scored
+        if (results.alreadyScored) {
+          return res.json({
+            success: false,
+            error: `Match ${matchId} has already been scored. Points not applied to prevent duplicates.`,
+            alreadyScored: true
+          });
+        }
         
         // Update match status
         if (matchId) {

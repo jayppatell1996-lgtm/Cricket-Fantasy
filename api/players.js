@@ -36,7 +36,43 @@ export default async function handler(req, res) {
     // GET - Fetch players
     // ============================================
     if (req.method === 'GET') {
-      const { tournament, playerId, position, team, leagueId, available } = req.query;
+      const { tournament, playerId, position, team, leagueId, available, action } = req.query;
+
+      // === GET PLAYER GAME LOG ===
+      if (action === 'gamelog' && playerId) {
+        const statsResult = await db.execute({
+          sql: `SELECT ps.*, 
+                       (SELECT name FROM tournaments t 
+                        JOIN players p ON p.tournament_id = t.id 
+                        WHERE p.id = ps.player_id LIMIT 1) as tournament_name
+                FROM player_stats ps
+                WHERE ps.player_id = ?
+                ORDER BY ps.match_date DESC`,
+          args: [playerId]
+        });
+        
+        const gameLog = statsResult.rows.map(s => ({
+          matchId: s.match_id,
+          matchDate: s.match_date,
+          opponent: s.opponent || 'Unknown',
+          runs: s.runs || 0,
+          ballsFaced: s.balls_faced || 0,
+          fours: s.fours || 0,
+          sixes: s.sixes || 0,
+          strikeRate: s.strike_rate || 0,
+          overs: s.overs_bowled || 0,
+          runsConceded: s.runs_conceded || 0,
+          wickets: s.wickets || 0,
+          maidens: s.maiden_overs || 0,
+          economy: s.economy_rate || 0,
+          catches: s.catches || 0,
+          runOuts: s.run_outs || 0,
+          stumpings: s.stumpings || 0,
+          fantasyPoints: s.fantasy_points || 0
+        }));
+        
+        return res.status(200).json({ success: true, gameLog });
+      }
 
       let sql = 'SELECT * FROM players WHERE 1=1';
       const args = [];

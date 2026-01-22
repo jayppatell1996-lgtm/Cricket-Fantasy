@@ -119,6 +119,7 @@ CREATE TABLE `roster` (
 	`ir_date` text,
 	`acquired_date` text DEFAULT CURRENT_TIMESTAMP,
 	`acquired_via` text DEFAULT 'draft' NOT NULL,
+	`dropped_date` text DEFAULT NULL,
 	FOREIGN KEY (`fantasy_team_id`) REFERENCES `fantasy_teams`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`player_id`) REFERENCES `players`(`id`) ON UPDATE no action ON DELETE no action
 );

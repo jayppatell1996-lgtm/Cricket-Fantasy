@@ -33,6 +33,14 @@ export default async function handler(req, res) {
   const db = getDb();
 
   try {
+    // Ensure dropped_date column exists (migration)
+    try {
+      await db.execute(`ALTER TABLE roster ADD COLUMN dropped_date TEXT DEFAULT NULL`);
+      console.log('Added dropped_date column to roster table');
+    } catch (e) {
+      // Column already exists, which is fine
+    }
+    
     // ============================================
     // GET - Fetch teams
     // ============================================
@@ -74,13 +82,13 @@ export default async function handler(req, res) {
 
       const result = await db.execute({ sql, args });
 
-      // Get roster for each team
+      // Get roster for each team (only active players - not dropped)
       const teams = await Promise.all(result.rows.map(async (t) => {
         const rosterResult = await db.execute({
           sql: `SELECT r.*, p.name as player_name, p.team as player_team, p.position as player_position
                 FROM roster r
                 LEFT JOIN players p ON r.player_id = p.id
-                WHERE r.fantasy_team_id = ?`,
+                WHERE r.fantasy_team_id = ? AND r.dropped_date IS NULL`,
           args: [t.id]
         });
 
@@ -231,12 +239,18 @@ export default async function handler(req, res) {
         });
       }
 
-      // Update roster if provided
+      // Update roster if provided - now tracks history properly
       if (roster && Array.isArray(roster)) {
-        // Clear existing roster
-        await db.execute({ sql: 'DELETE FROM roster WHERE fantasy_team_id = ?', args: [id] });
-
-        // Deduplicate roster by player ID before inserting
+        // Get current roster entries
+        const currentRoster = await db.execute({
+          sql: 'SELECT id, player_id, dropped_date FROM roster WHERE fantasy_team_id = ? AND dropped_date IS NULL',
+          args: [id]
+        });
+        
+        const currentPlayerIds = new Set(currentRoster.rows.map(r => r.player_id));
+        const newPlayerIds = new Set();
+        
+        // Deduplicate incoming roster
         const seenPlayerIds = new Set();
         const uniqueRoster = roster.filter(player => {
           const playerId = player.id || player.playerId;
@@ -245,16 +259,65 @@ export default async function handler(req, res) {
             return false;
           }
           seenPlayerIds.add(playerId);
+          newPlayerIds.add(playerId);
           return true;
         });
-
-        // Insert deduplicated roster
+        
+        // Get team's league_id for transaction logging
+        const teamInfo = await db.execute({
+          sql: 'SELECT league_id FROM fantasy_teams WHERE id = ?',
+          args: [id]
+        });
+        const leagueId = teamInfo.rows[0]?.league_id;
+        
+        // Find players that were dropped (in current but not in new)
+        for (const row of currentRoster.rows) {
+          if (!newPlayerIds.has(row.player_id)) {
+            // Mark as dropped with current date
+            await db.execute({
+              sql: `UPDATE roster SET dropped_date = datetime('now') WHERE id = ?`,
+              args: [row.id]
+            });
+            console.log(`Marked player ${row.player_id} as dropped from team ${id}`);
+            
+            // Log transaction
+            if (leagueId) {
+              await db.execute({
+                sql: `INSERT INTO transactions (id, league_id, fantasy_team_id, type, player_id, status, created_at)
+                      VALUES (?, ?, ?, 'drop', ?, 'completed', datetime('now'))`,
+                args: [generateId(), leagueId, id, row.player_id]
+              });
+            }
+          }
+        }
+        
+        // Add new players (in new but not in current active roster)
         for (const player of uniqueRoster) {
-          await db.execute({
-            sql: `INSERT INTO roster (id, fantasy_team_id, player_id, position, acquired_via)
-                  VALUES (?, ?, ?, ?, ?)`,
-            args: [generateId(), id, player.id || player.playerId, player.slot || player.position || 'flex', player.acquiredVia || 'draft']
-          });
+          const playerId = player.id || player.playerId;
+          if (!currentPlayerIds.has(playerId)) {
+            // Create new roster entry (each add creates new entry to preserve history)
+            await db.execute({
+              sql: `INSERT INTO roster (id, fantasy_team_id, player_id, position, acquired_via, acquired_date)
+                    VALUES (?, ?, ?, ?, ?, datetime('now'))`,
+              args: [generateId(), id, playerId, player.slot || player.position || 'flex', player.acquiredVia || 'pickup']
+            });
+            console.log(`Added player ${playerId} to team ${id}`);
+            
+            // Log transaction
+            if (leagueId) {
+              await db.execute({
+                sql: `INSERT INTO transactions (id, league_id, fantasy_team_id, type, player_id, status, created_at)
+                      VALUES (?, ?, ?, 'add', ?, 'completed', datetime('now'))`,
+                args: [generateId(), leagueId, id, playerId]
+              });
+            }
+          } else {
+            // Player already on roster - just update their position/slot
+            await db.execute({
+              sql: `UPDATE roster SET position = ? WHERE fantasy_team_id = ? AND player_id = ? AND dropped_date IS NULL`,
+              args: [player.slot || player.position || 'flex', id, playerId]
+            });
+          }
         }
       }
 

@@ -460,8 +460,156 @@ export default async function handler(req, res) {
         duplicatesRemoved: 0
       });
     }
+    
+    // ============================================
+    // RESET-POINTS - Clear all points and stats
+    // ============================================
+    if (action === 'reset-points') {
+      const { tournamentId } = req.query;
+      
+      if (!tournamentId) {
+        return res.status(400).json({ error: 'tournamentId required' });
+      }
+      
+      // Clear player_stats for this tournament's players
+      await db.execute({
+        sql: `DELETE FROM player_stats WHERE player_id IN (
+                SELECT id FROM players WHERE tournament_id = ?
+              )`,
+        args: [tournamentId]
+      });
+      
+      // Reset player total_points and matches_played
+      await db.execute({
+        sql: `UPDATE players SET total_points = 0, matches_played = 0 WHERE tournament_id = ?`,
+        args: [tournamentId]
+      });
+      
+      // Reset fantasy team total_points
+      await db.execute({
+        sql: `UPDATE fantasy_teams SET total_points = 0 WHERE tournament_id = ?`,
+        args: [tournamentId]
+      });
+      
+      return res.status(200).json({
+        success: true,
+        message: `Reset all points for tournament: ${tournamentId}`
+      });
+    }
+    
+    // ============================================
+    // ROSTER-HISTORY - View roster history for a team
+    // ============================================
+    if (action === 'roster-history') {
+      const { teamId } = req.query;
+      
+      if (!teamId) {
+        return res.status(400).json({ error: 'teamId required' });
+      }
+      
+      const history = await db.execute({
+        sql: `SELECT r.*, p.name as player_name, 
+                     (SELECT SUM(ps.fantasy_points) FROM player_stats ps 
+                      WHERE ps.player_id = r.player_id 
+                        AND DATE(ps.match_date) >= DATE(r.acquired_date)
+                        AND DATE(ps.match_date) <= DATE(COALESCE(r.dropped_date, '2099-12-31'))) as period_points
+              FROM roster r
+              LEFT JOIN players p ON r.player_id = p.id
+              WHERE r.fantasy_team_id = ?
+              ORDER BY r.acquired_date DESC`,
+        args: [teamId]
+      });
+      
+      return res.status(200).json({
+        success: true,
+        teamId,
+        rosterHistory: history.rows.map(r => ({
+          playerId: r.player_id,
+          playerName: r.player_name,
+          acquiredDate: r.acquired_date,
+          droppedDate: r.dropped_date,
+          isActive: !r.dropped_date,
+          periodPoints: r.period_points || 0,
+          acquiredVia: r.acquired_via
+        }))
+      });
+    }
+    
+    // ============================================
+    // RECALC-POINTS - Recalculate team totals from roster history
+    // ============================================
+    if (action === 'recalc-points') {
+      const { tournamentId } = req.query;
+      
+      if (!tournamentId) {
+        return res.status(400).json({ error: 'tournamentId required' });
+      }
+      
+      const teamsResult = await db.execute({
+        sql: `SELECT id, name FROM fantasy_teams WHERE tournament_id = ?`,
+        args: [tournamentId]
+      });
+      
+      const results = [];
+      
+      for (const team of teamsResult.rows) {
+        // Get ALL roster entries (including dropped)
+        const rosterHistory = await db.execute({
+          sql: `SELECT player_id, acquired_date, dropped_date FROM roster WHERE fantasy_team_id = ?`,
+          args: [team.id]
+        });
+        
+        let teamTotal = 0;
+        const breakdown = [];
+        
+        for (const roster of rosterHistory.rows) {
+          const acquiredDate = roster.acquired_date || '2000-01-01';
+          const droppedDate = roster.dropped_date || '2099-12-31';
+          
+          const statsResult = await db.execute({
+            sql: `SELECT COALESCE(SUM(fantasy_points), 0) as period_points
+                  FROM player_stats 
+                  WHERE player_id = ?
+                    AND DATE(match_date) >= DATE(?)
+                    AND DATE(match_date) <= DATE(?)`,
+            args: [roster.player_id, acquiredDate, droppedDate]
+          });
+          
+          const periodPoints = statsResult.rows[0]?.period_points || 0;
+          teamTotal += periodPoints;
+          
+          if (periodPoints > 0) {
+            breakdown.push({
+              playerId: roster.player_id,
+              acquired: acquiredDate,
+              dropped: roster.dropped_date,
+              points: periodPoints
+            });
+          }
+        }
+        
+        // Update team total
+        await db.execute({
+          sql: `UPDATE fantasy_teams SET total_points = ? WHERE id = ?`,
+          args: [teamTotal, team.id]
+        });
+        
+        results.push({
+          teamId: team.id,
+          teamName: team.name,
+          totalPoints: teamTotal,
+          breakdown
+        });
+      }
+      
+      return res.status(200).json({
+        success: true,
+        message: `Recalculated points for ${results.length} teams`,
+        teams: results
+      });
+    }
 
-    return res.status(400).json({ error: 'Invalid action. Use ?action=health, seed, users, tournaments, or dedupe' });
+    return res.status(400).json({ error: 'Invalid action. Use ?action=health, seed, users, tournaments, dedupe, reset-points, roster-history, or recalc-points' });
 
   } catch (error) {
     console.error('Admin API error:', error);

@@ -245,6 +245,10 @@ export const playersAPI = {
     return apiCall(`/players?playerId=${playerId}`);
   },
 
+  async getGameLog(playerId) {
+    return apiCall(`/players?playerId=${playerId}&action=gamelog`);
+  },
+
   async create(player) {
     return apiCall('/players', {
       method: 'POST',

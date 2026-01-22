@@ -2732,6 +2732,64 @@ const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament
               </div>
               
               <div className="sync-card">
+                <h4>🔄 Reset All Points</h4>
+                <p>Clear all fantasy points (use if points are doubled or incorrect)</p>
+                <button 
+                  className="btn-danger btn-large"
+                  onClick={async () => {
+                    if (!confirm('Reset ALL fantasy points for this tournament?\\n\\nThis will:\\n- Clear all player stats\\n- Reset all player points to 0\\n- Reset all team points to 0\\n\\nYou will need to re-apply match scores.')) {
+                      return;
+                    }
+                    setSyncStatus(prev => ({ ...prev, clearing: '⏳ Resetting points...' }));
+                    try {
+                      const response = await fetch(`${getApiBaseUrl()}/api/admin?action=reset-points&tournamentId=${tournament.id}`);
+                      const data = await response.json();
+                      if (data.success) {
+                        setSyncStatus(prev => ({ ...prev, clearing: '✅ All points reset! Re-apply match scores.' }));
+                        // Refresh players
+                        await refetchPlayers();
+                        onRefreshPlayers && await onRefreshPlayers();
+                      } else {
+                        setSyncStatus(prev => ({ ...prev, clearing: `❌ Error: ${data.error}` }));
+                      }
+                    } catch (error) {
+                      setSyncStatus(prev => ({ ...prev, clearing: `❌ Error: ${error.message}` }));
+                    }
+                  }}
+                >
+                  🔄 Reset All Points
+                </button>
+              </div>
+              
+              <div className="sync-card">
+                <h4>📊 Recalculate Team Totals</h4>
+                <p>Recalculate team points from roster history (use after applying scores)</p>
+                <button 
+                  className="btn-primary btn-large"
+                  onClick={async () => {
+                    setSyncStatus(prev => ({ ...prev, clearing: '⏳ Recalculating team totals...' }));
+                    try {
+                      const response = await fetch(`${getApiBaseUrl()}/api/admin?action=recalc-points&tournamentId=${tournament.id}`);
+                      const data = await response.json();
+                      if (data.success) {
+                        const summary = data.teams.map(t => `${t.teamName}: ${t.totalPoints} pts`).join(', ');
+                        setSyncStatus(prev => ({ ...prev, clearing: `✅ Recalculated! ${summary}` }));
+                        // Refresh data
+                        await refetchPlayers();
+                        onRefreshPlayers && await onRefreshPlayers();
+                      } else {
+                        setSyncStatus(prev => ({ ...prev, clearing: `❌ Error: ${data.error}` }));
+                      }
+                    } catch (error) {
+                      setSyncStatus(prev => ({ ...prev, clearing: `❌ Error: ${error.message}` }));
+                    }
+                  }}
+                >
+                  📊 Recalculate Team Totals
+                </button>
+              </div>
+              
+              <div className="sync-card">
                 <h4>📊 Check Live Matches</h4>
                 <p>Check for live T20 matches via Cricket API</p>
                 <button 
@@ -4226,6 +4284,56 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
   const [selectedSlotToFill, setSelectedSlotToFill] = useState(null); // For moving players from bench to lineup
   const [viewingTeam, setViewingTeam] = useState(null); // For viewing other team's roster
   const [localPlayers, setLocalPlayers] = useState(playersProp || []); // Local copy of players
+  const [playerGameLogs, setPlayerGameLogs] = useState({}); // Cache of player game logs: { playerId: [gameLog] }
+  
+  // Load game log for a player
+  const loadPlayerGameLog = async (playerId) => {
+    // Check cache first
+    if (playerGameLogs[playerId]) {
+      return playerGameLogs[playerId];
+    }
+    
+    try {
+      const response = await playersAPI.getGameLog(playerId);
+      if (response.gameLog) {
+        setPlayerGameLogs(prev => ({ ...prev, [playerId]: response.gameLog }));
+        return response.gameLog;
+      }
+    } catch (err) {
+      console.log('⚠️ Could not load game log for player:', playerId, err.message);
+    }
+    return [];
+  };
+  
+  // Get points for a specific match date
+  const getMatchPointsForDate = (playerId, date) => {
+    const dateStr = date.toISOString().split('T')[0];
+    const gameLog = playerGameLogs[playerId] || [];
+    
+    const matchEntry = gameLog.find(g => {
+      const matchDateStr = g.matchDate?.split('T')[0];
+      return matchDateStr === dateStr;
+    });
+    
+    return matchEntry?.fantasyPoints || 0;
+  };
+  
+  // Load game logs for all roster players
+  useEffect(() => {
+    const loadAllGameLogs = async () => {
+      const rosterPlayers = team?.roster || [];
+      for (const player of rosterPlayers) {
+        const playerId = player.id || player.playerId;
+        if (playerId && !playerGameLogs[playerId]) {
+          await loadPlayerGameLog(playerId);
+        }
+      }
+    };
+    
+    if (team?.roster?.length > 0) {
+      loadAllGameLogs();
+    }
+  }, [team?.roster]);
   
   // Enhanced Test Mode State
   const [selectedMatch, setSelectedMatch] = useState(null);
@@ -4351,16 +4459,7 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
   };
   
   const formatDateDisplay = (date) => {
-    const today = new Date();
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const yesterday = new Date(today);
-    yesterday.setDate(yesterday.getDate() - 1);
-    
-    if (date.toDateString() === today.toDateString()) return 'Today';
-    if (date.toDateString() === tomorrow.toDateString()) return 'Tomorrow';
-    if (date.toDateString() === yesterday.toDateString()) return 'Yesterday';
-    
+    // Always show actual date like "Jan 21" or "Wed, Jan 21"
     return date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
   };
   
@@ -5209,7 +5308,13 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
                               </div>
                             </div>
                             <div className="player-stats-yahoo">
-                              <span className="stat-value">{player.totalPoints || 0}</span>
+                              <span className="stat-value">
+                                {(() => {
+                                  // Show "-" for other teams since we don't have their game logs
+                                  // Could add API call to fetch per-player stats if needed
+                                  return '-';
+                                })()}
+                              </span>
                             </div>
                           </div>
                         );
@@ -5273,8 +5378,29 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
         </div>
         <div className="header-right">
           <div className="points-display">
-            <span className="points-value">{Math.round(team.totalPoints)}</span>
-            <span className="points-label">Total Pts</span>
+            <span className="points-value">
+              {(() => {
+                // Calculate today's points from game logs
+                const dateStr = selectedDate.toISOString().split('T')[0];
+                let todayPoints = 0;
+                
+                (team.roster || []).forEach(p => {
+                  const playerId = p.id || p.playerId;
+                  const gameLog = playerGameLogs[playerId] || [];
+                  const matchEntry = gameLog.find(g => g.matchDate?.split('T')[0] === dateStr);
+                  if (matchEntry) {
+                    todayPoints += matchEntry.fantasyPoints || 0;
+                  }
+                });
+                
+                return Math.round(todayPoints);
+              })()}
+            </span>
+            <span className="points-label">Today's Pts</span>
+          </div>
+          <div className="points-display" style={{ marginLeft: '10px' }}>
+            <span className="points-value" style={{ fontSize: '1.2rem', color: 'var(--text-muted)' }}>{Math.round(team.totalPoints)}</span>
+            <span className="points-label">Total</span>
           </div>
           <button className="btn-icon" onClick={onBackToTournaments} title="All Tournaments">🏆</button>
           <button className="btn-logout" onClick={onLogout} title="Logout">
@@ -5481,7 +5607,21 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
                             </div>
                           </div>
                           <div className="player-stats-yahoo">
-                            <span className="stat-value">{player.totalPoints || 0}</span>
+                            <span className="stat-value">
+                              {(() => {
+                                // Get match-specific points for selected date
+                                const dateStr = selectedDate.toISOString().split('T')[0];
+                                const gameLog = playerGameLogs[player.id] || [];
+                                const matchEntry = gameLog.find(g => g.matchDate?.split('T')[0] === dateStr);
+                                
+                                if (matchEntry) {
+                                  return matchEntry.fantasyPoints || 0;
+                                }
+                                
+                                // No match on this date - show "-"
+                                return '-';
+                              })()}
+                            </span>
                           </div>
                           <button 
                             className="drop-btn" 
@@ -5705,14 +5845,22 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
                 const isLocked = isDraftComplete && !isTestMode && (lockStatus.locked || !tradingWindowStatus.open);
                 return (
                   <div key={player.id} className={`player-card-full ${isLocked ? 'locked' : ''}`}>
-                    <div className="player-header">
+                    <div 
+                      className="player-header" 
+                      style={{ cursor: 'pointer' }}
+                      onClick={() => setSelectedPlayer(player)}
+                    >
                       <span className="player-name">
                         {isLocked && <span className="lock-icon">🔒</span>}
                         {player.name}
                       </span>
                       <span className={`position-badge ${player.position}`}>{player.position.toUpperCase()}</span>
                     </div>
-                    <div className="player-details">
+                    <div 
+                      className="player-details"
+                      style={{ cursor: 'pointer' }}
+                      onClick={() => setSelectedPlayer(player)}
+                    >
                       <span className="player-team">{player.team}</span>
                       {player.droppedAt && (
                         <span className="recently-dropped">Recently Dropped</span>
