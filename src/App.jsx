@@ -475,83 +475,8 @@ const generateTestStats = (player) => {
 };
 
 // Generate game log for a player based on completed matches
-const generatePlayerGameLog = (player, matches) => {
-  if (!matches || matches.length === 0) return [];
-  
-  const completedMatches = matches.filter(m => m.status === 'completed' || m.status === 'live');
-  const playerTeam = player.team;
-  
-  // Filter matches where player's team participated
-  const playerMatches = completedMatches.filter(match => {
-    const teamsInMatch = Array.isArray(match.teams) ? match.teams : (match.teams || '').split(' vs ').map(t => t.trim());
-    return teamsInMatch.some(t => t === playerTeam || t.includes(playerTeam) || playerTeam.includes(t));
-  });
-  
-  if (playerMatches.length === 0) return [];
-  
-  // Generate stats for each match (seeded by player id + match id for consistency)
-  const gameLog = playerMatches.map(match => {
-    const teamsInMatch = Array.isArray(match.teams) ? match.teams : (match.teams || '').split(' vs ').map(t => t.trim());
-    const opponent = teamsInMatch.find(t => t !== playerTeam && !playerTeam.includes(t) && !t.includes(playerTeam)) || teamsInMatch[0];
-    
-    // Use player id + match date as seed for consistent random values
-    const seed = (player.id + match.date).split('').reduce((a, c) => a + c.charCodeAt(0), 0);
-    const seededRandom = (offset = 0) => {
-      const x = Math.sin(seed + offset) * 10000;
-      return x - Math.floor(x);
-    };
-    
-    const isBatter = player.position === 'batter' || player.position === 'keeper' || player.position === 'allrounder';
-    const isBowler = player.position === 'bowler' || player.position === 'allrounder';
-    
-    let runs = 0, strikeRate = 0, wickets = 0, economy = 0, catches = 0, runOuts = 0, points = 0;
-    
-    if (isBatter) {
-      runs = Math.floor(seededRandom(1) * 70) + (seededRandom(2) > 0.3 ? 10 : 0);
-      const ballsFaced = Math.max(runs, Math.floor(runs * (0.7 + seededRandom(3) * 0.6)));
-      strikeRate = ballsFaced > 0 ? (runs / ballsFaced) * 100 : 0;
-      
-      // Calculate batting points
-      points += runs; // 1 point per run
-      if (runs >= 50 && runs < 100) points += 10; // 50 bonus
-      if (runs >= 100) points += 25; // Century bonus
-      if (strikeRate >= 150) points += 5; // High SR bonus
-    }
-    
-    if (isBowler) {
-      const overs = Math.floor(seededRandom(4) * 4) + 1;
-      wickets = seededRandom(5) > 0.5 ? Math.floor(seededRandom(6) * 3) + 1 : 0;
-      const runsConceded = Math.floor(overs * (5 + seededRandom(7) * 5));
-      economy = overs > 0 ? runsConceded / overs : 0;
-      
-      // Calculate bowling points
-      points += wickets * 20; // 20 points per wicket
-      if (wickets >= 3) points += 10; // 3+ wickets bonus
-      if (wickets >= 5) points += 15; // 5+ wickets bonus
-      if (economy < 6 && overs >= 2) points += 5; // Good economy bonus
-    }
-    
-    // Fielding
-    catches = seededRandom(8) > 0.7 ? Math.floor(seededRandom(9) * 2) + 1 : 0;
-    runOuts = seededRandom(10) > 0.9 ? 1 : 0;
-    points += catches * 5 + runOuts * 5;
-    
-    return {
-      matchId: match.id,
-      date: match.date,
-      opponent,
-      runs: isBatter ? runs : null,
-      strikeRate: isBatter ? strikeRate : null,
-      wickets: isBowler ? wickets : null,
-      economy: isBowler ? economy : null,
-      catches,
-      runOuts,
-      points: Math.round(points)
-    };
-  });
-  
-  return gameLog.sort((a, b) => new Date(b.date) - new Date(a.date)); // Most recent first
-};
+// generatePlayerGameLog REMOVED - was generating fake random data
+// All game log data now comes from database via API
 
 // Snake Draft Order Generator
 const generateSnakeDraftOrder = (teams, totalRounds) => {
@@ -2735,11 +2660,11 @@ const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament
               
               <div className="sync-card">
                 <h4>🔄 Reset All Points</h4>
-                <p>Clear all fantasy points (use if points are doubled or incorrect)</p>
+                <p>Clear all fantasy points AND browser cache (use if points are wrong or doubled)</p>
                 <button 
                   className="btn-danger btn-large"
                   onClick={async () => {
-                    if (!confirm('Reset ALL fantasy points for this tournament?\\n\\nThis will:\\n- Clear all player stats\\n- Reset all player points to 0\\n- Reset all team points to 0\\n\\nYou will need to re-apply match scores.')) {
+                    if (!confirm('Reset ALL fantasy points for this tournament?\\n\\nThis will:\\n- Clear all player stats from database\\n- Reset all player points to 0\\n- Reset all team points to 0\\n- Clear browser cache\\n- Reload the page\\n\\nYou will need to re-apply match scores.')) {
                       return;
                     }
                     setSyncStatus(prev => ({ ...prev, clearing: '⏳ Resetting points...' }));
@@ -2747,10 +2672,21 @@ const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament
                       const response = await fetch(`${getApiBaseUrl()}/api/admin?action=reset-points&tournamentId=${tournament.id}`);
                       const data = await response.json();
                       if (data.success) {
-                        setSyncStatus(prev => ({ ...prev, clearing: '✅ All points reset! Re-apply match scores.' }));
-                        // Refresh players
-                        await refetchPlayers();
-                        onRefreshPlayers && await onRefreshPlayers();
+                        // Clear localStorage cache
+                        localStorage.removeItem(`t20fantasy_players_${tournament.id}`);
+                        localStorage.removeItem(`t20fantasy_dropped_${tournament.id}`);
+                        
+                        // Clear all player-related localStorage
+                        Object.keys(localStorage).forEach(key => {
+                          if (key.startsWith('t20fantasy_')) {
+                            localStorage.removeItem(key);
+                          }
+                        });
+                        
+                        setSyncStatus(prev => ({ ...prev, clearing: '✅ Reset complete! Reloading page...' }));
+                        
+                        // Reload page to clear React state cache
+                        setTimeout(() => window.location.reload(), 1000);
                       } else {
                         setSyncStatus(prev => ({ ...prev, clearing: `❌ Error: ${data.error}` }));
                       }
@@ -2759,7 +2695,7 @@ const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament
                     }
                   }}
                 >
-                  🔄 Reset All Points
+                  🔄 Reset All Points & Clear Cache
                 </button>
               </div>
               
