@@ -84,18 +84,29 @@ export default async function handler(req, res) {
           args: [t.id]
         });
 
-        const roster = rosterResult.rows.map(r => ({
-          id: r.player_id,
-          playerId: r.player_id,
-          name: r.player_name || 'Unknown Player',
-          playerName: r.player_name,
-          team: r.player_team || 'Unknown',
-          playerTeam: r.player_team,
-          position: r.player_position || r.position || 'flex',
-          slot: r.position || 'flex', // position column stores slot in DB schema
-          acquiredVia: r.acquired_via,
-          acquiredAt: r.acquired_date
-        }));
+        // Deduplicate roster by player_id (in case of database duplicates)
+        const seenPlayerIds = new Set();
+        const roster = rosterResult.rows
+          .filter(r => {
+            if (seenPlayerIds.has(r.player_id)) {
+              console.log(`Filtering duplicate player from roster: ${r.player_name}`);
+              return false;
+            }
+            seenPlayerIds.add(r.player_id);
+            return true;
+          })
+          .map(r => ({
+            id: r.player_id,
+            playerId: r.player_id,
+            name: r.player_name || 'Unknown Player',
+            playerName: r.player_name,
+            team: r.player_team || 'Unknown',
+            playerTeam: r.player_team,
+            position: r.player_position || r.position || 'flex',
+            slot: r.position || 'flex', // position column stores slot in DB schema
+            acquiredVia: r.acquired_via,
+            acquiredAt: r.acquired_date
+          }));
 
         return {
           id: t.id,
@@ -225,8 +236,20 @@ export default async function handler(req, res) {
         // Clear existing roster
         await db.execute({ sql: 'DELETE FROM roster WHERE fantasy_team_id = ?', args: [id] });
 
-        // Insert new roster
-        for (const player of roster) {
+        // Deduplicate roster by player ID before inserting
+        const seenPlayerIds = new Set();
+        const uniqueRoster = roster.filter(player => {
+          const playerId = player.id || player.playerId;
+          if (seenPlayerIds.has(playerId)) {
+            console.log(`Skipping duplicate player: ${playerId}`);
+            return false;
+          }
+          seenPlayerIds.add(playerId);
+          return true;
+        });
+
+        // Insert deduplicated roster
+        for (const player of uniqueRoster) {
           await db.execute({
             sql: `INSERT INTO roster (id, fantasy_team_id, player_id, position, acquired_via)
                   VALUES (?, ?, ?, ?, ?)`,

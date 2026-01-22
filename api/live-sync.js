@@ -10,7 +10,8 @@
  * 
  * Endpoints:
  *   GET /api/live-sync?tournamentId=X - Get matches for tournament from Cricket API
- *   POST /api/live-sync - Sync specific match scorecard
+ *   POST /api/live-sync - Preview scorecard (calculates points but doesn't apply)
+ *   POST /api/live-sync?action=apply - Apply previously fetched stats to database
  * 
  * Required env: CRICKET_API_KEY from cricapi.com
  */
@@ -29,7 +30,6 @@ const CRICKET_API_BASE = 'https://api.cricapi.com/v1';
 // ============================================
 // TOURNAMENT TO SERIES MAPPING
 // ============================================
-// Maps our tournament IDs to Cricket API series search names
 const TOURNAMENT_SERIES_MAP = {
   'test_ind_nz': 'New Zealand tour of India, 2026',
   't20_wc_2026': 'ICC Mens T20 World Cup 2026',
@@ -37,68 +37,138 @@ const TOURNAMENT_SERIES_MAP = {
 };
 
 // ============================================
-// FANTASY POINTS CALCULATION
+// FANTASY POINTS CALCULATION (Your Rules)
 // ============================================
 
 const FANTASY_RULES = {
-  runPoints: 1, fourBonus: 1, sixBonus: 2,
-  thirtyBonus: 4, fiftyBonus: 8, centuryBonus: 16,
-  duckPenalty: -2, strikeRateBonus150: 6, strikeRateBonus170: 10,
-  wicketPoints: 25, maidenPoints: 12,
-  threeWicketBonus: 8, fourWicketBonus: 12, fiveWicketBonus: 16,
-  economyBonusBelow6: 6, economyBonusBelow5: 10,
-  economyPenaltyOver10: -4, economyPenaltyOver12: -8,
-  catchPoints: 8, stumpingPoints: 12, runOutDirect: 12, runOutIndirect: 6,
+  // Batting
+  runPoints: 1,           // +1 per run
+  
+  // Strike Rate Bonus (min 20 runs)
+  srMin20Runs: 20,        // Minimum runs to qualify for SR bonus
+  srBonus160: 25,         // SR >= 160: +25 pts
+  srBonus150: 20,         // SR 150-159.99: +20 pts
+  srBonus140: 15,         // SR 140-149.99: +15 pts
+  srBonus130: 10,         // SR 130-139.99: +10 pts
+  srBonus120: 5,          // SR 120-129.99: +5 pts
+  
+  // Bowling
+  wicketPoints: 25,       // +25 per wicket
+  maidenPoints: 20,       // +20 per maiden
+  
+  // Economy Rate Bonus (min 3 overs)
+  erMinOvers: 3,          // Minimum overs to qualify for ER bonus
+  erBonus5: 25,           // ER <= 5: +25 pts
+  erBonus6: 20,           // ER 5.01-6: +20 pts
+  erBonus7: 15,           // ER 6.01-7: +15 pts
+  erBonus8: 10,           // ER 7.01-8: +10 pts
+  
+  // Fielding
+  catchPoints: 12,        // +12 per catch
+  runOutPoints: 20,       // +20 per run out
+  stumpingPoints: 15,     // +15 per stumping (WK only)
 };
 
 function calculateFantasyPoints(stats, position = 'batter') {
   let points = 0;
   
+  // Batting points
   if (stats.runs !== undefined && stats.runs !== null) {
     points += stats.runs * FANTASY_RULES.runPoints;
-    points += (stats.fours || 0) * FANTASY_RULES.fourBonus;
-    points += (stats.sixes || 0) * FANTASY_RULES.sixBonus;
     
-    if (stats.runs >= 100) points += FANTASY_RULES.centuryBonus;
-    else if (stats.runs >= 50) points += FANTASY_RULES.fiftyBonus;
-    else if (stats.runs >= 30) points += FANTASY_RULES.thirtyBonus;
-    
-    if (stats.runs === 0 && stats.ballsFaced > 0 && position !== 'bowler') {
-      points += FANTASY_RULES.duckPenalty;
-    }
-    
-    if (stats.ballsFaced >= 10) {
+    // Strike Rate Bonus (min 20 runs)
+    if (stats.runs >= FANTASY_RULES.srMin20Runs && stats.ballsFaced > 0) {
       const sr = (stats.runs / stats.ballsFaced) * 100;
-      if (sr >= 170) points += FANTASY_RULES.strikeRateBonus170;
-      else if (sr >= 150) points += FANTASY_RULES.strikeRateBonus150;
+      if (sr >= 160) points += FANTASY_RULES.srBonus160;
+      else if (sr >= 150) points += FANTASY_RULES.srBonus150;
+      else if (sr >= 140) points += FANTASY_RULES.srBonus140;
+      else if (sr >= 130) points += FANTASY_RULES.srBonus130;
+      else if (sr >= 120) points += FANTASY_RULES.srBonus120;
     }
   }
   
+  // Bowling points
   if (stats.wickets !== undefined && stats.wickets !== null) {
     points += stats.wickets * FANTASY_RULES.wicketPoints;
-    points += (stats.maidens || 0) * FANTASY_RULES.maidenPoints;
+  }
+  
+  if (stats.maidens > 0) {
+    points += stats.maidens * FANTASY_RULES.maidenPoints;
+  }
+  
+  // Economy Rate Bonus (min 3 overs)
+  const overs = stats.oversBowled || stats.overs || 0;
+  const runsConceded = stats.runsConceded || 0;
+  if (overs >= FANTASY_RULES.erMinOvers) {
+    const economy = runsConceded / overs;
+    if (economy <= 5) points += FANTASY_RULES.erBonus5;
+    else if (economy <= 6) points += FANTASY_RULES.erBonus6;
+    else if (economy <= 7) points += FANTASY_RULES.erBonus7;
+    else if (economy <= 8) points += FANTASY_RULES.erBonus8;
+  }
+  
+  // Fielding points
+  points += (stats.catches || 0) * FANTASY_RULES.catchPoints;
+  points += (stats.runOuts || stats.runOutsDirect || 0) * FANTASY_RULES.runOutPoints;
+  
+  // Stumping (position check - only keepers should get this in practice)
+  if (stats.stumpings > 0) {
+    points += stats.stumpings * FANTASY_RULES.stumpingPoints;
+  }
+  
+  return Math.round(points);
+}
+
+/**
+ * Get detailed breakdown of how points were calculated
+ */
+function getPointsBreakdown(stats) {
+  const breakdown = [];
+  
+  // Batting
+  if (stats.runs !== undefined && stats.runs !== null && stats.runs > 0) {
+    breakdown.push({ label: `${stats.runs} runs`, points: stats.runs * FANTASY_RULES.runPoints });
     
-    if (stats.wickets >= 5) points += FANTASY_RULES.fiveWicketBonus;
-    else if (stats.wickets >= 4) points += FANTASY_RULES.fourWicketBonus;
-    else if (stats.wickets >= 3) points += FANTASY_RULES.threeWicketBonus;
-    
-    const overs = stats.oversBowled || stats.overs || 0;
-    const runsConceded = stats.runsConceded || 0;
-    if (overs >= 2) {
-      const economy = runsConceded / overs;
-      if (economy < 5) points += FANTASY_RULES.economyBonusBelow5;
-      else if (economy < 6) points += FANTASY_RULES.economyBonusBelow6;
-      else if (economy > 12) points += FANTASY_RULES.economyPenaltyOver12;
-      else if (economy > 10) points += FANTASY_RULES.economyPenaltyOver10;
+    // Strike Rate Bonus
+    if (stats.runs >= FANTASY_RULES.srMin20Runs && stats.ballsFaced > 0) {
+      const sr = (stats.runs / stats.ballsFaced) * 100;
+      if (sr >= 160) breakdown.push({ label: `SR ${sr.toFixed(1)} (≥160)`, points: FANTASY_RULES.srBonus160 });
+      else if (sr >= 150) breakdown.push({ label: `SR ${sr.toFixed(1)} (150-159)`, points: FANTASY_RULES.srBonus150 });
+      else if (sr >= 140) breakdown.push({ label: `SR ${sr.toFixed(1)} (140-149)`, points: FANTASY_RULES.srBonus140 });
+      else if (sr >= 130) breakdown.push({ label: `SR ${sr.toFixed(1)} (130-139)`, points: FANTASY_RULES.srBonus130 });
+      else if (sr >= 120) breakdown.push({ label: `SR ${sr.toFixed(1)} (120-129)`, points: FANTASY_RULES.srBonus120 });
     }
   }
   
-  points += (stats.catches || 0) * FANTASY_RULES.catchPoints;
-  points += (stats.stumpings || 0) * FANTASY_RULES.stumpingPoints;
-  points += (stats.runOutsDirect || 0) * FANTASY_RULES.runOutDirect;
-  points += (stats.runOutsIndirect || stats.runOuts || 0) * FANTASY_RULES.runOutIndirect;
+  // Bowling
+  if (stats.wickets > 0) {
+    breakdown.push({ label: `${stats.wickets} wickets`, points: stats.wickets * FANTASY_RULES.wicketPoints });
+  }
   
-  return Math.round(points);
+  if (stats.maidens > 0) {
+    breakdown.push({ label: `${stats.maidens} maidens`, points: stats.maidens * FANTASY_RULES.maidenPoints });
+  }
+  
+  // Economy Bonus
+  const overs = stats.oversBowled || stats.overs || 0;
+  const runsConceded = stats.runsConceded || 0;
+  if (overs >= FANTASY_RULES.erMinOvers) {
+    const economy = runsConceded / overs;
+    if (economy <= 5) breakdown.push({ label: `Econ ${economy.toFixed(2)} (≤5)`, points: FANTASY_RULES.erBonus5 });
+    else if (economy <= 6) breakdown.push({ label: `Econ ${economy.toFixed(2)} (5-6)`, points: FANTASY_RULES.erBonus6 });
+    else if (economy <= 7) breakdown.push({ label: `Econ ${economy.toFixed(2)} (6-7)`, points: FANTASY_RULES.erBonus7 });
+    else if (economy <= 8) breakdown.push({ label: `Econ ${economy.toFixed(2)} (7-8)`, points: FANTASY_RULES.erBonus8 });
+  }
+  
+  // Fielding
+  if (stats.catches > 0) breakdown.push({ label: `${stats.catches} catches`, points: stats.catches * FANTASY_RULES.catchPoints });
+  if (stats.runOuts > 0 || stats.runOutsDirect > 0) {
+    const runOuts = stats.runOuts || stats.runOutsDirect || 0;
+    breakdown.push({ label: `${runOuts} run outs`, points: runOuts * FANTASY_RULES.runOutPoints });
+  }
+  if (stats.stumpings > 0) breakdown.push({ label: `${stats.stumpings} stumpings`, points: stats.stumpings * FANTASY_RULES.stumpingPoints });
+  
+  return breakdown;
 }
 
 // ============================================
@@ -462,13 +532,43 @@ export default async function handler(req, res) {
         cricketApiMatchId, // Cricket API match ID (if known)
         teams,             // e.g., "IND vs NZ" to help find match
         matchDate,         // e.g., "2026-01-15" to help find match
-        seriesName: customSeriesName
+        seriesName: customSeriesName,
+        playerStats: providedStats  // For apply action - pre-calculated stats
       } = req.body;
       
       if (!tournamentId) {
         return res.status(400).json({ error: 'tournamentId required' });
       }
       
+      const action = req.query.action;
+      
+      // ===== ACTION: APPLY - Save previously fetched stats to database =====
+      if (action === 'apply') {
+        if (!providedStats || providedStats.length === 0) {
+          return res.status(400).json({ error: 'playerStats array required for apply action' });
+        }
+        
+        // Apply stats to database
+        const results = await syncMatchScores(db, tournamentId, providedStats);
+        
+        // Update match status
+        if (matchId) {
+          await updateMatchInTournament(db, tournamentId, matchId, cricketApiMatchId, 'completed');
+        }
+        
+        return res.json({
+          success: true,
+          applied: true,
+          matchId,
+          cricketApiId: cricketApiMatchId,
+          playersUpdated: results.filter(r => r.updated).length,
+          playersNotFound: results.filter(r => !r.updated).length,
+          totalPoints: results.reduce((sum, r) => sum + r.points, 0),
+          results: results.slice(0, 30)
+        });
+      }
+      
+      // ===== DEFAULT: PREVIEW - Fetch scorecard and calculate points (don't save) =====
       let actualCricketApiId = cricketApiMatchId;
       let matchInfo = null;
       
@@ -574,7 +674,7 @@ export default async function handler(req, res) {
         });
       }
       
-      // Parse scorecard to player stats
+      // Parse scorecard to player stats with calculated points
       const playerStats = parseScorecardToStats(scorecardResult.scorecard);
       
       if (playerStats.length === 0) {
@@ -587,25 +687,30 @@ export default async function handler(req, res) {
         });
       }
       
-      // Sync to database
-      const results = await syncMatchScores(db, tournamentId, playerStats);
+      // Calculate fantasy points for each player (PREVIEW ONLY - don't save)
+      const statsWithPoints = playerStats.map(stat => ({
+        ...stat,
+        fantasyPoints: calculateFantasyPoints(stat, stat.position),
+        pointsBreakdown: getPointsBreakdown(stat)
+      }));
       
-      // Update match in tournament with Cricket API ID
-      if (matchId) {
-        const status = scorecardResult.matchInfo?.matchEnded ? 'completed' : 'live';
-        await updateMatchInTournament(db, tournamentId, matchId, actualCricketApiId, status);
-      }
+      // Sort by fantasy points descending
+      statsWithPoints.sort((a, b) => b.fantasyPoints - a.fantasyPoints);
       
+      // Return preview data - NOT saved to database yet
       return res.json({
         success: true,
+        preview: true,  // Indicates this is just a preview
         matchId,
         cricketApiId: actualCricketApiId,
         matchInfo: scorecardResult.matchInfo || matchInfo,
-        source: 'cricket-api',
-        playersUpdated: results.filter(r => r.updated).length,
-        playersNotFound: results.filter(r => !r.updated).length,
-        totalPoints: results.reduce((sum, r) => sum + r.points, 0),
-        stats: results.slice(0, 25) // Limit response
+        matchStatus: scorecardResult.matchInfo?.status,
+        matchEnded: scorecardResult.matchInfo?.matchEnded,
+        totalPlayers: statsWithPoints.length,
+        totalFantasyPoints: statsWithPoints.reduce((sum, s) => sum + s.fantasyPoints, 0),
+        scoringRules: FANTASY_RULES,
+        playerStats: statsWithPoints,
+        message: 'Preview only - click "Apply Points" to save to database'
       });
     }
     

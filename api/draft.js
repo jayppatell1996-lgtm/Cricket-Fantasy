@@ -104,6 +104,16 @@ export default async function handler(req, res) {
           });
           const currentPickNum = (leagueResult.rows[0]?.current_pick || 0) + 1;
 
+          // Check if player is already on this team's roster (prevent duplicates)
+          const existingRoster = await db.execute({
+            sql: 'SELECT id FROM roster WHERE fantasy_team_id = ? AND player_id = ?',
+            args: [teamId, playerId]
+          });
+          
+          if (existingRoster.rows.length > 0) {
+            return res.status(400).json({ error: 'Player already on roster' });
+          }
+
           const pickId = generateId();
           const rosterId = generateId();
 

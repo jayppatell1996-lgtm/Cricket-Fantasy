@@ -338,22 +338,34 @@ export const liveSyncAPI = {
   },
 
   /**
-   * Sync real scorecard from CricketData.org API
-   * Flow: series search → series info → match scorecard
-   * 
-   * @param {string} matchId - Our internal match ID (match1, match2, etc)
-   * @param {string} tournamentId - Our tournament ID (test_ind_nz, ipl_2026, etc)
-   * @param {object} options - { teams, matchDate, cricketApiMatchId }
+   * Preview scorecard - fetch from Cricket API, calculate points, but DON'T save
+   * Returns player stats with calculated fantasy points for admin review
    */
-  async syncMatch(matchId, tournamentId, { teams, matchDate, cricketApiMatchId } = {}) {
+  async previewScorecard(matchId, tournamentId, { teams, matchDate, cricketApiMatchId } = {}) {
     return apiCall('/live-sync', {
       method: 'POST',
       body: { 
         matchId, 
         tournamentId, 
-        teams,              // e.g., "India vs New Zealand" helps find the match
-        matchDate,          // e.g., "2026-01-15" helps find the match
-        cricketApiMatchId   // If known, pass directly to skip search
+        teams,
+        matchDate,
+        cricketApiMatchId
+      }
+    });
+  },
+
+  /**
+   * Apply points - save previously previewed stats to database
+   * Call this after admin approves the preview
+   */
+  async applyPoints(matchId, tournamentId, cricketApiMatchId, playerStats) {
+    return apiCall('/live-sync?action=apply', {
+      method: 'POST',
+      body: { 
+        matchId, 
+        tournamentId, 
+        cricketApiMatchId,
+        playerStats
       }
     });
   }

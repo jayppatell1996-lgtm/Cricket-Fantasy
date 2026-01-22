@@ -403,8 +403,65 @@ export default async function handler(req, res) {
         return res.status(200).json({ success: true, message: 'Tournament updated' });
       }
     }
+    
+    // ============================================
+    // DEDUPE - Remove duplicate players from rosters
+    // ============================================
+    if (action === 'dedupe') {
+      // Get all roster entries grouped by team
+      const rosterResult = await db.execute({
+        sql: `SELECT r.id, r.fantasy_team_id, r.player_id, p.name as player_name
+              FROM roster r
+              LEFT JOIN players p ON r.player_id = p.id
+              ORDER BY r.fantasy_team_id, r.player_id, r.id`
+      });
+      
+      // Find duplicates within each team
+      const seenByTeam = new Map(); // Map<teamId, Set<playerId>>
+      const duplicateIds = [];
+      
+      for (const row of rosterResult.rows) {
+        const teamId = row.fantasy_team_id;
+        const playerId = row.player_id;
+        
+        if (!seenByTeam.has(teamId)) {
+          seenByTeam.set(teamId, new Set());
+        }
+        
+        const teamSeen = seenByTeam.get(teamId);
+        if (teamSeen.has(playerId)) {
+          // This is a duplicate
+          duplicateIds.push(row.id);
+          console.log(`Found duplicate: ${row.player_name} (${playerId}) on team ${teamId}`);
+        } else {
+          teamSeen.add(playerId);
+        }
+      }
+      
+      // Delete duplicates
+      if (duplicateIds.length > 0) {
+        for (const id of duplicateIds) {
+          await db.execute({
+            sql: 'DELETE FROM roster WHERE id = ?',
+            args: [id]
+          });
+        }
+        
+        return res.status(200).json({ 
+          success: true, 
+          message: `Removed ${duplicateIds.length} duplicate roster entries`,
+          duplicatesRemoved: duplicateIds.length
+        });
+      }
+      
+      return res.status(200).json({ 
+        success: true, 
+        message: 'No duplicates found',
+        duplicatesRemoved: 0
+      });
+    }
 
-    return res.status(400).json({ error: 'Invalid action. Use ?action=health, seed, users, or tournaments' });
+    return res.status(400).json({ error: 'Invalid action. Use ?action=health, seed, users, tournaments, or dedupe' });
 
   } catch (error) {
     console.error('Admin API error:', error);

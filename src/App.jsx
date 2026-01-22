@@ -195,7 +195,8 @@ const SQUAD_CONFIG = {
   keepers: { min: 0, max: 1, label: 'Wicketkeeper', icon: '🧤', isPlaying: true },
   bowlers: { min: 0, max: 5, label: 'Bowlers', icon: '🎯', isPlaying: true },
   flex: { min: 0, max: 1, label: 'Utility', icon: '🔄', isPlaying: true },
-  bench: { min: 0, max: 12, label: 'Bench', icon: '📋', isPlaying: false },
+  // Bench is only for overflow during free agency - not counted in TOTAL_ROSTER_SIZE
+  bench: { min: 0, max: 0, label: 'Bench', icon: '📋', isPlaying: false },
 };
 
 // Position compatibility rules
@@ -2128,7 +2129,8 @@ const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament
     }
   };
   
-  const [syncStatus, setSyncStatus] = useState({ players: null, scores: null, clearing: null });
+  const [syncStatus, setSyncStatus] = useState({ players: null, scores: null, clearing: null, match: null });
+  const [pendingSyncPreview, setPendingSyncPreview] = useState(null); // Holds preview data before admin approval
   const [isSyncing, setIsSyncing] = useState({ players: false, scores: false, clearing: false });
   const [editingTeam, setEditingTeam] = useState(null);
   const [editTeamForm, setEditTeamForm] = useState({ name: '', ownerName: '', totalPoints: 0 });
@@ -2226,89 +2228,118 @@ const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament
     }
   };
   
-  // Sync specific match scores to database
+  // Sync specific match - PREVIEW MODE (shows points before applying)
   const handleSyncMatch = async (match) => {
     setIsSyncing(prev => ({ ...prev, match: match.id }));
-    setSyncStatus(prev => ({ ...prev, match: `Syncing ${match.name || match.teams}...` }));
+    setSyncStatus(prev => ({ ...prev, match: `🔍 Fetching scorecard for ${match.name || match.teams}...` }));
+    setPendingSyncPreview(null);
     
     try {
-      // Get teams from match
       const matchTeams = Array.isArray(match.teams) ? match.teams.join(' vs ') : match.teams;
       
-      // Call API to sync real scorecard
-      const response = await liveSyncAPI.syncMatch(match.id, tournament.id, {
+      // Fetch preview (doesn't save to database)
+      const response = await liveSyncAPI.previewScorecard(match.id, tournament.id, {
         teams: matchTeams,
         matchDate: match.date,
         cricketApiMatchId: match.cricketApiId
       });
       
-      if (response.success) {
-        const totalPoints = response.totalFantasyPoints || response.totalPoints || 0;
-        const playersUpdated = response.playersUpdatedInDb || response.playersUpdated || 0;
-        const matchName = match.name || matchTeams || match.id;
-        
+      if (response.success && response.preview) {
+        // Store preview for admin approval
+        setPendingSyncPreview({
+          match,
+          matchId: match.id,
+          cricketApiId: response.cricketApiId,
+          matchInfo: response.matchInfo,
+          playerStats: response.playerStats,
+          totalPoints: response.totalFantasyPoints,
+          totalPlayers: response.totalPlayers,
+          scoringRules: response.scoringRules
+        });
         setSyncStatus(prev => ({ 
           ...prev, 
-          match: `✅ ${matchName}: ${playersUpdated} players synced, ${totalPoints} total points` 
+          match: `📋 Preview ready: ${response.totalPlayers} players, ${response.totalFantasyPoints} total points. Review and click "Apply Points" to save.` 
+        }));
+      } else if (response.warning) {
+        setSyncStatus(prev => ({ ...prev, match: `⚠️ ${response.warning}` }));
+      } else {
+        setSyncStatus(prev => ({ 
+          ...prev, 
+          match: `❌ ${response.error || 'Failed to fetch scorecard'}${response.tip ? ` - ${response.tip}` : ''}` 
+        }));
+      }
+    } catch (error) {
+      setSyncStatus(prev => ({ ...prev, match: `❌ Error: ${error.message}` }));
+    } finally {
+      setIsSyncing(prev => ({ ...prev, match: null }));
+    }
+  };
+  
+  // Apply points after admin approval
+  const handleApplyPoints = async () => {
+    if (!pendingSyncPreview) return;
+    
+    const { match, matchId, cricketApiId, playerStats, totalPoints } = pendingSyncPreview;
+    
+    if (!confirm(`Apply ${totalPoints} fantasy points for ${playerStats.length} players?\n\nThis will update the database.`)) {
+      return;
+    }
+    
+    setIsSyncing(prev => ({ ...prev, match: matchId }));
+    setSyncStatus(prev => ({ ...prev, match: `💾 Applying points to database...` }));
+    
+    try {
+      const response = await liveSyncAPI.applyPoints(matchId, tournament.id, cricketApiId, playerStats);
+      
+      if (response.success && response.applied) {
+        setSyncStatus(prev => ({ 
+          ...prev, 
+          match: `✅ Applied! ${response.playersUpdated} players updated, ${response.totalPoints} points saved.${response.playersNotFound > 0 ? ` (${response.playersNotFound} players not found in DB)` : ''}` 
         }));
         
-        // Refetch players to get updated stats
+        // Clear preview
+        setPendingSyncPreview(null);
+        
+        // Refetch players to show updated stats
         await refetchPlayers();
         
-        // Update tournament with cricketApiId and status
+        // Update tournament match status
         if (onUpdateTournament) {
           const updatedMatches = (tournament.matches || []).map(m => {
-            if (m.id === match.id) {
-              return { 
-                ...m, 
-                status: response.matchInfo?.matchEnded ? 'completed' : (m.status === 'upcoming' ? 'live' : m.status),
-                cricketApiId: response.cricketApiId || m.cricketApiId
-              };
+            if (m.id === matchId) {
+              return { ...m, status: 'completed', cricketApiId };
             }
             return m;
           });
           onUpdateTournament({ ...tournament, matches: updatedMatches });
         }
       } else {
-        const errorMsg = response.error || 'Unknown error';
-        const tip = response.tip || '';
-        setSyncStatus(prev => ({ 
-          ...prev, 
-          match: `❌ ${errorMsg}${tip ? ` - ${tip}` : ''}` 
-        }));
-      }
-    } catch (error) {
-      const errorMsg = error.message || 'Unknown error';
-      setSyncStatus(prev => ({ ...prev, match: `❌ Error: ${errorMsg}` }));
-    } finally {
-      setIsSyncing(prev => ({ ...prev, match: null }));
-    }
-  };
-  
-  // Complete a match (mark as completed and sync final scores)
-  const handleCompleteMatch = async (match) => {
-    if (!confirm(`Mark "${match.name}" as completed? This will finalize scores.`)) return;
-    
-    setIsSyncing(prev => ({ ...prev, match: match.id }));
-    
-    try {
-      const response = await liveSyncAPI.completeMatch(match.id, tournament.id);
-      
-      if (response.success) {
-        setSyncStatus(prev => ({ ...prev, match: `✅ ${match.name} marked as completed` }));
-        
-        // Update tournament matches
-        if (onUpdateTournament) {
-          const updatedMatches = (tournament.matches || []).map(m => 
-            m.id === match.id ? { ...m, status: 'completed' } : m
-          );
-          onUpdateTournament({ ...tournament, matches: updatedMatches });
-        }
+        setSyncStatus(prev => ({ ...prev, match: `❌ ${response.error || 'Failed to apply points'}` }));
       }
     } catch (error) {
       setSyncStatus(prev => ({ ...prev, match: `❌ Error: ${error.message}` }));
     } finally {
       setIsSyncing(prev => ({ ...prev, match: null }));
+    }
+  };
+  
+  // Cancel pending preview
+  const handleCancelPreview = () => {
+    setPendingSyncPreview(null);
+    setSyncStatus(prev => ({ ...prev, match: null }));
+  };
+  
+  // Complete a match (mark as completed without syncing - edge case)
+  const handleCompleteMatch = async (match) => {
+    if (!confirm(`Mark "${match.name || match.teams}" as completed without syncing new scores?`)) return;
+    
+    // Just update tournament match status locally
+    if (onUpdateTournament) {
+      const updatedMatches = (tournament.matches || []).map(m => 
+        m.id === match.id ? { ...m, status: 'completed' } : m
+      );
+      onUpdateTournament({ ...tournament, matches: updatedMatches });
+      setSyncStatus(prev => ({ ...prev, match: `✅ ${match.name || match.teams} marked as completed` }));
     }
   };
   
@@ -2908,6 +2939,108 @@ const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament
               {syncStatus.match && (
                 <div className={`sync-result ${syncStatus.match.startsWith('✅') ? 'success' : syncStatus.match.startsWith('❌') ? 'error' : ''}`} style={{ marginBottom: '15px' }}>
                   {syncStatus.match}
+                </div>
+              )}
+              
+              {/* Preview Panel - Shows calculated points before applying */}
+              {pendingSyncPreview && (
+                <div className="preview-panel" style={{ 
+                  marginBottom: '20px',
+                  padding: '20px',
+                  background: 'var(--bg-card)',
+                  borderRadius: '12px',
+                  border: '2px solid #3b82f6'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+                    <h4 style={{ margin: 0 }}>📋 Preview: {pendingSyncPreview.matchInfo?.name || pendingSyncPreview.match?.name}</h4>
+                    <div style={{ display: 'flex', gap: '10px' }}>
+                      <button 
+                        className="btn-primary"
+                        onClick={handleApplyPoints}
+                        disabled={isSyncing.match}
+                      >
+                        {isSyncing.match ? '⏳ Applying...' : '✅ Apply Points'}
+                      </button>
+                      <button 
+                        className="btn-secondary"
+                        onClick={handleCancelPreview}
+                      >
+                        ❌ Cancel
+                      </button>
+                    </div>
+                  </div>
+                  
+                  <div style={{ 
+                    display: 'grid', 
+                    gridTemplateColumns: 'repeat(3, 1fr)', 
+                    gap: '15px', 
+                    marginBottom: '15px',
+                    padding: '10px',
+                    background: 'var(--bg-primary)',
+                    borderRadius: '8px'
+                  }}>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#3b82f6' }}>{pendingSyncPreview.totalPlayers}</div>
+                      <div style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>Players</div>
+                    </div>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#22c55e' }}>{pendingSyncPreview.totalPoints}</div>
+                      <div style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>Total Points</div>
+                    </div>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#f59e0b' }}>{Math.round(pendingSyncPreview.totalPoints / pendingSyncPreview.totalPlayers)}</div>
+                      <div style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>Avg Points</div>
+                    </div>
+                  </div>
+                  
+                  <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+                      <thead>
+                        <tr style={{ background: 'var(--bg-primary)', position: 'sticky', top: 0 }}>
+                          <th style={{ padding: '8px', textAlign: 'left' }}>Player</th>
+                          <th style={{ padding: '8px', textAlign: 'center' }}>Runs</th>
+                          <th style={{ padding: '8px', textAlign: 'center' }}>Balls</th>
+                          <th style={{ padding: '8px', textAlign: 'center' }}>4s/6s</th>
+                          <th style={{ padding: '8px', textAlign: 'center' }}>Wkts</th>
+                          <th style={{ padding: '8px', textAlign: 'center' }}>Overs</th>
+                          <th style={{ padding: '8px', textAlign: 'center' }}>Econ</th>
+                          <th style={{ padding: '8px', textAlign: 'right', fontWeight: '700' }}>Points</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {pendingSyncPreview.playerStats.map((player, idx) => (
+                          <tr key={idx} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                            <td style={{ padding: '8px' }}>
+                              <div style={{ fontWeight: '500' }}>{player.playerName}</div>
+                              {player.pointsBreakdown && player.pointsBreakdown.length > 0 && (
+                                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                  {player.pointsBreakdown.map((b, i) => (
+                                    <span key={i}>{i > 0 ? ' • ' : ''}{b.label} ({b.points > 0 ? '+' : ''}{b.points})</span>
+                                  ))}
+                                </div>
+                              )}
+                            </td>
+                            <td style={{ padding: '8px', textAlign: 'center' }}>{player.runs ?? '-'}</td>
+                            <td style={{ padding: '8px', textAlign: 'center' }}>{player.ballsFaced ?? '-'}</td>
+                            <td style={{ padding: '8px', textAlign: 'center' }}>{player.fours ?? 0}/{player.sixes ?? 0}</td>
+                            <td style={{ padding: '8px', textAlign: 'center' }}>{player.wickets ?? '-'}</td>
+                            <td style={{ padding: '8px', textAlign: 'center' }}>{player.oversBowled ?? '-'}</td>
+                            <td style={{ padding: '8px', textAlign: 'center' }}>
+                              {player.oversBowled > 0 ? (player.runsConceded / player.oversBowled).toFixed(2) : '-'}
+                            </td>
+                            <td style={{ 
+                              padding: '8px', 
+                              textAlign: 'right', 
+                              fontWeight: '700',
+                              color: player.fantasyPoints >= 50 ? '#22c55e' : player.fantasyPoints >= 25 ? '#3b82f6' : 'inherit'
+                            }}>
+                              {player.fantasyPoints}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               )}
               
@@ -3700,20 +3833,33 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
 
   // Group roster by assigned slot (no bench, no IL - just playing 12)
   // Enrich roster players with data from player pool if missing
+  // Also deduplicate by player ID to prevent duplicate rendering
   const enrichedRoster = useMemo(() => {
-    return (team.roster || []).map(p => {
-      // If player already has name, use as-is
-      if (p.name && p.name !== 'Unknown Player') {
-        return p;
-      }
-      // Try to find player in player pool by ID
-      const poolPlayer = playerPool.find(pp => pp.id === p.id);
-      if (poolPlayer) {
-        return { ...poolPlayer, slot: p.slot || p.position };
-      }
-      // Fallback - use what we have
-      return { ...p, name: p.name || 'Unknown Player' };
-    });
+    const seenIds = new Set();
+    return (team.roster || [])
+      .filter(p => {
+        // Deduplicate by ID
+        const id = p.id || p.playerId;
+        if (seenIds.has(id)) {
+          console.warn(`Filtering duplicate player from roster: ${p.name || id}`);
+          return false;
+        }
+        seenIds.add(id);
+        return true;
+      })
+      .map(p => {
+        // If player already has name, use as-is
+        if (p.name && p.name !== 'Unknown Player') {
+          return p;
+        }
+        // Try to find player in player pool by ID
+        const poolPlayer = playerPool.find(pp => pp.id === p.id);
+        if (poolPlayer) {
+          return { ...poolPlayer, slot: p.slot || p.position };
+        }
+        // Fallback - use what we have
+        return { ...p, name: p.name || 'Unknown Player' };
+      });
   }, [team.roster, playerPool]);
   
   const rosterBySlot = {
@@ -4115,6 +4261,26 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
       return;
     }
     
+    // Check if player is already on roster (prevent duplicates) - check both ID and name
+    const isDuplicate = team.roster.some(p => 
+      p.id === player.id || 
+      p.playerId === player.id || 
+      (p.name && p.name === player.name)
+    );
+    if (isDuplicate) {
+      alert(`${player.name} is already on your roster!`);
+      return;
+    }
+    
+    // Count unique players on roster
+    const uniquePlayerIds = new Set(team.roster.map(p => p.id || p.playerId));
+    
+    // Check if roster is full (using unique count)
+    if (uniquePlayerIds.size >= TOTAL_ROSTER_SIZE) {
+      alert(`Roster is full (${TOTAL_ROSTER_SIZE} players). Drop a player first.`);
+      return;
+    }
+    
     // Check if player is locked (their game has started)
     const lockStatus = getPlayerLockStatus(player, tournament.matches, isTestMode);
     if (lockStatus.locked) {
@@ -4140,13 +4306,8 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
     // Get available slots for this player
     const availableSlots = getAvailableSlotsForPlayer(player);
     
-    // Also check if bench is available
-    if (!isSlotFull('bench') && !availableSlots.includes('bench')) {
-      availableSlots.push('bench');
-    }
-    
     if (availableSlots.length === 0) {
-      alert(`No available slots for ${player.name} (${player.position}). Check position compatibility.`);
+      alert(`No available slots for ${player.name} (${player.position}). All compatible slots are full.`);
       return;
     }
     
@@ -4181,7 +4342,7 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
     const updatedTeam = {
       ...team,
       roster: [...team.roster, playerWithSlot],
-      weeklyPickups: team.weeklyPickups + 1,
+      weeklyPickups: (team.weeklyPickups || 0) + 1,
     };
     onUpdateTeam(updatedTeam);
     
@@ -4190,6 +4351,36 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
     removeFromDroppedPlayers(player.id);
     setShowPlayerModal(false);
     setPlayerToAdd(null);
+  };
+  
+  // Drop a player back to free agency
+  const handleDropPlayer = (player) => {
+    // Check if in trading window
+    if (!tradingWindowStatus.open && !isTestMode) {
+      alert(tradingWindowStatus.message);
+      return;
+    }
+    
+    // Check if player is locked
+    const lockStatus = getPlayerLockStatus(player, tournament.matches, isTestMode);
+    if (lockStatus.locked) {
+      alert(`Cannot drop ${player.name}: ${lockStatus.message}`);
+      return;
+    }
+    
+    if (!confirm(`Drop ${player.name} to free agency?`)) {
+      return;
+    }
+    
+    // Remove from roster
+    const updatedRoster = team.roster.filter(p => p.id !== player.id);
+    const updatedTeam = { ...team, roster: updatedRoster };
+    onUpdateTeam(updatedTeam);
+    
+    // Add back to free agents
+    const droppedPlayer = { ...player };
+    delete droppedPlayer.slot; // Remove slot assignment
+    setFreeAgents(prev => [...prev, droppedPlayer].sort((a, b) => a.name.localeCompare(b.name)));
   };
   
   // Confirm add player to specific slot
@@ -4206,33 +4397,6 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
         // Adding new player
         handleAddPlayer(playerToAdd, slot);
       }
-    }
-  };
-
-  const handleDropPlayer = (player) => {
-    // Check if in trading window
-    if (!tradingWindowStatus.open && !isTestMode) {
-      alert(tradingWindowStatus.message);
-      return;
-    }
-    
-    // Check if player is locked (their game has started)
-    const lockStatus = getPlayerLockStatus(player, tournament.matches, isTestMode);
-    if (lockStatus.locked) {
-      alert(lockStatus.message);
-      return;
-    }
-    
-    if (window.confirm(`Drop ${player.name}?\n\nThey will be available in free agency for other teams to pick up.`)) {
-      const updatedTeam = {
-        ...team,
-        roster: team.roster.filter(p => p.id !== player.id),
-      };
-      onUpdateTeam(updatedTeam);
-      
-      // Add to both local free agents AND global dropped players pool
-      setFreeAgents([...freeAgents, player]);
-      addToDroppedPlayers(player);
     }
   };
 
@@ -4523,11 +4687,22 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
                             <span className="stat-value">{player.totalPoints || 0}</span>
                           </div>
                           <button 
-                            className="move-btn" 
-                            onClick={(e) => { e.stopPropagation(); movePlayerToSlot(player.id, 'bench'); }}
-                            title="Move to bench"
+                            className="drop-btn" 
+                            onClick={(e) => { e.stopPropagation(); handleDropPlayer(player); }}
+                            title="Drop to free agency"
+                            style={{ 
+                              marginLeft: '8px', 
+                              background: '#ef4444', 
+                              color: 'white', 
+                              border: 'none', 
+                              borderRadius: '4px', 
+                              padding: '6px 10px', 
+                              cursor: 'pointer', 
+                              fontSize: '0.8rem',
+                              fontWeight: '500'
+                            }}
                           >
-                            ↓
+                            Drop
                           </button>
                         </div>
                       );
@@ -4633,6 +4808,24 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
                           })}
                         </div>
                       )}
+                      <button 
+                        className="drop-btn" 
+                        onClick={(e) => { e.stopPropagation(); handleDropPlayer(player); }}
+                        title="Drop to free agency"
+                        style={{ 
+                          marginLeft: '8px', 
+                          background: '#ef4444', 
+                          color: 'white', 
+                          border: 'none', 
+                          borderRadius: '4px', 
+                          padding: '6px 10px', 
+                          cursor: 'pointer', 
+                          fontSize: '0.8rem',
+                          fontWeight: '500'
+                        }}
+                      >
+                        Drop
+                      </button>
                     </div>
                   );
                 })}
