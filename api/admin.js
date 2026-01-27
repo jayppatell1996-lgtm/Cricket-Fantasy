@@ -498,208 +498,6 @@ export default async function handler(req, res) {
     }
     
     // ============================================
-    // BACKDATE-ROSTER - Change acquired_date for a team's roster
-    // ============================================
-    if (action === 'backdate-roster') {
-      const { teamId, date } = req.query;
-      
-      if (!teamId || !date) {
-        return res.status(400).json({ error: 'teamId and date required (format: YYYY-MM-DD)' });
-      }
-      
-      // Update all roster entries for this team that don't have a dropped_date
-      const result = await db.execute({
-        sql: `UPDATE roster SET acquired_date = ? WHERE fantasy_team_id = ? AND dropped_date IS NULL`,
-        args: [date + ' 00:00:00', teamId]
-      });
-      
-      return res.status(200).json({
-        success: true,
-        message: `Backdated roster for team ${teamId} to ${date}`,
-        rowsAffected: result.rowsAffected
-      });
-    }
-    
-    // ============================================
-    // DEDUPE-ROSTER - Remove duplicate roster entries
-    // ============================================
-    if (action === 'dedupe-roster') {
-      const { teamId } = req.query;
-      
-      // Get all roster entries, optionally for a specific team
-      let sql = `SELECT id, fantasy_team_id, player_id, acquired_date, dropped_date FROM roster`;
-      let args = [];
-      if (teamId) {
-        sql += ` WHERE fantasy_team_id = ?`;
-        args.push(teamId);
-      }
-      
-      const rosterResult = await db.execute({ sql, args });
-      
-      // Track unique entries and duplicates to delete
-      const seen = new Map(); // key: teamId-playerId-acquiredDate-droppedDate
-      const toDelete = [];
-      
-      for (const row of rosterResult.rows) {
-        const key = `${row.fantasy_team_id}-${row.player_id}-${row.acquired_date || 'null'}-${row.dropped_date || 'null'}`;
-        if (seen.has(key)) {
-          toDelete.push(row.id);
-        } else {
-          seen.set(key, row.id);
-        }
-      }
-      
-      // Delete duplicates
-      for (const id of toDelete) {
-        await db.execute({
-          sql: `DELETE FROM roster WHERE id = ?`,
-          args: [id]
-        });
-      }
-      
-      return res.status(200).json({
-        success: true,
-        message: `Removed ${toDelete.length} duplicate roster entries`,
-        duplicatesRemoved: toDelete.length,
-        uniqueEntries: seen.size
-      });
-    }
-    
-    // ============================================
-    // FIX-OPPONENTS - Update opponent field in player_stats based on player team and match teams
-    // ============================================
-    if (action === 'fix-opponents') {
-      const { tournamentId, matchId } = req.query;
-      
-      if (!tournamentId) {
-        return res.status(400).json({ error: 'tournamentId required' });
-      }
-      
-      // Get tournament matches
-      const tournamentResult = await db.execute({
-        sql: `SELECT matches FROM tournaments WHERE id = ?`,
-        args: [tournamentId]
-      });
-      
-      if (tournamentResult.rows.length === 0) {
-        return res.status(404).json({ error: 'Tournament not found' });
-      }
-      
-      let matches = [];
-      try {
-        matches = JSON.parse(tournamentResult.rows[0].matches || '[]');
-      } catch (e) {
-        return res.status(500).json({ error: 'Could not parse tournament matches' });
-      }
-      
-      // Get all player_stats with player team info
-      let sql = `SELECT ps.id, ps.match_id, ps.player_id, p.team as player_team
-                 FROM player_stats ps
-                 JOIN players p ON ps.player_id = p.id
-                 WHERE p.tournament_id = ?`;
-      let args = [tournamentId];
-      
-      if (matchId) {
-        sql += ` AND ps.match_id = ?`;
-        args.push(matchId);
-      }
-      
-      const statsResult = await db.execute({ sql, args });
-      
-      let updated = 0;
-      for (const stat of statsResult.rows) {
-        // Find the match
-        const match = matches.find(m => m.id === stat.match_id);
-        if (!match || !match.teams || match.teams.length !== 2) continue;
-        
-        // Determine opponent
-        const opponent = match.teams.find(t => t !== stat.player_team) || match.teams[0];
-        
-        // Update the record
-        await db.execute({
-          sql: `UPDATE player_stats SET opponent = ? WHERE id = ?`,
-          args: [opponent, stat.id]
-        });
-        updated++;
-      }
-      
-      return res.status(200).json({
-        success: true,
-        message: `Updated ${updated} player_stats records with opponent info`,
-        updated
-      });
-    }
-    
-    // ============================================
-    // DEBUG-DB - View database state for debugging
-    // ============================================
-    if (action === 'debug-db') {
-      const { tournamentId } = req.query;
-      
-      // Get all player_stats
-      const statsResult = await db.execute({
-        sql: `SELECT ps.*, p.name as player_name 
-              FROM player_stats ps
-              LEFT JOIN players p ON ps.player_id = p.id
-              ${tournamentId ? 'WHERE p.tournament_id = ?' : ''}
-              ORDER BY ps.match_date DESC
-              LIMIT 100`,
-        args: tournamentId ? [tournamentId] : []
-      });
-      
-      // Get all roster entries
-      const rosterResult = await db.execute({
-        sql: `SELECT r.*, p.name as player_name, ft.name as team_name
-              FROM roster r
-              LEFT JOIN players p ON r.player_id = p.id
-              LEFT JOIN fantasy_teams ft ON r.fantasy_team_id = ft.id
-              ${tournamentId ? 'WHERE ft.tournament_id = ?' : ''}
-              ORDER BY r.acquired_date DESC
-              LIMIT 200`,
-        args: tournamentId ? [tournamentId] : []
-      });
-      
-      // Get fantasy teams
-      const teamsResult = await db.execute({
-        sql: `SELECT id, name, total_points, tournament_id FROM fantasy_teams
-              ${tournamentId ? 'WHERE tournament_id = ?' : ''}`,
-        args: tournamentId ? [tournamentId] : []
-      });
-      
-      return res.status(200).json({
-        success: true,
-        playerStats: {
-          count: statsResult.rows.length,
-          rows: statsResult.rows.map(s => ({
-            id: s.id,
-            playerId: s.player_id,
-            playerName: s.player_name,
-            matchId: s.match_id,
-            matchDate: s.match_date,
-            fantasyPoints: s.fantasy_points
-          }))
-        },
-        roster: {
-          count: rosterResult.rows.length,
-          rows: rosterResult.rows.map(r => ({
-            playerId: r.player_id,
-            playerName: r.player_name,
-            teamId: r.fantasy_team_id,
-            teamName: r.team_name,
-            acquiredDate: r.acquired_date,
-            droppedDate: r.dropped_date,
-            acquiredVia: r.acquired_via
-          }))
-        },
-        teams: teamsResult.rows.map(t => ({
-          id: t.id,
-          name: t.name,
-          totalPoints: t.total_points
-        }))
-      });
-    }
-    
-    // ============================================
     // ROSTER-HISTORY - View roster history for a team
     // ============================================
     if (action === 'roster-history') {
@@ -764,21 +562,9 @@ export default async function handler(req, res) {
         let teamTotal = 0;
         const breakdown = [];
         
-        // Track which player_id + period combinations we've already counted
-        // This prevents double-counting if there are duplicate roster entries
-        const countedPeriods = new Set();
-        
         for (const roster of rosterHistory.rows) {
           const acquiredDate = roster.acquired_date || '2000-01-01';
           const droppedDate = roster.dropped_date || '2099-12-31';
-          
-          // Create a unique key for this player + period to detect duplicates
-          const periodKey = `${roster.player_id}-${acquiredDate}-${droppedDate}`;
-          if (countedPeriods.has(periodKey)) {
-            console.log(`Skipping duplicate roster entry: ${periodKey}`);
-            continue;
-          }
-          countedPeriods.add(periodKey);
           
           const statsResult = await db.execute({
             sql: `SELECT COALESCE(SUM(fantasy_points), 0) as period_points
@@ -812,7 +598,6 @@ export default async function handler(req, res) {
           teamId: team.id,
           teamName: team.name,
           totalPoints: teamTotal,
-          rosterEntries: rosterHistory.rows.length,
           breakdown
         });
       }
@@ -824,7 +609,7 @@ export default async function handler(req, res) {
       });
     }
 
-    return res.status(400).json({ error: 'Invalid action. Use ?action=health, seed, users, tournaments, dedupe, reset-points, roster-history, recalc-points, debug-db, backdate-roster, or dedupe-roster' });
+    return res.status(400).json({ error: 'Invalid action. Use ?action=health, seed, users, tournaments, dedupe, reset-points, roster-history, or recalc-points' });
 
   } catch (error) {
     console.error('Admin API error:', error);

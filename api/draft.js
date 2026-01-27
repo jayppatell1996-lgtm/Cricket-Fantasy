@@ -126,8 +126,8 @@ export default async function handler(req, res) {
 
           // Add to roster - position is the slot (flex, batters, etc)
           await db.execute({
-            sql: `INSERT INTO roster (id, fantasy_team_id, player_id, position, acquired_via, acquired_date)
-                  VALUES (?, ?, ?, ?, 'draft', datetime('now'))`,
+            sql: `INSERT INTO roster (id, fantasy_team_id, player_id, position, acquired_via)
+                  VALUES (?, ?, ?, ?, 'draft')`,
             args: [rosterId, teamId, playerId, slot || 'flex']
           });
 
@@ -249,8 +249,8 @@ export default async function handler(req, res) {
         }
 
         await db.execute({
-          sql: `INSERT INTO roster (id, fantasy_team_id, player_id, position, acquired_via, acquired_date)
-                VALUES (?, ?, ?, ?, ?, datetime('now'))`,
+          sql: `INSERT INTO roster (id, fantasy_team_id, player_id, position, acquired_via)
+                VALUES (?, ?, ?, ?, ?)`,
           args: [generateId(), teamId, playerId, slot || 'flex', acquiredVia]
         });
 

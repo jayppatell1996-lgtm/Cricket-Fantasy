@@ -510,12 +510,11 @@ function parseScorecardToStats(scorecard) {
 
 const normalizeTeam = (t) => (t || '').toLowerCase().replace(/[^a-z]/g, '');
 
-async function syncMatchScores(db, tournamentId, playerStats, matchId, matchDate, matchTeams) {
+async function syncMatchScores(db, tournamentId, playerStats, matchId, matchDate) {
   console.log(`📊 syncMatchScores called:`);
   console.log(`   - tournamentId: ${tournamentId}`);
   console.log(`   - matchId: ${matchId}`);
   console.log(`   - matchDate: ${matchDate}`);
-  console.log(`   - matchTeams: ${JSON.stringify(matchTeams)}`);
   console.log(`   - playerStats count: ${playerStats?.length || 0}`);
   
   const results = [];
@@ -531,34 +530,15 @@ async function syncMatchScores(db, tournamentId, playerStats, matchId, matchDate
     return { alreadyScored: true, matchId };
   }
   
-  // Get match teams from tournament if not provided
-  let teams = matchTeams || [];
-  if (teams.length === 0 && matchId) {
-    const tournamentResult = await db.execute({
-      sql: `SELECT matches FROM tournaments WHERE id = ?`,
-      args: [tournamentId]
-    });
-    if (tournamentResult.rows.length > 0) {
-      try {
-        const matches = JSON.parse(tournamentResult.rows[0].matches || '[]');
-        const match = matches.find(m => m.id === matchId);
-        if (match && match.teams) {
-          teams = match.teams;
-          console.log(`   Found match teams from tournament: ${teams}`);
-        }
-      } catch (e) { console.log('Could not parse matches'); }
-    }
-  }
-  
   for (const stat of playerStats) {
     if (!stat.playerName) continue;
     
     const points = calculateFantasyPoints(stat, stat.position);
     const playerName = stat.playerName.trim();
     
-    // Find the player ID AND their team
+    // Find the player ID
     let playerResult = await db.execute({
-      sql: `SELECT id, team FROM players WHERE tournament_id = ? AND LOWER(TRIM(name)) = LOWER(?)`,
+      sql: `SELECT id FROM players WHERE tournament_id = ? AND LOWER(TRIM(name)) = LOWER(?)`,
       args: [tournamentId, playerName]
     });
     
@@ -568,7 +548,7 @@ async function syncMatchScores(db, tournamentId, playerStats, matchId, matchDate
       const lastName = nameParts[nameParts.length - 1];
       
       playerResult = await db.execute({
-        sql: `SELECT id, team FROM players WHERE tournament_id = ? AND LOWER(TRIM(name)) LIKE LOWER(?) LIMIT 1`,
+        sql: `SELECT id FROM players WHERE tournament_id = ? AND LOWER(TRIM(name)) LIKE LOWER(?) LIMIT 1`,
         args: [tournamentId, `%${lastName}`]
       });
     }
@@ -580,22 +560,12 @@ async function syncMatchScores(db, tournamentId, playerStats, matchId, matchDate
     }
     
     const playerId = playerResult.rows[0].id;
-    const playerTeam = playerResult.rows[0].team;
-    
-    // Determine opponent from player's team and match teams
-    let opponent = stat.opponent || '';
-    if (!opponent && teams.length === 2 && playerTeam) {
-      // Find the team that ISN'T the player's team
-      opponent = teams.find(t => t !== playerTeam) || teams[0];
-      console.log(`   Auto-detected opponent for ${playerName} (${playerTeam}): ${opponent}`);
-    }
     
     // Insert into player_stats for this specific match
     const statsId = `${matchId || 'manual'}-${playerId}-${Date.now()}`;
     
     console.log(`   📝 Inserting stats for ${playerName} (${playerId}):`);
     console.log(`      - matchDate: ${matchDate || new Date().toISOString().split('T')[0]}`);
-    console.log(`      - opponent: ${opponent}`);
     console.log(`      - runs: ${stat.runs}, SR: ${stat.SR || stat.strikeRate || 0}`);
     console.log(`      - wickets: ${stat.wickets}, overs: ${stat.overs}, ER: ${stat.ER || stat.economy || 0}`);
     console.log(`      - fantasyPoints: ${points}`);
@@ -608,7 +578,7 @@ async function syncMatchScores(db, tournamentId, playerStats, matchId, matchDate
         playerId, 
         matchId || 'manual-entry', 
         matchDate || new Date().toISOString().split('T')[0],
-        opponent,
+        stat.opponent || '',
         stat.runs || 0,
         stat.ballsFaced || 0,
         stat.SR || stat.strikeRate || 0,
@@ -670,22 +640,10 @@ async function updateTeamTotals(db, tournamentId) {
       
       let teamTotal = 0;
       
-      // Track which player_id + period combinations we've already counted
-      // This prevents double-counting if there are duplicate roster entries
-      const countedPeriods = new Set();
-      
       for (const roster of rosterHistory.rows) {
         // For each roster period, sum the player_stats where match_date is within the period
         const acquiredDate = roster.acquired_date || '2000-01-01'; // Default to old date if not set
         const droppedDate = roster.dropped_date || '2099-12-31'; // Default to future if not dropped
-        
-        // Create a unique key for this player + period to detect duplicates
-        const periodKey = `${roster.player_id}-${acquiredDate}-${droppedDate}`;
-        if (countedPeriods.has(periodKey)) {
-          console.log(`   ⚠️ Skipping duplicate roster entry: ${periodKey}`);
-          continue;
-        }
-        countedPeriods.add(periodKey);
         
         const statsResult = await db.execute({
           sql: `SELECT COALESCE(SUM(fantasy_points), 0) as period_points
@@ -705,7 +663,7 @@ async function updateTeamTotals(db, tournamentId) {
         args: [teamTotal, team.id]
       });
       
-      console.log(`   Updated team ${team.id} total: ${teamTotal} (from ${rosterHistory.rows.length} roster periods, ${countedPeriods.size} unique)`);
+      console.log(`   Updated team ${team.id} total: ${teamTotal} (from ${rosterHistory.rows.length} roster periods)`);
     } catch (e) {
       console.error('Error updating team total:', e);
     }
@@ -831,16 +789,9 @@ export default async function handler(req, res) {
         
         console.log(`📊 APPLY ACTION - matchId: ${matchId}, matchDate: ${matchDate}, tournamentId: ${tournamentId}`);
         console.log(`📊 Received ${providedStats.length} player stats to apply`);
-        console.log(`📊 Teams: ${JSON.stringify(teams)}`);
-        
-        // Parse teams if it's a string like "IND vs NZ"
-        let matchTeams = teams;
-        if (typeof teams === 'string') {
-          matchTeams = teams.split(/\s+vs\s+|,/).map(t => t.trim());
-        }
         
         // Apply stats to database with match context
-        const results = await syncMatchScores(db, tournamentId, providedStats, matchId, matchDate, matchTeams);
+        const results = await syncMatchScores(db, tournamentId, providedStats, matchId, matchDate);
         
         // Check if already scored
         if (results.alreadyScored) {

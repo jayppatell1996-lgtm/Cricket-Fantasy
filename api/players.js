@@ -40,18 +40,16 @@ export default async function handler(req, res) {
 
       // === GET PLAYER GAME LOG ===
       if (action === 'gamelog' && playerId) {
-        console.log(`📊 Getting game log for player: ${playerId}`);
-        
-        // Simple query - just get stats directly from player_stats table
         const statsResult = await db.execute({
-          sql: `SELECT id, player_id, match_id, match_date, opponent, runs, balls_faced, fours, sixes, strike_rate, overs_bowled, runs_conceded, wickets, maiden_overs, economy_rate, catches, run_outs, stumpings, fantasy_points 
-                FROM player_stats 
-                WHERE player_id = ? 
-                ORDER BY match_date DESC`,
+          sql: `SELECT ps.*, 
+                       (SELECT name FROM tournaments t 
+                        JOIN players p ON p.tournament_id = t.id 
+                        WHERE p.id = ps.player_id LIMIT 1) as tournament_name
+                FROM player_stats ps
+                WHERE ps.player_id = ?
+                ORDER BY ps.match_date DESC`,
           args: [playerId]
         });
-        
-        console.log(`📊 Found ${statsResult.rows.length} stats entries for ${playerId}`);
         
         const gameLog = statsResult.rows.map(s => ({
           matchId: s.match_id,
@@ -73,12 +71,7 @@ export default async function handler(req, res) {
           fantasyPoints: s.fantasy_points || 0
         }));
         
-        return res.status(200).json({ 
-          success: true, 
-          playerId,
-          count: gameLog.length,
-          gameLog 
-        });
+        return res.status(200).json({ success: true, gameLog });
       }
 
       let sql = 'SELECT * FROM players WHERE 1=1';

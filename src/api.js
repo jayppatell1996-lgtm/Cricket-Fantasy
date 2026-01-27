@@ -362,7 +362,7 @@ export const liveSyncAPI = {
    * Apply points - save previously previewed stats to database
    * Call this after admin approves the preview
    */
-  async applyPoints(matchId, tournamentId, cricketApiMatchId, playerStats, matchDate, teams) {
+  async applyPoints(matchId, tournamentId, cricketApiMatchId, playerStats, matchDate) {
     return apiCall('/live-sync?action=apply', {
       method: 'POST',
       body: { 
@@ -370,9 +370,143 @@ export const liveSyncAPI = {
         tournamentId, 
         cricketApiMatchId,
         playerStats,
-        matchDate, // IMPORTANT: Include date for player_stats
-        teams // IMPORTANT: Include teams for opponent detection
+        matchDate // IMPORTANT: Include date for player_stats
       }
+    });
+  }
+};
+
+// ============================================
+// AUCTION API - Auction Draft System
+// ============================================
+export const auctionAPI = {
+  /**
+   * Get current auction state including current player, bids, timer, teams
+   */
+  async getState(leagueId) {
+    return apiCall(`/auction?action=state&leagueId=${leagueId}`);
+  },
+
+  /**
+   * Get all auction players (queue, sold, unsold)
+   */
+  async getPlayers(leagueId, status = null) {
+    const query = status ? `&status=${status}` : '';
+    return apiCall(`/auction?action=players&leagueId=${leagueId}${query}`);
+  },
+
+  /**
+   * Get auction activity logs
+   */
+  async getLogs(leagueId, limit = 50) {
+    return apiCall(`/auction?action=logs&leagueId=${leagueId}&limit=${limit}`);
+  },
+
+  /**
+   * Setup auction for a league - initializes state and loads players
+   */
+  async setup(leagueId, tournamentId, budget = 5000000) {
+    return apiCall('/auction?action=setup', {
+      method: 'POST',
+      body: { leagueId, tournamentId, budget }
+    });
+  },
+
+  /**
+   * Place a bid on the current player
+   */
+  async placeBid(leagueId, teamId, userId) {
+    return apiCall('/auction?action=bid', {
+      method: 'POST',
+      body: { leagueId, teamId, userId }
+    });
+  },
+
+  /**
+   * Admin control actions: start, pause, resume, skip, sell, timer_expired, stop, next_player
+   */
+  async control(leagueId, controlAction) {
+    return apiCall('/auction?action=control', {
+      method: 'POST',
+      body: { leagueId, controlAction }
+    });
+  },
+
+  /**
+   * Start the auction
+   */
+  async start(leagueId) {
+    return this.control(leagueId, 'start');
+  },
+
+  /**
+   * Pause the auction
+   */
+  async pause(leagueId) {
+    return this.control(leagueId, 'pause');
+  },
+
+  /**
+   * Resume the auction
+   */
+  async resume(leagueId) {
+    return this.control(leagueId, 'resume');
+  },
+
+  /**
+   * Skip current player (mark as unsold)
+   */
+  async skip(leagueId) {
+    return this.control(leagueId, 'skip');
+  },
+
+  /**
+   * Sell current player to highest bidder
+   */
+  async sell(leagueId) {
+    return this.control(leagueId, 'sell');
+  },
+
+  /**
+   * Handle timer expiration (client-triggered)
+   */
+  async timerExpired(leagueId) {
+    return this.control(leagueId, 'timer_expired');
+  },
+
+  /**
+   * Stop the auction (can be resumed later)
+   */
+  async stop(leagueId) {
+    return this.control(leagueId, 'stop');
+  },
+
+  /**
+   * Reset auction - clears all data
+   */
+  async reset(leagueId) {
+    return apiCall(`/auction?action=reset&leagueId=${leagueId}`, {
+      method: 'DELETE'
+    });
+  },
+
+  /**
+   * Update player order in queue
+   */
+  async reorderPlayer(leagueId, playerId, newIndex) {
+    return apiCall('/auction?action=reorder', {
+      method: 'POST',
+      body: { leagueId, playerId, newIndex }
+    });
+  },
+
+  /**
+   * Update player base price
+   */
+  async updateBasePrice(leagueId, playerId, basePrice) {
+    return apiCall('/auction?action=update_price', {
+      method: 'POST',
+      body: { leagueId, playerId, basePrice }
     });
   }
 };
@@ -466,6 +600,7 @@ export default {
   users: usersAPI,
   seed: seedAPI,
   liveSync: liveSyncAPI,
+  auction: auctionAPI,
   initializeAppData,
   getDraftData,
   getStandings
