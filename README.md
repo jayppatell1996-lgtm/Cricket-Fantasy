@@ -9,38 +9,46 @@ Full-featured fantasy cricket application with auction-style drafting, live scor
 - IPL 2026
 
 ### Auction System (₹129 Cr Budget)
-- **Rounds Management**: Create auction rounds (Marquee, Capped, Uncapped, etc.)
-- **Player JSON Import**: Import players via JSON with base prices and categories
-- **Live Bidding**: Real-time auction with timer and bid increments
+- **Predefined Rounds**: Batsmen → Allrounders → Bowlers
+- **Auto-Setup**: Click "Setup Auction" to create all rounds and auto-populate players
+- **Live Bidding**: Real-time auction with timer and progressive bid increments
 - **Franchise Management**: Create and manage teams with purse tracking
-- **Round-by-Round Auction**: Select and auction each round independently
+- **Add Players to Rounds**: Directly add players to their respective rounds
 
-### Draft Types
-- 🎯 **Auction Draft**: Bid on players with ₹129 Cr budget
-- 🐍 **Snake Draft**: Turn-based picking
+### Admin Panel Tabs
+1. **Overview**: Dashboard with stats
+2. **Sync**: Cricket API integration
+3. **Players**: Import players via JSON, manage player pool
+4. **Teams**: View registered franchises
+5. **Users**: User management
+6. **Auction**: Auction controls, rounds management, franchise management
+7. **Settings**: Tournament settings
 
-### Admin Panel
-- Auction controls (start, pause, resume, skip, sell)
-- Rounds creation and player import
-- Franchise/team management
-- Live sync with Cricket API
-- Manual score entry
-
-## Player JSON Format
+## Player JSON Import Format
 
 ```json
 [
-  {
-    "name": "Virat Kohli",
-    "team": "RCB",
-    "position": "batter",
-    "category": "Marquee",
-    "base_price": 20000000
-  }
+  {"name": "Virat Kohli", "team": "IND", "position": "batter"},
+  {"name": "Jasprit Bumrah", "team": "IND", "position": "bowler"},
+  {"name": "Hardik Pandya", "team": "IND", "position": "allrounder"},
+  {"name": "Rishabh Pant", "team": "IND", "position": "keeper"}
 ]
 ```
 
 See `data/sample_auction_players.json` for complete examples.
+
+## Auction Workflow
+
+1. **Players Tab**: Import players to the database
+2. **Auction Tab**: 
+   - Add franchises (team name + owner)
+   - Click "Open Auction Registration" 
+   - Click "Setup Auction" (auto-creates Batsmen/Allrounders/Bowlers rounds)
+3. **Rounds Panel**: 
+   - Select a round to auction
+   - Add/remove players from rounds
+   - Start auction for selected round
+4. **Live Auction**: Franchises bid on players in real-time
 
 ## Quick Start
 

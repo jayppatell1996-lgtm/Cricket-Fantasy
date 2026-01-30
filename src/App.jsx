@@ -3,9 +3,16 @@ import api, { authAPI, teamsAPI, playersAPI, leaguesAPI, draftAPI, rosterAPI, to
 
 // ============================================
 // T20 FANTASY CRICKET - COMPLETE APPLICATION
-// With Tournaments, Snake Draft, Auction & Test Mode
+// With Tournaments & Auction Draft System
 // Database-integrated version
 // ============================================
+
+// Predefined Auction Rounds
+const AUCTION_ROUNDS = [
+  { roundNumber: 1, name: 'Batsmen', position: 'batter' },
+  { roundNumber: 2, name: 'Allrounders', position: 'allrounder' },
+  { roundNumber: 3, name: 'Bowlers', position: 'bowler' }
+];
 
 // Tournament Configurations (minimal fallback - primary data comes from database)
 const TOURNAMENTS = {
@@ -470,25 +477,6 @@ const generateTestStats = (player) => {
 // Generate game log for a player based on completed matches
 // generatePlayerGameLog REMOVED - was generating fake random data
 // All game log data now comes from database via API
-
-// Snake Draft Order Generator
-const generateSnakeDraftOrder = (teams, totalRounds) => {
-  const order = [];
-  for (let round = 1; round <= totalRounds; round++) {
-    const roundOrder = round % 2 === 1 
-      ? [...teams] 
-      : [...teams].reverse();
-    roundOrder.forEach((team, idx) => {
-      order.push({
-        round,
-        pick: (round - 1) * teams.length + idx + 1,
-        teamId: team.id,
-        teamName: team.name,
-      });
-    });
-  }
-  return order;
-};
 
 // ============================================
 // COMPONENTS
@@ -1000,650 +988,14 @@ const TeamCreationPage = ({ user, tournament, onTeamCreated }) => {
           </div>
           
           <div className="draft-info">
-            <h3>🐍 Snake Draft</h3>
-            <p>Players are drafted in snake order. Pick order reverses each round for fairness.</p>
+            <h3>🎯 Auction Draft</h3>
+            <p>Bid on players in rounds: Batsmen, Allrounders, Bowlers. Budget: ₹129 Cr per team.</p>
           </div>
           
           <button type="submit" className="btn-primary btn-large" disabled={loading}>
             {loading ? <span className="spinner"></span> : 'Create Team & Enter Draft'}
           </button>
         </form>
-      </div>
-    </div>
-  );
-};
-
-// Snake Draft Component - Database synchronized, turn-based
-const SnakeDraftPage = ({ team, tournament, players, allTeams, onDraftComplete, onUpdateTeam }) => {
-  const [draftState, setDraftState] = useState('loading'); // loading, waiting, drafting, completed
-  const [league, setLeague] = useState(null);
-  const [draftOrder, setDraftOrder] = useState([]);
-  const [currentPick, setCurrentPick] = useState(0);
-  const [picks, setPicks] = useState([]);
-  const [availablePlayers, setAvailablePlayers] = useState([...players]);
-  const [filterPosition, setFilterPosition] = useState('all');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState(null);
-
-  // Get tournament teams
-  const tournamentTeams = useMemo(() => {
-    return (allTeams || [])
-      .filter(t => t.tournamentId === tournament?.id)
-      .map(t => ({
-        id: t.id,
-        name: t.name,
-        owner: t.owner,
-        isUser: t.id === team?.id,
-        draftPosition: t.draftPosition || 0
-      }))
-      .sort((a, b) => a.draftPosition - b.draftPosition);
-  }, [allTeams, tournament?.id, team?.id]);
-
-  // Generate snake draft order
-  const generateDraftOrder = (teams, totalRounds) => {
-    const order = [];
-    for (let round = 1; round <= totalRounds; round++) {
-      const roundTeams = round % 2 === 1 ? [...teams] : [...teams].reverse();
-      roundTeams.forEach((t, idx) => {
-        order.push({
-          pick: order.length + 1,
-          round,
-          teamId: t.id,
-          teamName: t.name,
-          isUser: t.isUser
-        });
-      });
-    }
-    return order;
-  };
-
-  // Load league and draft state
-  const loadDraftState = async () => {
-    try {
-      const leaguesResponse = await leaguesAPI.getAll(tournament.id);
-      if (!leaguesResponse.leagues || leaguesResponse.leagues.length === 0) {
-        setError('No league found for this tournament');
-        return;
-      }
-
-      const leagueData = leaguesResponse.leagues[0];
-      setLeague(leagueData);
-      
-      console.log('📋 League data:', {
-        draftStatus: leagueData.draftStatus,
-        currentPick: leagueData.currentPick,
-        draftOrderLength: leagueData.draftOrder?.length || 0
-      });
-
-      // Check draft status
-      if (leagueData.draftStatus === 'pending' || leagueData.draftStatus === 'open') {
-        setDraftState('waiting');
-        return;
-      }
-
-      if (leagueData.draftStatus === 'completed') {
-        setDraftState('completed');
-        return;
-      }
-
-      // Draft is in progress
-      setDraftState('drafting');
-      setCurrentPick(leagueData.currentPick || 0);
-
-      // Load draft order from database - DO NOT regenerate
-      let order = leagueData.draftOrder;
-      
-      // Only regenerate if order doesn't exist AND we have teams
-      if (!order || order.length === 0) {
-        if (tournamentTeams.length >= 2) {
-          console.log('⚠️ No draft order found, generating for', tournamentTeams.length, 'teams');
-          order = generateDraftOrder(tournamentTeams, TOTAL_ROSTER_SIZE);
-          // Save draft order to league
-          await leaguesAPI.update({
-            id: leagueData.id,
-            draftOrder: order
-          });
-        } else {
-          console.error('❌ Cannot generate draft order - not enough teams loaded');
-          setError('Draft order not found. Please refresh or contact admin.');
-          return;
-        }
-      }
-      
-      console.log('📋 Draft order loaded:', order.length, 'total picks');
-      setDraftOrder(order);
-
-      // Load existing picks and enrich with player data
-      const picksResponse = await draftAPI.getPicks(leagueData.id);
-      if (picksResponse.picks) {
-        // Enrich picks with player data from local pool
-        const enrichedPicks = picksResponse.picks.map(pick => {
-          const poolPlayer = players.find(p => p.id === pick.playerId);
-          return {
-            ...pick,
-            playerName: pick.playerName || poolPlayer?.name || 'Unknown',
-            playerTeam: pick.playerTeam || poolPlayer?.team || 'Unknown',
-            playerPosition: pick.playerPosition || poolPlayer?.position || 'flex'
-          };
-        });
-        setPicks(enrichedPicks);
-        // Remove drafted players from available
-        const draftedIds = new Set(enrichedPicks.map(p => p.playerId));
-        setAvailablePlayers(players.filter(p => !draftedIds.has(p.id)));
-      }
-
-      // Check if draft is complete - ONLY if we have a valid draft order AND picks have been made
-      const totalPicksRequired = order.length;
-      const currentPickNum = leagueData.currentPick || 0;
-      
-      console.log('📋 Draft progress:', currentPickNum, '/', totalPicksRequired);
-      
-      // Only mark complete if:
-      // 1. We have a valid draft order (totalPicksRequired > 0)
-      // 2. At least one pick has been made (currentPickNum > 0)
-      // 3. We've reached or passed the total picks required
-      if (totalPicksRequired > 0 && currentPickNum > 0 && currentPickNum >= totalPicksRequired) {
-        console.log('✅ Draft is complete!');
-        setDraftState('completed');
-      }
-    } catch (err) {
-      console.error('Failed to load draft state:', err);
-      setError('Failed to load draft. Please refresh.');
-    }
-  };
-
-  // Initial load
-  useEffect(() => {
-    loadDraftState();
-  }, [tournament?.id]);
-
-  // Poll for updates every 3 seconds
-  useEffect(() => {
-    if (draftState === 'loading' || draftState === 'completed') return;
-
-    const pollInterval = setInterval(async () => {
-      try {
-        const leaguesResponse = await leaguesAPI.getAll(tournament.id);
-        if (!leaguesResponse.leagues || leaguesResponse.leagues.length === 0) return;
-
-        const leagueData = leaguesResponse.leagues[0];
-
-        // Check if draft started (was waiting, now in_progress)
-        if (draftState === 'waiting' && leagueData.draftStatus === 'in_progress') {
-          console.log('🚀 Draft started! Loading draft state...');
-          loadDraftState();
-          return;
-        }
-
-        // If drafting, check for new picks
-        if (draftState === 'drafting') {
-          const serverPick = leagueData.currentPick || 0;
-          
-          // Also update draft order if we don't have it
-          if ((!draftOrder || draftOrder.length === 0) && leagueData.draftOrder?.length > 0) {
-            console.log('📋 Loading draft order from server:', leagueData.draftOrder.length, 'picks');
-            setDraftOrder(leagueData.draftOrder);
-          }
-          
-          if (serverPick > currentPick) {
-            console.log(`📥 New pick detected: ${currentPick} → ${serverPick}`);
-            
-            // Load new picks - need to enrich with player data from local pool
-            const picksResponse = await draftAPI.getPicks(leagueData.id);
-            if (picksResponse.picks) {
-              // Enrich picks with player data from local pool
-              const enrichedPicks = picksResponse.picks.map(pick => {
-                const poolPlayer = players.find(p => p.id === pick.playerId);
-                return {
-                  ...pick,
-                  playerName: pick.playerName || poolPlayer?.name || 'Unknown',
-                  playerTeam: pick.playerTeam || poolPlayer?.team || 'Unknown',
-                  playerPosition: pick.playerPosition || poolPlayer?.position || 'flex'
-                };
-              });
-              setPicks(enrichedPicks);
-              const draftedIds = new Set(enrichedPicks.map(p => p.playerId));
-              setAvailablePlayers(players.filter(p => !draftedIds.has(p.id)));
-            }
-            
-            setCurrentPick(serverPick);
-
-            // Check if draft complete - use server's draft order length
-            // Only complete if at least one pick was made (serverPick > 0)
-            const totalPicks = leagueData.draftOrder?.length || draftOrder.length || 0;
-            console.log(`📋 Draft progress: ${serverPick} / ${totalPicks}`);
-            
-            if (totalPicks > 0 && serverPick > 0 && serverPick >= totalPicks) {
-              console.log('✅ Draft complete via polling!');
-              setDraftState('completed');
-            }
-          }
-        }
-      } catch (err) {
-        console.error('Poll error:', err);
-      }
-    }, 3000);
-
-    return () => clearInterval(pollInterval);
-  }, [draftState, currentPick, draftOrder.length, tournament?.id, team?.id]);
-
-  // Current pick info
-  const currentPickData = draftOrder[currentPick];
-  const isUsersTurn = currentPickData?.teamId === team?.id;
-
-  // Get roster counts
-  const getUserRoster = () => {
-    return picks
-      .filter(p => p.teamId === team?.id)
-      .map(p => ({
-        id: p.playerId,
-        name: p.playerName,
-        team: p.playerTeam,
-        position: p.playerPosition
-      }));
-  };
-
-  const userRoster = getUserRoster();
-
-  const getRosterCount = (position) => {
-    return userRoster.filter(p => p.position === position).length;
-  };
-
-  const getSlotCount = (slotKey) => {
-    return userRoster.filter(p => {
-      const validSlots = POSITION_COMPATIBILITY[p.position] || [];
-      return validSlots.includes(slotKey);
-    }).length;
-  };
-
-  const canDraftPosition = (position) => {
-    const validSlots = POSITION_COMPATIBILITY[position] || [];
-    for (const slotKey of validSlots) {
-      const config = SQUAD_CONFIG[slotKey];
-      if (config) {
-        const current = getRosterCount(slotKey === 'keepers' ? 'keeper' : slotKey.slice(0, -1));
-        if (current < config.max) return true;
-      }
-    }
-    return false;
-  };
-
-  const getBestSlotForPosition = (position) => {
-    const validSlots = POSITION_COMPATIBILITY[position] || [];
-    for (const slotKey of validSlots) {
-      if (slotKey === 'flex') continue;
-      const config = SQUAD_CONFIG[slotKey];
-      if (config) {
-        const pos = slotKey === 'keepers' ? 'keeper' : slotKey.slice(0, -1);
-        const current = getRosterCount(pos);
-        if (current < config.max) return slotKey;
-      }
-    }
-    if (validSlots.includes('flex') && SQUAD_CONFIG.flex) {
-      return 'flex';
-    }
-    return 'flex';
-  };
-
-  // Make a draft pick
-  const draftPlayer = async (player) => {
-    if (!isUsersTurn || isSubmitting) return;
-    
-    // Guard: Ensure we have a valid draft order
-    if (!draftOrder || draftOrder.length === 0) {
-      setError('Draft order not loaded. Please refresh the page.');
-      return;
-    }
-
-    if (!canDraftPosition(player.position)) {
-      alert(`No available slots for ${player.position}s!`);
-      return;
-    }
-
-    setIsSubmitting(true);
-    setError(null);
-
-    try {
-      const slot = getBestSlotForPosition(player.position);
-      const pickData = {
-        leagueId: league.id,
-        teamId: team.id,
-        playerId: player.id,
-        round: currentPickData?.round || 1,
-        pickNumber: currentPick + 1,
-        slot: slot
-      };
-
-      const response = await draftAPI.makePick(pickData);
-      
-      if (response.success) {
-        console.log('✅ Pick saved:', player.name);
-        
-        // Optimistic update with full player data
-        const newPick = {
-          ...pickData,
-          playerName: player.name,
-          playerTeam: player.team,
-          playerPosition: player.position,
-          teamName: team.name
-        };
-        setPicks(prev => [...prev, newPick]);
-        setAvailablePlayers(prev => prev.filter(p => p.id !== player.id));
-        
-        const nextPick = currentPick + 1;
-        setCurrentPick(nextPick);
-
-        // Check if draft complete - only if we have a valid draft order
-        const totalPicks = draftOrder.length;
-        console.log(`📋 Draft progress after pick: ${nextPick} / ${totalPicks}`);
-        
-        if (totalPicks > 0 && nextPick >= totalPicks) {
-          console.log('✅ Draft complete!');
-          setDraftState('completed');
-          // Don't auto-redirect - let user click "Go to Roster" button
-        }
-      }
-    } catch (err) {
-      console.error('Failed to make pick:', err);
-      setError(err.message || 'Failed to make pick. Try again.');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  // Filter players
-  const filteredPlayers = availablePlayers.filter(p => {
-    const matchesPosition = filterPosition === 'all' || p.position === filterPosition;
-    const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         p.team.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesPosition && matchesSearch;
-  });
-
-  // Loading state
-  if (draftState === 'loading') {
-    return (
-      <div className="draft-page">
-        <div className="draft-intro">
-          <div className="loading-spinner">Loading draft...</div>
-        </div>
-      </div>
-    );
-  }
-
-  // Waiting room
-  if (draftState === 'waiting') {
-    return (
-      <div className="draft-page">
-        <div className="draft-intro">
-          <div className="draft-intro-content">
-            <h1>⏳ Waiting Room</h1>
-            <p>Waiting for admin to start the draft...</p>
-            
-            <div className="waiting-animation">
-              <div className="pulse-circle"></div>
-            </div>
-
-            <div className="draft-order-preview">
-              <h3>Registered Teams ({tournamentTeams.length})</h3>
-              <div className="team-order">
-                {tournamentTeams.map((t, i) => (
-                  <div key={t.id} className={`order-item ${t.isUser ? 'user' : ''}`}>
-                    <span className="order-num">{i + 1}</span>
-                    <span className="order-name">{t.name}</span>
-                    {t.isUser && <span className="you-badge">YOU</span>}
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <p className="waiting-hint">
-              💡 The admin will start the draft from the Admin Panel.<br/>
-              This page will automatically update when the draft begins.
-            </p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // Completed state
-  if (draftState === 'completed') {
-    // Build final roster with full player data - ALL go to BENCH first
-    const finalRoster = picks
-      .filter(p => p.teamId === team?.id)
-      .map(p => ({
-        id: p.playerId,
-        name: p.playerName || 'Unknown Player',
-        team: p.playerTeam || 'Unknown',
-        position: p.playerPosition || 'flex',
-        slot: 'bench', // All players start on bench
-        totalPoints: 0,
-        avgPoints: 0,
-        matchesPlayed: 0
-      }));
-    
-    // Position counts for summary
-    const positionCounts = {
-      batter: finalRoster.filter(p => p.position === 'batter').length,
-      keeper: finalRoster.filter(p => p.position === 'keeper').length,
-      allrounder: finalRoster.filter(p => p.position === 'allrounder').length,
-      bowler: finalRoster.filter(p => p.position === 'bowler').length,
-    };
-    
-    return (
-      <div className="draft-page">
-        <div className="draft-intro">
-          <div className="draft-intro-content">
-            <h1>✅ Draft Complete!</h1>
-            <p>Your roster has been set with {finalRoster.length} players.</p>
-            
-            {/* Position Summary */}
-            <div className="draft-position-summary" style={{ 
-              display: 'grid', 
-              gridTemplateColumns: 'repeat(4, 1fr)', 
-              gap: '10px', 
-              margin: '20px 0',
-              padding: '15px',
-              background: 'rgba(255,255,255,0.05)',
-              borderRadius: '8px'
-            }}>
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: '1.5rem' }}>🏏</div>
-                <div style={{ fontWeight: 'bold', color: '#d4af37' }}>{positionCounts.batter}</div>
-                <div style={{ fontSize: '0.75rem', color: '#888' }}>Batters</div>
-              </div>
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: '1.5rem' }}>🧤</div>
-                <div style={{ fontWeight: 'bold', color: '#d4af37' }}>{positionCounts.keeper}</div>
-                <div style={{ fontSize: '0.75rem', color: '#888' }}>Keepers</div>
-              </div>
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: '1.5rem' }}>⚡</div>
-                <div style={{ fontWeight: 'bold', color: '#d4af37' }}>{positionCounts.allrounder}</div>
-                <div style={{ fontSize: '0.75rem', color: '#888' }}>All-rounders</div>
-              </div>
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: '1.5rem' }}>🎯</div>
-                <div style={{ fontWeight: 'bold', color: '#d4af37' }}>{positionCounts.bowler}</div>
-                <div style={{ fontSize: '0.75rem', color: '#888' }}>Bowlers</div>
-              </div>
-            </div>
-            
-            {/* Player List */}
-            <div className="draft-summary" style={{ margin: '20px 0', textAlign: 'left' }}>
-              <h3>Your Team:</h3>
-              <div className="drafted-players" style={{ maxHeight: '250px', overflow: 'auto' }}>
-                {finalRoster.map((p, i) => (
-                  <div key={i} style={{ padding: '8px', borderBottom: '1px solid #333', display: 'flex', justifyContent: 'space-between' }}>
-                    <span>{p.name}</span>
-                    <span className={`position-badge ${p.position}`}>
-                      {p.position === 'keeper' ? 'WK' : p.position.toUpperCase().slice(0, 3)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <button 
-              className="btn-primary btn-large" 
-              onClick={() => onDraftComplete(finalRoster)}
-              style={{ marginTop: '20px' }}
-            >
-              Go to My Roster →
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // Guard: Show loading if draftOrder is empty
-  if (!draftOrder || draftOrder.length === 0) {
-    return (
-      <div className="draft-page">
-        <div className="draft-intro">
-          <div className="draft-intro-content">
-            <h1>⏳ Loading Draft...</h1>
-            <p>Waiting for draft order to load. Please wait...</p>
-            <button className="btn-secondary" onClick={loadDraftState}>
-              Refresh
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // Active draft
-  return (
-    <div className="draft-page">
-      <header className="draft-header">
-        <div className="draft-title">
-          <h1>🐍 Snake Draft</h1>
-          <span className="draft-round">
-            Round {currentPickData?.round || 1} • Pick {currentPick + 1}/{draftOrder.length}
-          </span>
-        </div>
-        {isUsersTurn ? (
-          <div className="your-turn-indicator">🎯 YOUR PICK!</div>
-        ) : (
-          <div className="waiting-indicator">
-            ⏳ Waiting for {currentPickData?.teamName}...
-          </div>
-        )}
-      </header>
-
-      {error && (
-        <div className="draft-error" style={{ background: '#dc3545', padding: '10px', textAlign: 'center' }}>
-          {error}
-        </div>
-      )}
-
-      <div className="draft-content">
-        <div className="draft-sidebar">
-          <div className="my-roster-preview">
-            <h3>Your Roster ({userRoster.length}/{TOTAL_ROSTER_SIZE})</h3>
-            
-            {/* Position counts */}
-            <div className="position-counts">
-              <div className="position-count-item">
-                <span>🏏 Batters</span>
-                <span>{userRoster.filter(p => p.position === 'batter').length}</span>
-              </div>
-              <div className="position-count-item">
-                <span>🧤 Wicket Keepers</span>
-                <span>{userRoster.filter(p => p.position === 'keeper').length}</span>
-              </div>
-              <div className="position-count-item">
-                <span>⚡ All-rounders</span>
-                <span>{userRoster.filter(p => p.position === 'allrounder').length}</span>
-              </div>
-              <div className="position-count-item">
-                <span>🎯 Bowlers</span>
-                <span>{userRoster.filter(p => p.position === 'bowler').length}</span>
-              </div>
-            </div>
-            
-            {/* Drafted players list */}
-            <div className="drafted-players-list">
-              <h4>Drafted</h4>
-              {userRoster.length === 0 ? (
-                <div className="no-players">No players drafted yet</div>
-              ) : (
-                userRoster.map((p, i) => (
-                  <div key={i} className="drafted-player-item">
-                    <span className="drafted-player-name">{p.name}</span>
-                    <span className={`position-badge small ${p.position}`}>
-                      {p.position === 'keeper' ? 'WK' : p.position.toUpperCase().slice(0, 3)}
-                    </span>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-          
-          <div className="draft-log">
-            <h3>Recent Picks</h3>
-            <div className="log-entries">
-              {picks.slice(-8).reverse().map((pick, i) => (
-                <div key={i} className={`log-entry ${pick.teamId === team?.id ? 'user-pick' : ''}`}>
-                  <span className="pick-num">#{pick.pickNumber}</span>
-                  <span className="pick-team">{pick.teamName}</span>
-                  <span className="pick-player">{pick.playerName}</span>
-                </div>
-              ))}
-              {picks.length === 0 && <div className="no-picks">No picks yet</div>}
-            </div>
-          </div>
-        </div>
-
-        <div className="draft-main">
-          <div className="player-filters">
-            <input
-              type="text"
-              placeholder="Search players..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="search-input"
-            />
-            <select 
-              value={filterPosition} 
-              onChange={(e) => setFilterPosition(e.target.value)}
-              className="position-filter"
-            >
-              <option value="all">All Positions</option>
-              <option value="batter">Batters</option>
-              <option value="bowler">Bowlers</option>
-              <option value="allrounder">All-rounders</option>
-              <option value="keeper">Keepers</option>
-            </select>
-          </div>
-
-          <div className="available-players">
-            {filteredPlayers.slice(0, 50).map(player => {
-              const canDraft = isUsersTurn && canDraftPosition(player.position) && !isSubmitting;
-              return (
-                <div 
-                  key={player.id} 
-                  className={`player-card ${canDraft ? 'draftable' : 'disabled'}`}
-                  onClick={() => canDraft && draftPlayer(player)}
-                >
-                  <div className="player-info">
-                    <span className="player-name">{player.name}</span>
-                    <span className="player-team">{player.team}</span>
-                  </div>
-                  <div className="player-meta">
-                    <span className={`position-badge ${player.position}`}>
-                      {player.position.toUpperCase().slice(0, 3)}
-                    </span>
-                    <span className="player-points">{player.totalPoints || 0} pts</span>
-                  </div>
-                  {canDraft && <div className="draft-btn">Draft</div>}
-                </div>
-              );
-            })}
-          </div>
-        </div>
       </div>
     </div>
   );
@@ -2557,7 +1909,7 @@ const AdminPanel = ({ user, tournament, players: playersProp, draftType: parentD
   
   // Draft status state
   const [draftStatus, setDraftStatusState] = useState('pending');
-  const [selectedDraftType, setSelectedDraftTypeState] = useState(parentDraftType || 'snake'); // 'snake' or 'auction'
+  const [selectedDraftType, setSelectedDraftTypeState] = useState(parentDraftType || 'auction'); // Always auction now
   const [auctionState, setAuctionState] = useState(null);
   const [auctionLoading, setAuctionLoading] = useState(false);
   
@@ -2716,6 +2068,54 @@ const AdminPanel = ({ user, tournament, players: playersProp, draftType: parentD
   const [newFranchiseName, setNewFranchiseName] = useState('');
   const [newFranchiseOwner, setNewFranchiseOwner] = useState('');
   const [editingFranchise, setEditingFranchise] = useState(null);
+  const [showAddPlayerToRound, setShowAddPlayerToRound] = useState(false);
+  const [addPlayerBasePrice, setAddPlayerBasePrice] = useState(2000000);
+  
+  // Get players available to add to a round (not already in any round)
+  const getAvailablePlayersForRound = (round) => {
+    if (!round) return [];
+    const existingPlayerIds = new Set(roundPlayers.map(p => p.playerId || p.name));
+    
+    // Filter by position based on round name
+    return players.filter(p => {
+      const pos = (p.position || '').toLowerCase();
+      const roundName = round.name.toLowerCase();
+      
+      // Check if player is already in this round
+      if (existingPlayerIds.has(p.id) || existingPlayerIds.has(p.name)) return false;
+      
+      // Match position to round
+      if (roundName.includes('bats')) return pos === 'batter' || pos === 'keeper';
+      if (roundName.includes('allround')) return pos === 'allrounder';
+      if (roundName.includes('bowl')) return pos === 'bowler';
+      return true; // Default: show all
+    });
+  };
+  
+  // Add a single player to a round
+  const handleAddPlayerToRound = async (player) => {
+    if (!selectedRound) return;
+    try {
+      const leaguesResponse = await leaguesAPI.getAll(tournament.id);
+      if (leaguesResponse.leagues && leaguesResponse.leagues.length > 0) {
+        const league = leaguesResponse.leagues[0];
+        const playerData = [{
+          name: player.name,
+          team: player.team,
+          position: player.position,
+          category: selectedRound.name,
+          base_price: addPlayerBasePrice
+        }];
+        const response = await auctionAPI.importPlayers(league.id, selectedRound.id, playerData, true);
+        if (response.success) {
+          loadRoundPlayers(selectedRound.id);
+          loadAuctionRounds();
+        }
+      }
+    } catch (err) {
+      console.error('Failed to add player to round:', err);
+    }
+  };
   
   // Load auction rounds
   const loadAuctionRounds = async () => {
@@ -2975,21 +2375,51 @@ const AdminPanel = ({ user, tournament, players: playersProp, draftType: parentD
   }, [tournament.id, supportsAuction]);
   
   const handleSetupAuction = async () => {
-    if (!window.confirm('Setup auction for this league? This will initialize the auction and set team budgets to ₹129 Cr.')) return;
+    if (!window.confirm('Setup auction for this league? This will:\n- Set team budgets to ₹129 Cr\n- Create rounds: Batsmen, Allrounders, Bowlers\n- Auto-populate rounds from player pool')) return;
     
     setAuctionLoading(true);
     try {
       const leaguesResponse = await leaguesAPI.getAll(tournament.id);
       if (leaguesResponse.leagues && leaguesResponse.leagues.length > 0) {
         const league = leaguesResponse.leagues[0];
+        
+        // Setup auction state and budgets
         const response = await auctionAPI.setup(league.id, tournament.id, 129000000);
-        if (response.success) {
-          alert('Auction setup complete! Teams now have ₹129 Cr budget.');
-          loadAuctionState();
-          loadAuctionRounds();
-        } else {
+        if (!response.success) {
           alert(response.error || 'Failed to setup auction');
+          return;
         }
+        
+        // Create predefined rounds and auto-populate with players by position
+        for (const roundDef of AUCTION_ROUNDS) {
+          // Create the round
+          const roundResponse = await auctionAPI.createRound(league.id, roundDef.roundNumber, roundDef.name);
+          if (roundResponse.success && roundResponse.roundId) {
+            // Get players matching this position from the player pool
+            const matchingPlayers = players.filter(p => {
+              const pos = (p.position || '').toLowerCase();
+              if (roundDef.position === 'batter') return pos === 'batter' || pos === 'keeper';
+              if (roundDef.position === 'allrounder') return pos === 'allrounder';
+              if (roundDef.position === 'bowler') return pos === 'bowler';
+              return false;
+            }).map(p => ({
+              name: p.name,
+              team: p.team,
+              position: p.position,
+              category: roundDef.name,
+              base_price: 2000000 // Default ₹20 Lakhs base price
+            }));
+            
+            // Import players to this round
+            if (matchingPlayers.length > 0) {
+              await auctionAPI.importPlayers(league.id, roundResponse.roundId, matchingPlayers, false);
+            }
+          }
+        }
+        
+        alert(`Auction setup complete!\n- Teams have ₹129 Cr budget\n- Created 3 rounds with ${players.length} players auto-assigned`);
+        loadAuctionState();
+        loadAuctionRounds();
       }
     } catch (err) {
       console.error('Failed to setup auction:', err);
@@ -3352,7 +2782,7 @@ const AdminPanel = ({ user, tournament, players: playersProp, draftType: parentD
       return;
     }
     
-    if (window.confirm(`Begin the snake draft with ${tournamentTeams.length} teams? Make sure all teams are registered.`)) {
+    if (window.confirm(`Begin the auction with ${tournamentTeams.length} franchises? Make sure all teams are registered.`)) {
       // Generate draft order
       const shuffledTeams = [...tournamentTeams].sort(() => Math.random() - 0.5);
       const draftOrder = [];
@@ -3493,7 +2923,7 @@ const AdminPanel = ({ user, tournament, players: playersProp, draftType: parentD
       </header>
       
       <nav className="admin-nav">
-        {['overview', 'sync', 'players', 'teams', 'users', 'draft', 'settings'].map(tab => (
+        {['overview', 'sync', 'players', 'teams', 'users', 'auction', 'settings'].map(tab => (
           <button 
             key={tab}
             className={`nav-tab ${activeTab === tab ? 'active' : ''}`}
@@ -3504,7 +2934,7 @@ const AdminPanel = ({ user, tournament, players: playersProp, draftType: parentD
             {tab === 'players' && '👥 '}
             {tab === 'teams' && '🏏 '}
             {tab === 'users' && '👤 '}
-            {tab === 'draft' && '📝 '}
+            {tab === 'auction' && '🎯 '}
             {tab === 'settings' && '⚙️ '}
             {tab.charAt(0).toUpperCase() + tab.slice(1)}
           </button>
@@ -4776,7 +4206,86 @@ const AdminPanel = ({ user, tournament, players: playersProp, draftType: parentD
               </div>
             </div>
             
-            <div className="player-list-admin">
+            {/* JSON Import Section */}
+            <div className="import-players-section" style={{ marginTop: '20px', padding: '20px', background: 'var(--bg-card)', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+                <h3 style={{ margin: 0 }}>📥 Import Players (JSON)</h3>
+                <button 
+                  className="btn-small btn-secondary"
+                  onClick={() => setShowImportModal(!showImportModal)}
+                >
+                  {showImportModal ? 'Hide' : 'Show'} Import Panel
+                </button>
+              </div>
+              
+              {showImportModal && (
+                <div style={{ marginTop: '15px' }}>
+                  <p style={{ color: 'var(--text-secondary)', marginBottom: '10px' }}>
+                    Paste JSON array of players. They will be added to the player database.
+                  </p>
+                  <textarea
+                    value={importJson}
+                    onChange={(e) => setImportJson(e.target.value)}
+                    placeholder='[{"name": "Player Name", "team": "IND", "position": "batter"}]'
+                    style={{ 
+                      width: '100%', 
+                      height: '150px', 
+                      padding: '12px', 
+                      borderRadius: '8px', 
+                      border: '1px solid var(--border-color)', 
+                      background: 'var(--bg-input)', 
+                      color: 'var(--text-primary)',
+                      fontFamily: 'monospace',
+                      fontSize: '0.9rem',
+                      resize: 'vertical'
+                    }}
+                  />
+                  <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
+                    <button className="btn-primary" onClick={async () => {
+                      try {
+                        const parsed = JSON.parse(importJson);
+                        const playersToAdd = Array.isArray(parsed) ? parsed : (parsed.players || []);
+                        let added = 0;
+                        for (const p of playersToAdd) {
+                          if (p.name && p.position) {
+                            await playersAPI.create({
+                              name: p.name,
+                              team: p.team || '',
+                              position: p.position,
+                              tournamentId: tournament.id
+                            });
+                            added++;
+                          }
+                        }
+                        alert(`Successfully imported ${added} players!`);
+                        setImportJson('');
+                        refetchPlayers();
+                      } catch (err) {
+                        console.error('Import error:', err);
+                        alert('Failed to import: ' + (err.message || 'Invalid JSON'));
+                      }
+                    }}>
+                      Import to Database
+                    </button>
+                    <button className="btn-secondary" onClick={() => setImportJson('')}>
+                      Clear
+                    </button>
+                  </div>
+                  
+                  <div style={{ marginTop: '15px', padding: '12px', background: 'var(--bg-dark)', borderRadius: '6px' }}>
+                    <strong style={{ color: 'var(--accent)', fontSize: '0.9rem' }}>Example JSON Format:</strong>
+                    <pre style={{ marginTop: '8px', fontSize: '0.8rem', color: '#a5d6a7', overflow: 'auto' }}>{`[
+  {"name": "Virat Kohli", "team": "IND", "position": "batter"},
+  {"name": "Jasprit Bumrah", "team": "IND", "position": "bowler"},
+  {"name": "Hardik Pandya", "team": "IND", "position": "allrounder"},
+  {"name": "Rishabh Pant", "team": "IND", "position": "keeper"}
+]`}</pre>
+                  </div>
+                </div>
+              )}
+            </div>
+            
+            <div className="player-list-admin" style={{ marginTop: '20px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <h3>📋 Player Pool ({players.length} players)</h3>
                 <button className="btn-small btn-secondary" onClick={refetchPlayers} disabled={playersLoading}>
@@ -4998,68 +4507,35 @@ const AdminPanel = ({ user, tournament, players: playersProp, draftType: parentD
           </div>
         )}
         
-        {activeTab === 'draft' && (
+        {activeTab === 'auction' && (
           <div className="admin-draft">
-            <h3>📝 Draft Management</h3>
-            
-            {/* Draft Type Selection - Only for WC and IPL */}
-            {supportsAuction && draftStatus === 'pending' && (
-              <div className="draft-type-selection" style={{ marginBottom: '20px' }}>
-                <div 
-                  className={`draft-type-card ${selectedDraftType === 'snake' ? 'selected' : ''}`}
-                  onClick={() => setSelectedDraftType('snake')}
-                >
-                  <div className="icon">🐍</div>
-                  <h4>Snake Draft</h4>
-                  <p>Turn-based picking in reverse order each round</p>
-                </div>
-                <div 
-                  className={`draft-type-card ${selectedDraftType === 'auction' ? 'selected' : ''}`}
-                  onClick={() => setSelectedDraftType('auction')}
-                >
-                  <div className="icon">🎯</div>
-                  <h4>Auction</h4>
-                  <p>Bid on players with ₹129 Cr budget</p>
-                </div>
-              </div>
-            )}
+            <h3>🎯 Auction Management</h3>
             
             <div className="draft-status-card">
               <div className={`status-indicator ${draftStatus}`}>
-                {draftStatus === 'pending' && '⏸️ Pending - Draft not yet open'}
+                {draftStatus === 'pending' && '⏸️ Pending - Auction not yet open'}
                 {draftStatus === 'open' && '🟢 Open - Teams can register'}
-                {draftStatus === 'in_progress' && (selectedDraftType === 'auction' ? '🔴 In Progress - Auction running' : '🔴 In Progress - Snake draft running')}
+                {draftStatus === 'in_progress' && '🔴 In Progress - Auction running'}
                 {draftStatus === 'completed' && '✅ Completed - Season active'}
               </div>
               
               <div className="draft-info">
-                <p><strong>Registered Teams:</strong> {allTeams?.length || 0}</p>
+                <p><strong>Registered Franchises:</strong> {allTeams?.length || 0}</p>
                 <p><strong>Players Available:</strong> {players.length}</p>
-                {supportsAuction && <p><strong>Draft Type:</strong> {selectedDraftType === 'auction' ? '🎯 Auction' : '🐍 Snake'}</p>}
+                <p><strong>Budget per Team:</strong> ₹129 Cr</p>
               </div>
               
               <div className="draft-controls">
-                <h4>Draft Actions</h4>
+                <h4>Auction Actions</h4>
                 
                 <div className="draft-buttons">
                   {draftStatus === 'pending' && (
                     <button className="btn-primary btn-large" onClick={handleStartDraft}>
-                      🚀 Open Draft Registration
+                      🚀 Open Auction Registration
                     </button>
                   )}
                   
-                  {draftStatus === 'open' && selectedDraftType === 'snake' && (
-                    <>
-                      <button className="btn-primary btn-large" onClick={handleBeginDraft}>
-                        ▶️ Start Snake Draft
-                      </button>
-                      <button className="btn-secondary" onClick={() => setDraftStatus('pending')}>
-                        ⏪ Close Registration
-                      </button>
-                    </>
-                  )}
-                  
-                  {draftStatus === 'open' && selectedDraftType === 'auction' && (
+                  {draftStatus === 'open' && (
                     <>
                       {!auctionState ? (
                         <button 
@@ -5084,18 +4560,7 @@ const AdminPanel = ({ user, tournament, players: playersProp, draftType: parentD
                     </>
                   )}
                   
-                  {draftStatus === 'in_progress' && selectedDraftType === 'snake' && (
-                    <>
-                      <button className="btn-primary btn-large" onClick={handleCompleteDraft}>
-                        ✅ Complete Draft
-                      </button>
-                      <button className="btn-secondary" onClick={handleResetDraft}>
-                        🔄 Reset Draft (Keep Teams)
-                      </button>
-                    </>
-                  )}
-                  
-                  {draftStatus === 'in_progress' && selectedDraftType === 'auction' && (
+                  {draftStatus === 'in_progress' && (
                     <div className="auction-admin-controls">
                       <h4>🎯 Auction Controls</h4>
                       <div className="auction-control-buttons">
@@ -5267,27 +4732,27 @@ const AdminPanel = ({ user, tournament, players: playersProp, draftType: parentD
                       {/* ============ ROUNDS PANEL ============ */}
                       {showRoundsPanel && (
                         <div className="rounds-panel" style={{ background: 'var(--bg-card)', padding: '20px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
-                          <h5 style={{ marginBottom: '15px', color: 'var(--text-primary)' }}>Auction Rounds</h5>
-                          
-                          {/* Create New Round */}
-                          <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
-                            <input 
-                              type="text"
-                              value={newRoundName}
-                              onChange={(e) => setNewRoundName(e.target.value)}
-                              placeholder="Round name (e.g., Marquee Players, Capped, Uncapped)"
-                              style={{ flex: 1, padding: '10px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-primary)' }}
-                            />
-                            <button className="btn-primary btn-small" onClick={handleCreateRound}>
-                              + Add Round
-                            </button>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+                            <h5 style={{ margin: 0, color: 'var(--text-primary)' }}>Auction Rounds (Batsmen → Allrounders → Bowlers)</h5>
+                            {auctionRounds.length === 0 && (
+                              <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                                Click "Setup Auction" to create rounds
+                              </span>
+                            )}
                           </div>
                           
                           {/* Rounds List */}
                           {auctionRounds.length === 0 ? (
-                            <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '20px' }}>
-                              No rounds created yet. Create rounds and import players to begin.
-                            </p>
+                            <div style={{ padding: '30px', textAlign: 'center', background: 'var(--bg-dark)', borderRadius: '8px' }}>
+                              <p style={{ color: 'var(--text-muted)', marginBottom: '15px' }}>
+                                No rounds created yet. Click "Setup Auction" to auto-create:
+                              </p>
+                              <div style={{ display: 'flex', justifyContent: 'center', gap: '15px', flexWrap: 'wrap' }}>
+                                <span style={{ padding: '8px 16px', background: 'var(--bg-input)', borderRadius: '20px', color: 'var(--accent)' }}>1. Batsmen</span>
+                                <span style={{ padding: '8px 16px', background: 'var(--bg-input)', borderRadius: '20px', color: 'var(--accent)' }}>2. Allrounders</span>
+                                <span style={{ padding: '8px 16px', background: 'var(--bg-input)', borderRadius: '20px', color: 'var(--accent)' }}>3. Bowlers</span>
+                              </div>
+                            </div>
                           ) : (
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                               {auctionRounds.map(round => (
@@ -5380,6 +4845,77 @@ const AdminPanel = ({ user, tournament, players: playersProp, draftType: parentD
                                   </table>
                                 </div>
                               )}
+                              
+                              {/* Add Player to Round */}
+                              <div style={{ marginTop: '15px' }}>
+                                <button 
+                                  className="btn-small btn-secondary"
+                                  onClick={() => setShowAddPlayerToRound(!showAddPlayerToRound)}
+                                >
+                                  {showAddPlayerToRound ? '✖ Hide' : '➕ Add Player to Round'}
+                                </button>
+                                
+                                {showAddPlayerToRound && (
+                                  <div style={{ marginTop: '10px', padding: '12px', background: 'var(--bg-card)', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                                    <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap' }}>
+                                      <label style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Base Price:</label>
+                                      <select 
+                                        value={addPlayerBasePrice} 
+                                        onChange={(e) => setAddPlayerBasePrice(parseInt(e.target.value))}
+                                        style={{ padding: '6px 10px', borderRadius: '4px', background: 'var(--bg-input)', color: 'var(--text-primary)', border: '1px solid var(--border-color)' }}
+                                      >
+                                        <option value={2000000}>₹20 Lakhs</option>
+                                        <option value={5000000}>₹50 Lakhs</option>
+                                        <option value={10000000}>₹1 Crore</option>
+                                        <option value={15000000}>₹1.5 Crores</option>
+                                        <option value={20000000}>₹2 Crores</option>
+                                      </select>
+                                    </div>
+                                    
+                                    <div style={{ maxHeight: '200px', overflow: 'auto' }}>
+                                      {getAvailablePlayersForRound(selectedRound).length === 0 ? (
+                                        <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '10px' }}>
+                                          No matching players available. Add players in the Players tab first.
+                                        </p>
+                                      ) : (
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                          {getAvailablePlayersForRound(selectedRound).slice(0, 20).map(player => (
+                                            <div 
+                                              key={player.id}
+                                              style={{ 
+                                                display: 'flex', 
+                                                justifyContent: 'space-between', 
+                                                alignItems: 'center',
+                                                padding: '8px 10px',
+                                                background: 'var(--bg-input)',
+                                                borderRadius: '6px'
+                                              }}
+                                            >
+                                              <div>
+                                                <span style={{ fontWeight: '500', color: 'var(--text-primary)' }}>{player.name}</span>
+                                                <span style={{ marginLeft: '8px', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                                                  {player.team} • {player.position}
+                                                </span>
+                                              </div>
+                                              <button 
+                                                className="btn-small btn-primary"
+                                                onClick={() => handleAddPlayerToRound(player)}
+                                              >
+                                                + Add
+                                              </button>
+                                            </div>
+                                          ))}
+                                          {getAvailablePlayersForRound(selectedRound).length > 20 && (
+                                            <p style={{ color: 'var(--text-muted)', textAlign: 'center', fontSize: '0.85rem' }}>
+                                              Showing first 20 of {getAvailablePlayersForRound(selectedRound).length} players
+                                            </p>
+                                          )}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
                             </div>
                           )}
                         </div>
@@ -7929,7 +7465,7 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
               <ul>
                 <li className={team.roster.length > 0 ? 'checked' : ''}>
                   <span className="check-icon">{team.roster.length > 0 ? '✓' : '○'}</span>
-                  Complete snake draft ({team.roster.length}/{TOTAL_ROSTER_SIZE} players)
+                  Complete auction ({team.roster.length}/{TOTAL_ROSTER_SIZE} players)
                 </li>
                 <li className={apiTestStatus?.status === 'success' ? 'checked' : ''}>
                   <span className="check-icon">{apiTestStatus?.status === 'success' ? '✓' : '○'}</span>
@@ -8012,7 +7548,7 @@ export default function App() {
   const [team, setTeam] = useState(null);
   const [isDraftComplete, setIsDraftComplete] = useState(false);
   const [isDraftOpen, setIsDraftOpen] = useState(false);
-  const [draftType, setDraftType] = useState('snake'); // 'snake' or 'auction'
+  const [draftType, setDraftType] = useState('auction'); // Always auction now
   const [allTeams, setAllTeams] = useState([]);
   const [allUsers, setAllUsers] = useState([]);
   const [players, setPlayers] = useState([]); // Players loaded from API
@@ -8423,7 +7959,6 @@ export default function App() {
         />
       )}
       {currentPage === 'draft' && (
-        draftType === 'auction' ? (
           <AuctionPage
             team={team}
             tournament={selectedTournament}
@@ -8432,21 +7967,11 @@ export default function App() {
             onDraftComplete={handleDraftComplete}
             onUpdateTeam={handleUpdateTeam}
           />
-        ) : (
-          <SnakeDraftPage
-            team={team}
-            tournament={selectedTournament}
-            players={playerPool}
-            allTeams={allTeams}
-            onDraftComplete={handleDraftComplete}
-            onUpdateTeam={handleUpdateTeam}
-          />
-        )
       )}
       {currentPage === 'admin' && user?.isAdmin && (
         <AdminPanel
           user={user}
-          tournament={selectedTournament || TOURNAMENTS.test_ind_nz}
+          tournament={selectedTournament || TOURNAMENTS.t20_wc_2026}
           players={playerPool}
           draftType={draftType}
           onSetDraftType={setDraftType}
