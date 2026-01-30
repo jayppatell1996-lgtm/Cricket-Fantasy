@@ -44,8 +44,8 @@ const TOURNAMENTS = {
   },
 };
 
-// Default Team Purse: ₹129 Crores
-const DEFAULT_TEAM_PURSE = 129000000;
+// Default Team Purse: $120 Million
+const DEFAULT_TEAM_PURSE = 120000000;
 
 // Trading Window Configuration
 // Trading window: 8 PM MST (previous day) to game start time
@@ -989,7 +989,7 @@ const TeamCreationPage = ({ user, tournament, onTeamCreated }) => {
           
           <div className="draft-info">
             <h3>🎯 Auction Draft</h3>
-            <p>Bid on players in rounds: Batsmen, Allrounders, Bowlers. Budget: ₹129 Cr per team.</p>
+            <p>Bid on players in rounds: Batsmen, Allrounders, Bowlers. Budget: $120M per team.</p>
           </div>
           
           <button type="submit" className="btn-primary btn-large" disabled={loading}>
@@ -1028,7 +1028,7 @@ const AuctionPage = ({ team, tournament, players, allTeams, onDraftComplete, onU
         id: t.id,
         name: t.name,
         owner: t.owner,
-        purse: t.purse || 129000000,
+        purse: t.purse || 120000000,
         rosterCount: t.rosterCount || 0,
         isUser: t.id === team?.id
       })).sort((a, b) => b.purse - a.purse);
@@ -1039,7 +1039,7 @@ const AuctionPage = ({ team, tournament, players, allTeams, onDraftComplete, onU
         id: t.id,
         name: t.name,
         owner: t.owner,
-        purse: t.purse || 129000000,
+        purse: t.purse || 120000000,
         rosterCount: t.roster?.length || 0,
         isUser: t.id === team?.id
       }))
@@ -1048,10 +1048,10 @@ const AuctionPage = ({ team, tournament, players, allTeams, onDraftComplete, onU
 
   // Format currency in Lakhs/Crores
   const formatMoney = (amount) => {
-    if (!amount) return '₹0';
-    if (amount >= 10000000) return `₹${(amount / 10000000).toFixed(2)} Cr`;
-    if (amount >= 100000) return `₹${(amount / 100000).toFixed(1)} L`;
-    return `₹${amount.toLocaleString()}`;
+    if (!amount) return '$0';
+    if (amount >= 1000000) return `$${(amount / 1000000).toFixed(2)}M`;
+    if (amount >= 1000) return `$${(amount / 1000).toFixed(0)}K`;
+    return `$${amount.toLocaleString()}`;
   };
 
   // Load auction state
@@ -1392,7 +1392,7 @@ const AuctionPage = ({ team, tournament, players, allTeams, onDraftComplete, onU
           
           <div className="team-info-card">
             <h4>Your Team: {team?.name}</h4>
-            <p>Starting Purse: {formatMoney(129000000)}</p>
+            <p>Starting Purse: {formatMoney(120000000)}</p>
             <p>Roster Slots: 12 players</p>
           </div>
         </div>
@@ -2309,10 +2309,10 @@ const AdminPanel = ({ user, tournament, players: playersProp, draftType: parentD
   
   // Format currency in Crores/Lakhs
   const formatCurrency = (amount) => {
-    if (!amount) return '₹0';
-    if (amount >= 10000000) return `₹${(amount / 10000000).toFixed(2)} Cr`;
-    if (amount >= 100000) return `₹${(amount / 100000).toFixed(1)} L`;
-    return `₹${amount.toLocaleString()}`;
+    if (!amount) return '$0';
+    if (amount >= 1000000) return `$${(amount / 1000000).toFixed(2)}M`;
+    if (amount >= 1000) return `$${(amount / 1000).toFixed(0)}K`;
+    return `$${amount.toLocaleString()}`;
   };
   
   // Load draft logs when draft tab is opened or draft is completed
@@ -2375,7 +2375,7 @@ const AdminPanel = ({ user, tournament, players: playersProp, draftType: parentD
   }, [tournament.id, supportsAuction]);
   
   const handleSetupAuction = async () => {
-    if (!window.confirm('Setup auction for this league? This will:\n- Set team budgets to ₹129 Cr\n- Create rounds: Batsmen, Allrounders, Bowlers\n- Auto-populate rounds from player pool')) return;
+    if (!window.confirm('Setup auction for this league? This will:\n- Set team budgets to $120M\n- Create rounds: Batsmen, Allrounders, Bowlers\n- Auto-populate rounds from player pool')) return;
     
     setAuctionLoading(true);
     try {
@@ -2384,7 +2384,7 @@ const AdminPanel = ({ user, tournament, players: playersProp, draftType: parentD
         const league = leaguesResponse.leagues[0];
         
         // Setup auction state and budgets
-        const response = await auctionAPI.setup(league.id, tournament.id, 129000000);
+        const response = await auctionAPI.setup(league.id, tournament.id, 120000000);
         if (!response.success) {
           alert(response.error || 'Failed to setup auction');
           return;
@@ -2407,7 +2407,7 @@ const AdminPanel = ({ user, tournament, players: playersProp, draftType: parentD
               team: p.team,
               position: p.position,
               category: roundDef.name,
-              base_price: 2000000 // Default ₹20 Lakhs base price
+              base_price: 2000000 // Default $2M base price
             }));
             
             // Import players to this round
@@ -2417,7 +2417,7 @@ const AdminPanel = ({ user, tournament, players: playersProp, draftType: parentD
           }
         }
         
-        alert(`Auction setup complete!\n- Teams have ₹129 Cr budget\n- Created 3 rounds with ${players.length} players auto-assigned`);
+        alert(`Auction setup complete!\n- Teams have $120M budget\n- Created 3 rounds with ${players.length} players auto-assigned`);
         loadAuctionState();
         loadAuctionRounds();
       }
@@ -4221,12 +4221,12 @@ const AdminPanel = ({ user, tournament, players: playersProp, draftType: parentD
               {showImportModal && (
                 <div style={{ marginTop: '15px' }}>
                   <p style={{ color: 'var(--text-secondary)', marginBottom: '10px' }}>
-                    Paste JSON array of players. They will be added to the player database.
+                    Paste JSON array of players with base prices. They will be added to the player database.
                   </p>
                   <textarea
                     value={importJson}
                     onChange={(e) => setImportJson(e.target.value)}
-                    placeholder='[{"name": "Player Name", "team": "IND", "position": "batter"}]'
+                    placeholder='[{"name": "Player Name", "team": "IND", "position": "batter", "base_price": 2000000}]'
                     style={{ 
                       width: '100%', 
                       height: '150px', 
@@ -4252,6 +4252,7 @@ const AdminPanel = ({ user, tournament, players: playersProp, draftType: parentD
                               name: p.name,
                               team: p.team || '',
                               position: p.position,
+                              basePrice: p.base_price || p.basePrice || 2000000,
                               tournamentId: tournament.id
                             });
                             added++;
@@ -4275,11 +4276,13 @@ const AdminPanel = ({ user, tournament, players: playersProp, draftType: parentD
                   <div style={{ marginTop: '15px', padding: '12px', background: 'var(--bg-dark)', borderRadius: '6px' }}>
                     <strong style={{ color: 'var(--accent)', fontSize: '0.9rem' }}>Example JSON Format:</strong>
                     <pre style={{ marginTop: '8px', fontSize: '0.8rem', color: '#a5d6a7', overflow: 'auto' }}>{`[
-  {"name": "Virat Kohli", "team": "IND", "position": "batter"},
-  {"name": "Jasprit Bumrah", "team": "IND", "position": "bowler"},
-  {"name": "Hardik Pandya", "team": "IND", "position": "allrounder"},
-  {"name": "Rishabh Pant", "team": "IND", "position": "keeper"}
-]`}</pre>
+  {"name": "Virat Kohli", "team": "IND", "position": "batter", "base_price": 2000000},
+  {"name": "Jasprit Bumrah", "team": "IND", "position": "bowler", "base_price": 2000000},
+  {"name": "Hardik Pandya", "team": "IND", "position": "allrounder", "base_price": 1500000},
+  {"name": "Rishabh Pant", "team": "IND", "position": "keeper", "base_price": 1000000}
+]
+
+// base_price is in dollars (2000000 = $2M)`}</pre>
                   </div>
                 </div>
               )}
@@ -4522,7 +4525,7 @@ const AdminPanel = ({ user, tournament, players: playersProp, draftType: parentD
               <div className="draft-info">
                 <p><strong>Registered Franchises:</strong> {allTeams?.length || 0}</p>
                 <p><strong>Players Available:</strong> {players.length}</p>
-                <p><strong>Budget per Team:</strong> ₹129 Cr</p>
+                <p><strong>Budget per Team:</strong> $120M</p>
               </div>
               
               <div className="draft-controls">
@@ -4607,7 +4610,7 @@ const AdminPanel = ({ user, tournament, players: playersProp, draftType: parentD
                       {auctionState?.currentPlayer && (
                         <div style={{ marginTop: '15px', padding: '15px', background: 'var(--bg-input)', borderRadius: '8px' }}>
                           <p><strong>Current Player:</strong> {auctionState.currentPlayer.name}</p>
-                          <p><strong>Current Bid:</strong> ₹{((auctionState.currentBid || 0) / 100000).toFixed(1)}L</p>
+                          <p><strong>Current Bid:</strong> ${formatCurrency(auctionState.currentBid || 0)}</p>
                           {auctionState.highestBidder && (
                             <p><strong>Leading:</strong> {auctionState.highestBidder.teamName}</p>
                           )}
@@ -4679,7 +4682,7 @@ const AdminPanel = ({ user, tournament, players: playersProp, draftType: parentD
                                         onClick={() => setEditingPlayerPrice({ id: player.id, basePrice: player.basePrice })}
                                         title="Click to edit base price"
                                       >
-                                        ₹{((player.basePrice || 100000) / 100000).toFixed(1)}L
+                                        ${formatCurrency(player.basePrice || 100000)}
                                       </span>
                                     )}
                                     <div style={{ display: 'flex', gap: '4px' }}>
@@ -4864,11 +4867,13 @@ const AdminPanel = ({ user, tournament, players: playersProp, draftType: parentD
                                         onChange={(e) => setAddPlayerBasePrice(parseInt(e.target.value))}
                                         style={{ padding: '6px 10px', borderRadius: '4px', background: 'var(--bg-input)', color: 'var(--text-primary)', border: '1px solid var(--border-color)' }}
                                       >
-                                        <option value={2000000}>₹20 Lakhs</option>
-                                        <option value={5000000}>₹50 Lakhs</option>
-                                        <option value={10000000}>₹1 Crore</option>
-                                        <option value={15000000}>₹1.5 Crores</option>
-                                        <option value={20000000}>₹2 Crores</option>
+                                        <option value={500000}>$500K</option>
+                                        <option value={1000000}>$1M</option>
+                                        <option value={2000000}>$2M</option>
+                                        <option value={5000000}>$5M</option>
+                                        <option value={10000000}>$10M</option>
+                                        <option value={15000000}>$15M</option>
+                                        <option value={20000000}>$20M</option>
                                       </select>
                                     </div>
                                     
@@ -5122,7 +5127,7 @@ const AdminPanel = ({ user, tournament, players: playersProp, draftType: parentD
 // Notes:
 // - position: "batter", "bowler", "allrounder", "keeper"
 // - category: Custom label (e.g., "Marquee", "Capped", "Uncapped")
-// - base_price: Amount in paisa (20000000 = ₹2 Cr)
+// - base_price: Amount in dollars (2000000 = $2M)
 // - team: Optional - real IPL/national team code`}</pre>
                             </div>
                           </div>

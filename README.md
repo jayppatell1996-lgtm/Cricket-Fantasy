@@ -8,7 +8,7 @@ Full-featured fantasy cricket application with auction-style drafting, live scor
 - T20 World Cup 2026 (India & Sri Lanka)
 - IPL 2026
 
-### Auction System (₹129 Cr Budget)
+### Auction System ($120M Budget)
 - **Predefined Rounds**: Batsmen → Allrounders → Bowlers
 - **Auto-Setup**: Click "Setup Auction" to create all rounds and auto-populate players
 - **Live Bidding**: Real-time auction with timer and progressive bid increments
@@ -28,18 +28,20 @@ Full-featured fantasy cricket application with auction-style drafting, live scor
 
 ```json
 [
-  {"name": "Virat Kohli", "team": "IND", "position": "batter"},
-  {"name": "Jasprit Bumrah", "team": "IND", "position": "bowler"},
-  {"name": "Hardik Pandya", "team": "IND", "position": "allrounder"},
-  {"name": "Rishabh Pant", "team": "IND", "position": "keeper"}
+  {"name": "Virat Kohli", "team": "IND", "position": "batter", "base_price": 2000000},
+  {"name": "Jasprit Bumrah", "team": "IND", "position": "bowler", "base_price": 2000000},
+  {"name": "Hardik Pandya", "team": "IND", "position": "allrounder", "base_price": 1500000},
+  {"name": "Rishabh Pant", "team": "IND", "position": "keeper", "base_price": 1000000}
 ]
 ```
+
+**Note**: `base_price` is in dollars (2000000 = $2M)
 
 See `data/sample_auction_players.json` for complete examples.
 
 ## Auction Workflow
 
-1. **Players Tab**: Import players to the database
+1. **Players Tab**: Import players to the database (with base_price)
 2. **Auction Tab**: 
    - Add franchises (team name + owner)
    - Click "Open Auction Registration" 
@@ -54,8 +56,8 @@ See `data/sample_auction_players.json` for complete examples.
 
 1. Clone and install: `npm install`
 2. Set up environment variables in `.env`
-3. Run migrations: `npx drizzle-kit push:sqlite`
-4. Start dev server: `npm run dev`
+3. Start dev server: `npm run dev`
+4. Go to Admin Panel → Auction → Setup Auction
 
 ## Tech Stack
 - React + Vite

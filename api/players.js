@@ -136,7 +136,7 @@ export default async function handler(req, res) {
     // POST - Create player(s)
     // ============================================
     if (req.method === 'POST') {
-      const { players, tournamentId, name, team, position } = req.body;
+      const { players, tournamentId, name, team, position, basePrice } = req.body;
 
       // Bulk insert
       if (players && Array.isArray(players)) {
@@ -144,11 +144,12 @@ export default async function handler(req, res) {
 
         for (const p of players) {
           const pid = p.id || generateId();
+          const playerPrice = p.base_price || p.basePrice || p.price || 2000000;
           try {
             await db.execute({
               sql: `INSERT OR REPLACE INTO players (id, name, team, position, tournament_id, price, avg_points, total_points, matches_played, is_active, is_injured)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)`,
-              args: [pid, p.name, p.team, p.position, tournamentId || p.tournamentId, p.price || 0, p.avgPoints || 0, p.totalPoints || 0, p.matchesPlayed || 0]
+              args: [pid, p.name, p.team, p.position, tournamentId || p.tournamentId, playerPrice, p.avgPoints || 0, p.totalPoints || 0, p.matchesPlayed || 0]
             });
             inserted++;
           } catch (err) {
@@ -165,11 +166,12 @@ export default async function handler(req, res) {
       }
 
       const playerId = generateId();
+      const playerPrice = basePrice || 2000000;
 
       await db.execute({
         sql: `INSERT INTO players (id, name, team, position, tournament_id, price, avg_points, total_points, matches_played, is_active, is_injured)
-              VALUES (?, ?, ?, ?, ?, 0, 0, 0, 0, 1, 0)`,
-        args: [playerId, name, team, position, tournamentId]
+              VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, 1, 0)`,
+        args: [playerId, name, team, position, tournamentId, playerPrice]
       });
 
       return res.status(201).json({ success: true, playerId });

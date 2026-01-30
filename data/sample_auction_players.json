@@ -4,7 +4,7 @@
     "Copy the 'players' array and paste into the import modal",
     "position: 'batter', 'bowler', 'allrounder', 'keeper'",
     "category: Custom label (e.g., 'Marquee', 'Capped', 'Uncapped')",
-    "base_price: Amount in paisa (20000000 = ₹2 Cr, 10000000 = ₹1 Cr)",
+    "base_price: Amount in dollars (20000000 = $20M, 2000000 = $2M)",
     "team: Optional - real IPL/national team code"
   ],
   

@@ -88,29 +88,29 @@ function releaseControlLock() {
 
 // Calculate bid increment based on current bid (IPL-style in Crores/Lakhs)
 function getBidIncrement(currentBid) {
-  if (currentBid >= 150000000) return 10000000;   // ₹15Cr+ -> ₹1Cr increment
-  if (currentBid >= 100000000) return 5000000;    // ₹10Cr+ -> ₹50L increment
-  if (currentBid >= 50000000) return 2500000;     // ₹5Cr+ -> ₹25L increment
-  if (currentBid >= 20000000) return 1000000;     // ₹2Cr+ -> ₹10L increment
-  if (currentBid >= 10000000) return 500000;      // ₹1Cr+ -> ₹5L increment
-  if (currentBid >= 5000000) return 250000;       // ₹50L+ -> ₹2.5L increment
-  return 100000;                                   // Base -> ₹1L increment
+  if (currentBid >= 150000000) return 10000000;   // $150M+ -> $10M increment
+  if (currentBid >= 100000000) return 5000000;    // $100M+ -> $5M increment
+  if (currentBid >= 50000000) return 2500000;     // $50M+ -> $2.5M increment
+  if (currentBid >= 20000000) return 1000000;     // $20M+ -> $1M increment
+  if (currentBid >= 10000000) return 500000;      // $10M+ -> $500K increment
+  if (currentBid >= 5000000) return 250000;       // $5M+ -> $250K increment
+  return 100000;                                   // Base -> $100K increment
 }
 
 // Timer settings
 const INITIAL_TIMER = 15000;  // 15 seconds for first bid
 const BID_TIMER = 10000;      // 10 seconds after each bid
 
-// Default starting purse: ₹129 Crore
-const DEFAULT_PURSE = 129000000;
-const DEFAULT_BASE_PRICE = 2000000; // ₹20 Lakhs
+// Default starting purse: $120 Million
+const DEFAULT_PURSE = 120000000;
+const DEFAULT_BASE_PRICE = 2000000; // $2M default
 
 // Format currency
 function formatCurrency(amount) {
-  if (!amount) return '₹0';
-  if (amount >= 10000000) return `₹${(amount / 10000000).toFixed(2)} Cr`;
-  if (amount >= 100000) return `₹${(amount / 100000).toFixed(1)} L`;
-  return `₹${amount.toLocaleString()}`;
+  if (!amount) return '$0';
+  if (amount >= 1000000) return `$${(amount / 1000000).toFixed(2)}M`;
+  if (amount >= 1000) return `$${(amount / 1000).toFixed(0)}K`;
+  return `$${amount.toLocaleString()}`;
 }
 
 // Log action helper
@@ -129,70 +129,75 @@ async function logAction(db, leagueId, roundId, message, logType, teamId = null,
 // Run migrations for Phase 3 (rounds-based auction)
 async function runMigrations(db) {
   try {
-    // Check if auction_rounds table exists
-    const tableCheck = await db.execute({
-      sql: `SELECT name FROM sqlite_master WHERE type='table' AND name='auction_rounds'`
-    });
+    // Ensure all auction tables exist first
+    await db.execute({ sql: `CREATE TABLE IF NOT EXISTS auction_state (
+      id text PRIMARY KEY NOT NULL,
+      league_id text NOT NULL UNIQUE,
+      is_active integer DEFAULT 0,
+      is_paused integer DEFAULT 0,
+      current_player_id text,
+      current_bid real DEFAULT 0,
+      highest_bidder_team_id text,
+      timer_end_time integer,
+      paused_time_remaining integer,
+      current_round_id text,
+      created_at text DEFAULT CURRENT_TIMESTAMP,
+      updated_at text DEFAULT CURRENT_TIMESTAMP
+    )` });
     
-    if (tableCheck.rows.length === 0) {
-      await db.execute({
-        sql: `CREATE TABLE auction_rounds (
-          id text PRIMARY KEY NOT NULL,
-          league_id text NOT NULL,
-          round_number integer NOT NULL,
-          name text NOT NULL,
-          is_active integer DEFAULT 0,
-          is_completed integer DEFAULT 0,
-          created_at text DEFAULT CURRENT_TIMESTAMP,
-          FOREIGN KEY (league_id) REFERENCES leagues(id) ON DELETE CASCADE
-        )`
-      });
-      console.log('Created auction_rounds table');
-    }
+    await db.execute({ sql: `CREATE TABLE IF NOT EXISTS auction_players (
+      id text PRIMARY KEY NOT NULL,
+      league_id text NOT NULL,
+      round_id text,
+      player_id text NOT NULL,
+      player_name text NOT NULL,
+      player_team text NOT NULL,
+      player_position text NOT NULL,
+      category text,
+      base_price real NOT NULL DEFAULT 2000000,
+      status text DEFAULT 'pending' NOT NULL,
+      sold_to_team_id text,
+      sold_for real,
+      sold_at text,
+      order_index integer NOT NULL DEFAULT 0,
+      created_at text DEFAULT CURRENT_TIMESTAMP
+    )` });
     
-    // Add round_id to auction_state if missing
-    try {
-      await db.execute({ sql: `SELECT current_round_id FROM auction_state LIMIT 1` });
-    } catch (e) {
-      await db.execute({ sql: `ALTER TABLE auction_state ADD COLUMN current_round_id text` });
-    }
+    await db.execute({ sql: `CREATE TABLE IF NOT EXISTS auction_rounds (
+      id text PRIMARY KEY NOT NULL,
+      league_id text NOT NULL,
+      round_number integer NOT NULL,
+      name text NOT NULL,
+      is_active integer DEFAULT 0,
+      is_completed integer DEFAULT 0,
+      created_at text DEFAULT CURRENT_TIMESTAMP
+    )` });
     
-    // Add round_id to auction_players if missing
-    try {
-      await db.execute({ sql: `SELECT round_id FROM auction_players LIMIT 1` });
-    } catch (e) {
-      await db.execute({ sql: `ALTER TABLE auction_players ADD COLUMN round_id text` });
-    }
+    await db.execute({ sql: `CREATE TABLE IF NOT EXISTS auction_logs (
+      id text PRIMARY KEY NOT NULL,
+      league_id text NOT NULL,
+      round_id text,
+      log_type text NOT NULL,
+      message text NOT NULL,
+      team_id text,
+      player_id text,
+      amount real,
+      timestamp text DEFAULT CURRENT_TIMESTAMP
+    )` });
     
-    // Add category to auction_players if missing
-    try {
-      await db.execute({ sql: `SELECT category FROM auction_players LIMIT 1` });
-    } catch (e) {
-      await db.execute({ sql: `ALTER TABLE auction_players ADD COLUMN category text` });
-    }
+    await db.execute({ sql: `CREATE TABLE IF NOT EXISTS unsold_players (
+      id text PRIMARY KEY NOT NULL,
+      league_id text NOT NULL,
+      player_id text NOT NULL,
+      player_name text NOT NULL,
+      player_position text NOT NULL,
+      base_price real NOT NULL,
+      original_round_id text,
+      category text,
+      created_at text DEFAULT CURRENT_TIMESTAMP
+    )` });
     
-    // Add round_id to auction_logs if missing
-    try {
-      await db.execute({ sql: `SELECT round_id FROM auction_logs LIMIT 1` });
-    } catch (e) {
-      await db.execute({ sql: `ALTER TABLE auction_logs ADD COLUMN round_id text` });
-    }
-
-    // Add category to unsold_players if missing
-    try {
-      await db.execute({ sql: `SELECT category FROM unsold_players LIMIT 1` });
-    } catch (e) {
-      await db.execute({ sql: `ALTER TABLE unsold_players ADD COLUMN category text` });
-    }
-
-    // Add original_round_id to unsold_players if missing
-    try {
-      await db.execute({ sql: `SELECT original_round_id FROM unsold_players LIMIT 1` });
-    } catch (e) {
-      await db.execute({ sql: `ALTER TABLE unsold_players ADD COLUMN original_round_id text` });
-    }
-    
-    // Update team purses to new default (129 Cr) if they have old default (5M)
+    // Update team purses to new default ($120M) if they have old default (5M)
     await db.execute({
       sql: `UPDATE fantasy_teams SET purse = ? WHERE purse = 5000000`,
       args: [DEFAULT_PURSE]
@@ -468,7 +473,7 @@ export default async function handler(req, res) {
       const { leagueId, budget = DEFAULT_PURSE } = req.body;
       if (!leagueId) return res.status(400).json({ error: 'leagueId required' });
 
-      // Create or reset auction state
+      // Create or reset auction state (tables already created by runMigrations)
       const existingState = await db.execute({
         sql: `SELECT id FROM auction_state WHERE league_id = ?`,
         args: [leagueId]
