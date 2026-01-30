@@ -9,19 +9,6 @@ import api, { authAPI, teamsAPI, playersAPI, leaguesAPI, draftAPI, rosterAPI, to
 
 // Tournament Configurations (minimal fallback - primary data comes from database)
 const TOURNAMENTS = {
-  test_ind_nz: {
-    id: 'test_ind_nz',
-    name: 'India vs NZ T20 Series 2026',
-    shortName: 'IND vs NZ T20',
-    description: 'T20 International Series',
-    startDate: '2026-01-15',
-    endDate: '2026-01-25',
-    status: 'active',
-    teams: ['IND', 'NZ'],
-    isTest: true,
-    draftStatus: 'pending',
-    matches: [], // Loaded from database/API
-  },
   t20_wc_2026: {
     id: 't20_wc_2026',
     name: 'T20 World Cup 2026',
@@ -49,6 +36,9 @@ const TOURNAMENTS = {
     matches: [], // Loaded from database/API
   },
 };
+
+// Default Team Purse: ₹129 Crores
+const DEFAULT_TEAM_PURSE = 129000000;
 
 // Trading Window Configuration
 // Trading window: 8 PM MST (previous day) to game start time
@@ -1686,7 +1676,7 @@ const AuctionPage = ({ team, tournament, players, allTeams, onDraftComplete, onU
         id: t.id,
         name: t.name,
         owner: t.owner,
-        purse: t.purse || 5000000,
+        purse: t.purse || 129000000,
         rosterCount: t.rosterCount || 0,
         isUser: t.id === team?.id
       })).sort((a, b) => b.purse - a.purse);
@@ -1697,7 +1687,7 @@ const AuctionPage = ({ team, tournament, players, allTeams, onDraftComplete, onU
         id: t.id,
         name: t.name,
         owner: t.owner,
-        purse: t.purse || 5000000,
+        purse: t.purse || 129000000,
         rosterCount: t.roster?.length || 0,
         isUser: t.id === team?.id
       }))
@@ -2050,7 +2040,7 @@ const AuctionPage = ({ team, tournament, players, allTeams, onDraftComplete, onU
           
           <div className="team-info-card">
             <h4>Your Team: {team?.name}</h4>
-            <p>Starting Purse: {formatMoney(5000000)}</p>
+            <p>Starting Purse: {formatMoney(129000000)}</p>
             <p>Roster Slots: 12 players</p>
           </div>
         </div>
@@ -2711,6 +2701,220 @@ const AdminPanel = ({ user, tournament, players: playersProp, draftType: parentD
     }
   };
   
+  // ============================================
+  // AUCTION ROUNDS MANAGEMENT STATE
+  // ============================================
+  const [auctionRounds, setAuctionRounds] = useState([]);
+  const [selectedRound, setSelectedRound] = useState(null);
+  const [roundPlayers, setRoundPlayers] = useState([]);
+  const [showRoundsPanel, setShowRoundsPanel] = useState(false);
+  const [showFranchisePanel, setShowFranchisePanel] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importJson, setImportJson] = useState('');
+  const [newRoundName, setNewRoundName] = useState('');
+  const [franchises, setFranchises] = useState([]);
+  const [newFranchiseName, setNewFranchiseName] = useState('');
+  const [newFranchiseOwner, setNewFranchiseOwner] = useState('');
+  const [editingFranchise, setEditingFranchise] = useState(null);
+  
+  // Load auction rounds
+  const loadAuctionRounds = async () => {
+    try {
+      const leaguesResponse = await leaguesAPI.getAll(tournament.id);
+      if (leaguesResponse.leagues && leaguesResponse.leagues.length > 0) {
+        const league = leaguesResponse.leagues[0];
+        const roundsResponse = await auctionAPI.getRounds(league.id);
+        if (roundsResponse.success) {
+          setAuctionRounds(roundsResponse.rounds || []);
+        }
+        // Also load franchises
+        const teamsResponse = await auctionAPI.getTeams(league.id);
+        if (teamsResponse.success) {
+          setFranchises(teamsResponse.teams || []);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load auction rounds:', err);
+    }
+  };
+  
+  // Load rounds when panel is opened
+  useEffect(() => {
+    if ((showRoundsPanel || showFranchisePanel) && selectedDraftType === 'auction') {
+      loadAuctionRounds();
+    }
+  }, [showRoundsPanel, showFranchisePanel, tournament.id, selectedDraftType]);
+  
+  // Load players for selected round
+  const loadRoundPlayers = async (roundId) => {
+    try {
+      const leaguesResponse = await leaguesAPI.getAll(tournament.id);
+      if (leaguesResponse.leagues && leaguesResponse.leagues.length > 0) {
+        const league = leaguesResponse.leagues[0];
+        const playersResponse = await auctionAPI.getPlayers(league.id);
+        if (playersResponse.success) {
+          const filtered = (playersResponse.players || []).filter(p => p.roundId === roundId);
+          setRoundPlayers(filtered);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load round players:', err);
+    }
+  };
+  
+  // Create new round
+  const handleCreateRound = async () => {
+    if (!newRoundName.trim()) return;
+    try {
+      const leaguesResponse = await leaguesAPI.getAll(tournament.id);
+      if (leaguesResponse.leagues && leaguesResponse.leagues.length > 0) {
+        const league = leaguesResponse.leagues[0];
+        const nextRoundNum = (auctionRounds.length || 0) + 1;
+        const response = await auctionAPI.createRound(league.id, nextRoundNum, newRoundName.trim());
+        if (response.success) {
+          setNewRoundName('');
+          loadAuctionRounds();
+        } else {
+          alert(response.error || 'Failed to create round');
+        }
+      }
+    } catch (err) {
+      console.error('Failed to create round:', err);
+      alert('Failed to create round');
+    }
+  };
+  
+  // Import players from JSON
+  const handleImportPlayers = async () => {
+    if (!selectedRound || !importJson.trim()) return;
+    try {
+      const parsed = JSON.parse(importJson);
+      const players = Array.isArray(parsed) ? parsed : (parsed.players || []);
+      
+      const leaguesResponse = await leaguesAPI.getAll(tournament.id);
+      if (leaguesResponse.leagues && leaguesResponse.leagues.length > 0) {
+        const league = leaguesResponse.leagues[0];
+        const response = await auctionAPI.importPlayers(league.id, selectedRound.id, players, false);
+        if (response.success) {
+          alert(`Imported ${response.count} players to ${selectedRound.name}`);
+          setImportJson('');
+          setShowImportModal(false);
+          loadRoundPlayers(selectedRound.id);
+          loadAuctionRounds();
+        } else {
+          alert(response.error || 'Failed to import players');
+        }
+      }
+    } catch (err) {
+      console.error('Failed to import players:', err);
+      alert('Invalid JSON format. Check the example and try again.');
+    }
+  };
+  
+  // Select and start a round
+  const handleSelectRound = async (round) => {
+    try {
+      const leaguesResponse = await leaguesAPI.getAll(tournament.id);
+      if (leaguesResponse.leagues && leaguesResponse.leagues.length > 0) {
+        const league = leaguesResponse.leagues[0];
+        const response = await auctionAPI.control(league.id, 'select_round', round.id);
+        if (response.success) {
+          setSelectedRound(round);
+          loadRoundPlayers(round.id);
+          loadAuctionState();
+        }
+      }
+    } catch (err) {
+      console.error('Failed to select round:', err);
+    }
+  };
+  
+  // Delete a round
+  const handleDeleteRound = async (roundId) => {
+    if (!confirm('Delete this round and all its players?')) return;
+    try {
+      const leaguesResponse = await leaguesAPI.getAll(tournament.id);
+      if (leaguesResponse.leagues && leaguesResponse.leagues.length > 0) {
+        const league = leaguesResponse.leagues[0];
+        const response = await auctionAPI.deleteRound(league.id, roundId);
+        if (response.success) {
+          loadAuctionRounds();
+          if (selectedRound?.id === roundId) {
+            setSelectedRound(null);
+            setRoundPlayers([]);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Failed to delete round:', err);
+    }
+  };
+  
+  // Create new franchise
+  const handleCreateFranchise = async () => {
+    if (!newFranchiseName.trim() || !newFranchiseOwner.trim()) return;
+    try {
+      const leaguesResponse = await leaguesAPI.getAll(tournament.id);
+      if (leaguesResponse.leagues && leaguesResponse.leagues.length > 0) {
+        const league = leaguesResponse.leagues[0];
+        const response = await auctionAPI.createTeam(league.id, newFranchiseName.trim(), newFranchiseOwner.trim());
+        if (response.success) {
+          setNewFranchiseName('');
+          setNewFranchiseOwner('');
+          loadAuctionRounds();
+        } else {
+          alert(response.error || 'Failed to create franchise');
+        }
+      }
+    } catch (err) {
+      console.error('Failed to create franchise:', err);
+      alert('Failed to create franchise');
+    }
+  };
+  
+  // Update franchise
+  const handleUpdateFranchise = async (teamId) => {
+    if (!editingFranchise) return;
+    try {
+      const response = await auctionAPI.updateTeam(teamId, {
+        name: editingFranchise.name,
+        ownerName: editingFranchise.ownerName,
+        purse: editingFranchise.purse
+      });
+      if (response.success) {
+        setEditingFranchise(null);
+        loadAuctionRounds();
+      }
+    } catch (err) {
+      console.error('Failed to update franchise:', err);
+    }
+  };
+  
+  // Delete franchise
+  const handleDeleteFranchise = async (teamId) => {
+    if (!confirm('Delete this franchise? All players will be removed from roster.')) return;
+    try {
+      const leaguesResponse = await leaguesAPI.getAll(tournament.id);
+      if (leaguesResponse.leagues && leaguesResponse.leagues.length > 0) {
+        const league = leaguesResponse.leagues[0];
+        const response = await auctionAPI.deleteTeam(league.id, teamId);
+        if (response.success) {
+          loadAuctionRounds();
+        }
+      }
+    } catch (err) {
+      console.error('Failed to delete franchise:', err);
+    }
+  };
+  
+  // Format currency in Crores/Lakhs
+  const formatCurrency = (amount) => {
+    if (!amount) return '₹0';
+    if (amount >= 10000000) return `₹${(amount / 10000000).toFixed(2)} Cr`;
+    if (amount >= 100000) return `₹${(amount / 100000).toFixed(1)} L`;
+    return `₹${amount.toLocaleString()}`;
+  };
+  
   // Load draft logs when draft tab is opened or draft is completed
   useEffect(() => {
     const loadDraftLogs = async () => {
@@ -2771,17 +2975,18 @@ const AdminPanel = ({ user, tournament, players: playersProp, draftType: parentD
   }, [tournament.id, supportsAuction]);
   
   const handleSetupAuction = async () => {
-    if (!window.confirm('Setup auction for this league? This will initialize the auction with all players and set team budgets to ₹50L.')) return;
+    if (!window.confirm('Setup auction for this league? This will initialize the auction and set team budgets to ₹129 Cr.')) return;
     
     setAuctionLoading(true);
     try {
       const leaguesResponse = await leaguesAPI.getAll(tournament.id);
       if (leaguesResponse.leagues && leaguesResponse.leagues.length > 0) {
         const league = leaguesResponse.leagues[0];
-        const response = await auctionAPI.setup(league.id, tournament.id, 5000000);
+        const response = await auctionAPI.setup(league.id, tournament.id, 129000000);
         if (response.success) {
-          alert('Auction setup complete! Teams now have ₹50L budget.');
+          alert('Auction setup complete! Teams now have ₹129 Cr budget.');
           loadAuctionState();
+          loadAuctionRounds();
         } else {
           alert(response.error || 'Failed to setup auction');
         }
@@ -4814,7 +5019,7 @@ const AdminPanel = ({ user, tournament, players: playersProp, draftType: parentD
                 >
                   <div className="icon">🎯</div>
                   <h4>Auction</h4>
-                  <p>Bid on players with ₹50L budget</p>
+                  <p>Bid on players with ₹129 Cr budget</p>
                 </div>
               </div>
             )}
@@ -5033,6 +5238,360 @@ const AdminPanel = ({ user, tournament, players: playersProp, draftType: parentD
                           </div>
                         )}
                       </div>
+                    </div>
+                  )}
+                  
+                  {/* ============================================
+                      AUCTION ROUNDS & FRANCHISE MANAGEMENT
+                      ============================================ */}
+                  {selectedDraftType === 'auction' && (draftStatus === 'open' || draftStatus === 'in_progress' || draftStatus === 'pending') && (
+                    <div className="auction-management-section" style={{ marginTop: '30px' }}>
+                      <h4 style={{ marginBottom: '15px', color: 'var(--accent)' }}>🎯 Auction Management</h4>
+                      
+                      {/* Management Tabs */}
+                      <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
+                        <button 
+                          className={`btn-small ${showRoundsPanel ? 'btn-primary' : 'btn-secondary'}`}
+                          onClick={() => { setShowRoundsPanel(!showRoundsPanel); setShowFranchisePanel(false); }}
+                        >
+                          📊 Rounds ({auctionRounds.length})
+                        </button>
+                        <button 
+                          className={`btn-small ${showFranchisePanel ? 'btn-primary' : 'btn-secondary'}`}
+                          onClick={() => { setShowFranchisePanel(!showFranchisePanel); setShowRoundsPanel(false); }}
+                        >
+                          🏢 Franchises ({franchises.length})
+                        </button>
+                      </div>
+                      
+                      {/* ============ ROUNDS PANEL ============ */}
+                      {showRoundsPanel && (
+                        <div className="rounds-panel" style={{ background: 'var(--bg-card)', padding: '20px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
+                          <h5 style={{ marginBottom: '15px', color: 'var(--text-primary)' }}>Auction Rounds</h5>
+                          
+                          {/* Create New Round */}
+                          <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
+                            <input 
+                              type="text"
+                              value={newRoundName}
+                              onChange={(e) => setNewRoundName(e.target.value)}
+                              placeholder="Round name (e.g., Marquee Players, Capped, Uncapped)"
+                              style={{ flex: 1, padding: '10px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-primary)' }}
+                            />
+                            <button className="btn-primary btn-small" onClick={handleCreateRound}>
+                              + Add Round
+                            </button>
+                          </div>
+                          
+                          {/* Rounds List */}
+                          {auctionRounds.length === 0 ? (
+                            <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '20px' }}>
+                              No rounds created yet. Create rounds and import players to begin.
+                            </p>
+                          ) : (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                              {auctionRounds.map(round => (
+                                <div 
+                                  key={round.id} 
+                                  style={{ 
+                                    padding: '15px', 
+                                    background: selectedRound?.id === round.id ? 'var(--primary-dark)' : 'var(--bg-input)',
+                                    borderRadius: '8px',
+                                    border: `2px solid ${selectedRound?.id === round.id ? 'var(--accent)' : 'var(--border-color)'}`,
+                                    cursor: 'pointer'
+                                  }}
+                                  onClick={() => { setSelectedRound(round); loadRoundPlayers(round.id); }}
+                                >
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <div>
+                                      <strong style={{ color: 'var(--text-primary)' }}>Round {round.roundNumber}: {round.name}</strong>
+                                      <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+                                        {round.playerCount || 0} players • 
+                                        {round.isCompleted ? ' ✅ Completed' : round.isActive ? ' 🔴 Active' : ' ⏳ Pending'}
+                                      </div>
+                                    </div>
+                                    <div style={{ display: 'flex', gap: '8px' }}>
+                                      <button 
+                                        className="btn-small btn-secondary"
+                                        onClick={(e) => { e.stopPropagation(); setSelectedRound(round); setShowImportModal(true); }}
+                                      >
+                                        📥 Import
+                                      </button>
+                                      {!round.isActive && !round.isCompleted && (
+                                        <button 
+                                          className="btn-small btn-primary"
+                                          onClick={(e) => { e.stopPropagation(); handleSelectRound(round); }}
+                                        >
+                                          ▶️ Select
+                                        </button>
+                                      )}
+                                      <button 
+                                        className="btn-small btn-danger"
+                                        onClick={(e) => { e.stopPropagation(); handleDeleteRound(round.id); }}
+                                      >
+                                        🗑️
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          
+                          {/* Selected Round Players */}
+                          {selectedRound && (
+                            <div style={{ marginTop: '20px', padding: '15px', background: 'var(--bg-dark)', borderRadius: '8px' }}>
+                              <h6 style={{ marginBottom: '10px', color: 'var(--accent)' }}>
+                                {selectedRound.name} Players ({roundPlayers.length})
+                              </h6>
+                              {roundPlayers.length === 0 ? (
+                                <p style={{ color: 'var(--text-muted)' }}>No players in this round. Import players using JSON.</p>
+                              ) : (
+                                <div style={{ maxHeight: '300px', overflow: 'auto' }}>
+                                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
+                                    <thead>
+                                      <tr style={{ borderBottom: '1px solid var(--border-color)' }}>
+                                        <th style={{ padding: '8px', textAlign: 'left', color: 'var(--text-secondary)' }}>#</th>
+                                        <th style={{ padding: '8px', textAlign: 'left', color: 'var(--text-secondary)' }}>Name</th>
+                                        <th style={{ padding: '8px', textAlign: 'left', color: 'var(--text-secondary)' }}>Team</th>
+                                        <th style={{ padding: '8px', textAlign: 'left', color: 'var(--text-secondary)' }}>Type</th>
+                                        <th style={{ padding: '8px', textAlign: 'right', color: 'var(--text-secondary)' }}>Base Price</th>
+                                        <th style={{ padding: '8px', textAlign: 'center', color: 'var(--text-secondary)' }}>Status</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {roundPlayers.map((p, idx) => (
+                                        <tr key={p.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                                          <td style={{ padding: '8px', color: 'var(--text-muted)' }}>{idx + 1}</td>
+                                          <td style={{ padding: '8px', color: 'var(--text-primary)', fontWeight: '500' }}>{p.name}</td>
+                                          <td style={{ padding: '8px', color: 'var(--text-secondary)' }}>{p.team}</td>
+                                          <td style={{ padding: '8px' }}>
+                                            <span className={`position-badge ${p.position}`} style={{ fontSize: '0.75rem', padding: '2px 6px' }}>
+                                              {(p.category || p.position || 'UNK').toUpperCase()}
+                                            </span>
+                                          </td>
+                                          <td style={{ padding: '8px', textAlign: 'right', color: 'var(--accent)' }}>{formatCurrency(p.basePrice)}</td>
+                                          <td style={{ padding: '8px', textAlign: 'center' }}>
+                                            {p.status === 'sold' ? '✅' : p.status === 'unsold' ? '❌' : p.status === 'current' ? '🔴' : '⏳'}
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      
+                      {/* ============ FRANCHISE PANEL ============ */}
+                      {showFranchisePanel && (
+                        <div className="franchise-panel" style={{ background: 'var(--bg-card)', padding: '20px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
+                          <h5 style={{ marginBottom: '15px', color: 'var(--text-primary)' }}>Franchise Management</h5>
+                          
+                          {/* Create New Franchise */}
+                          <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', flexWrap: 'wrap' }}>
+                            <input 
+                              type="text"
+                              value={newFranchiseName}
+                              onChange={(e) => setNewFranchiseName(e.target.value)}
+                              placeholder="Franchise name"
+                              style={{ flex: '1', minWidth: '150px', padding: '10px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-primary)' }}
+                            />
+                            <input 
+                              type="text"
+                              value={newFranchiseOwner}
+                              onChange={(e) => setNewFranchiseOwner(e.target.value)}
+                              placeholder="Owner name"
+                              style={{ flex: '1', minWidth: '150px', padding: '10px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-primary)' }}
+                            />
+                            <button className="btn-primary btn-small" onClick={handleCreateFranchise}>
+                              + Add Franchise
+                            </button>
+                          </div>
+                          
+                          {/* Franchise List */}
+                          {franchises.length === 0 ? (
+                            <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '20px' }}>
+                              No franchises registered. Add franchises or let users register teams.
+                            </p>
+                          ) : (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                              {franchises.map(team => (
+                                <div 
+                                  key={team.id}
+                                  style={{ 
+                                    padding: '15px', 
+                                    background: 'var(--bg-input)',
+                                    borderRadius: '8px',
+                                    border: '1px solid var(--border-color)'
+                                  }}
+                                >
+                                  {editingFranchise?.id === team.id ? (
+                                    <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+                                      <input 
+                                        type="text"
+                                        value={editingFranchise.name}
+                                        onChange={(e) => setEditingFranchise({...editingFranchise, name: e.target.value})}
+                                        style={{ flex: '1', minWidth: '120px', padding: '8px', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'var(--bg-card)', color: 'var(--text-primary)' }}
+                                      />
+                                      <input 
+                                        type="text"
+                                        value={editingFranchise.ownerName}
+                                        onChange={(e) => setEditingFranchise({...editingFranchise, ownerName: e.target.value})}
+                                        style={{ flex: '1', minWidth: '120px', padding: '8px', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'var(--bg-card)', color: 'var(--text-primary)' }}
+                                      />
+                                      <input 
+                                        type="number"
+                                        value={editingFranchise.purse}
+                                        onChange={(e) => setEditingFranchise({...editingFranchise, purse: parseInt(e.target.value) || 0})}
+                                        style={{ width: '120px', padding: '8px', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'var(--bg-card)', color: 'var(--text-primary)' }}
+                                        placeholder="Purse"
+                                      />
+                                      <button className="btn-small btn-primary" onClick={() => handleUpdateFranchise(team.id)}>✓ Save</button>
+                                      <button className="btn-small btn-secondary" onClick={() => setEditingFranchise(null)}>✗ Cancel</button>
+                                    </div>
+                                  ) : (
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                      <div>
+                                        <strong style={{ color: 'var(--text-primary)', fontSize: '1.1rem' }}>{team.name}</strong>
+                                        <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+                                          Owner: {team.ownerName || 'TBD'} • Players: {team.rosterCount || 0}/12
+                                        </div>
+                                      </div>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+                                        <div style={{ textAlign: 'right' }}>
+                                          <div style={{ color: 'var(--success)', fontWeight: '700', fontSize: '1.1rem' }}>{formatCurrency(team.purse)}</div>
+                                          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Remaining</div>
+                                        </div>
+                                        <div style={{ display: 'flex', gap: '6px' }}>
+                                          <button 
+                                            className="btn-small btn-secondary"
+                                            onClick={() => setEditingFranchise({ id: team.id, name: team.name, ownerName: team.ownerName, purse: team.purse })}
+                                          >
+                                            ✏️
+                                          </button>
+                                          <button 
+                                            className="btn-small btn-danger"
+                                            onClick={() => handleDeleteFranchise(team.id)}
+                                          >
+                                            🗑️
+                                          </button>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          
+                          {/* Total Purse Summary */}
+                          {franchises.length > 0 && (
+                            <div style={{ marginTop: '15px', padding: '10px', background: 'var(--bg-dark)', borderRadius: '6px', display: 'flex', justifyContent: 'space-between' }}>
+                              <span style={{ color: 'var(--text-secondary)' }}>Total Remaining Purse:</span>
+                              <strong style={{ color: 'var(--accent)' }}>{formatCurrency(franchises.reduce((sum, t) => sum + (t.purse || 0), 0))}</strong>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      
+                      {/* JSON Import Modal */}
+                      {showImportModal && selectedRound && (
+                        <div className="modal-overlay" onClick={() => setShowImportModal(false)}>
+                          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '700px', maxHeight: '90vh', overflow: 'auto' }}>
+                            <button className="modal-close" onClick={() => setShowImportModal(false)}>×</button>
+                            <h3 style={{ marginBottom: '15px' }}>📥 Import Players to {selectedRound.name}</h3>
+                            
+                            <p style={{ color: 'var(--text-secondary)', marginBottom: '15px' }}>
+                              Paste JSON array of players. Each player should have: name, team, position/category, base_price
+                            </p>
+                            
+                            <textarea
+                              value={importJson}
+                              onChange={(e) => setImportJson(e.target.value)}
+                              placeholder='[{"name": "Player Name", "team": "MI", "position": "batter", "base_price": 20000000}]'
+                              style={{ 
+                                width: '100%', 
+                                height: '200px', 
+                                padding: '12px', 
+                                borderRadius: '8px', 
+                                border: '1px solid var(--border-color)', 
+                                background: 'var(--bg-input)', 
+                                color: 'var(--text-primary)',
+                                fontFamily: 'monospace',
+                                fontSize: '0.9rem',
+                                resize: 'vertical'
+                              }}
+                            />
+                            
+                            <div style={{ display: 'flex', gap: '10px', marginTop: '15px' }}>
+                              <button className="btn-primary" onClick={handleImportPlayers}>
+                                Import Players
+                              </button>
+                              <button className="btn-secondary" onClick={() => setShowImportModal(false)}>
+                                Cancel
+                              </button>
+                            </div>
+                            
+                            {/* JSON Example */}
+                            <div style={{ marginTop: '20px', padding: '15px', background: 'var(--bg-dark)', borderRadius: '8px' }}>
+                              <h5 style={{ marginBottom: '10px', color: 'var(--accent)' }}>📋 JSON Format Example</h5>
+                              <pre style={{ 
+                                background: '#1a1a2e', 
+                                padding: '12px', 
+                                borderRadius: '6px', 
+                                overflow: 'auto',
+                                fontSize: '0.8rem',
+                                color: '#a5d6a7'
+                              }}>{`[
+  {
+    "name": "Virat Kohli",
+    "team": "RCB",
+    "position": "batter",
+    "category": "Marquee",
+    "base_price": 20000000
+  },
+  {
+    "name": "Jasprit Bumrah",
+    "team": "MI",
+    "position": "bowler",
+    "category": "Marquee",
+    "base_price": 20000000
+  },
+  {
+    "name": "Hardik Pandya",
+    "team": "MI",
+    "position": "allrounder",
+    "category": "Capped",
+    "base_price": 15000000
+  },
+  {
+    "name": "Ishan Kishan",
+    "team": "MI",
+    "position": "keeper",
+    "category": "Capped",
+    "base_price": 10000000
+  },
+  {
+    "name": "New Player",
+    "team": "CSK",
+    "position": "bowler",
+    "category": "Uncapped",
+    "base_price": 2000000
+  }
+]
+
+// Notes:
+// - position: "batter", "bowler", "allrounder", "keeper"
+// - category: Custom label (e.g., "Marquee", "Capped", "Uncapped")
+// - base_price: Amount in paisa (20000000 = ₹2 Cr)
+// - team: Optional - real IPL/national team code`}</pre>
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                   

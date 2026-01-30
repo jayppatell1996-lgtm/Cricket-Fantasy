@@ -423,12 +423,12 @@ export const auctionAPI = {
   },
 
   /**
-   * Admin control actions: start, pause, resume, skip, sell, timer_expired, stop, next_player
+   * Admin control actions: start, pause, resume, skip, sell, timer_expired, stop, next_player, select_round
    */
-  async control(leagueId, controlAction) {
+  async control(leagueId, controlAction, roundId = null) {
     return apiCall('/auction?action=control', {
       method: 'POST',
-      body: { leagueId, controlAction }
+      body: { leagueId, controlAction, roundId }
     });
   },
 
@@ -507,6 +507,109 @@ export const auctionAPI = {
     return apiCall('/auction?action=update_price', {
       method: 'POST',
       body: { leagueId, playerId, basePrice }
+    });
+  },
+
+  // ============================================
+  // ROUNDS MANAGEMENT
+  // ============================================
+
+  /**
+   * Get all auction rounds for a league
+   */
+  async getRounds(leagueId) {
+    return apiCall(`/auction?action=rounds&leagueId=${leagueId}`);
+  },
+
+  /**
+   * Create a new auction round
+   */
+  async createRound(leagueId, roundNumber, name, players = []) {
+    return apiCall('/auction?action=create_round', {
+      method: 'POST',
+      body: { leagueId, roundNumber, name, players }
+    });
+  },
+
+  /**
+   * Import players to a round (JSON format)
+   */
+  async importPlayers(leagueId, roundId, players, append = false) {
+    return apiCall('/auction?action=import_players', {
+      method: 'POST',
+      body: { leagueId, roundId, players, append }
+    });
+  },
+
+  /**
+   * Delete a round
+   */
+  async deleteRound(leagueId, roundId) {
+    return apiCall(`/auction?action=delete_round&leagueId=${leagueId}&roundId=${roundId}`, {
+      method: 'DELETE'
+    });
+  },
+
+  /**
+   * Reset a round (clear players and status)
+   */
+  async resetRound(leagueId, roundId) {
+    return apiCall('/auction?action=reset_round', {
+      method: 'POST',
+      body: { leagueId, roundId }
+    });
+  },
+
+  /**
+   * Start a specific round
+   */
+  async startRound(leagueId, roundId) {
+    return apiCall('/auction?action=control', {
+      method: 'POST',
+      body: { leagueId, controlAction: 'start_round', roundId }
+    });
+  },
+
+  /**
+   * Get unsold players
+   */
+  async getUnsold(leagueId) {
+    return apiCall(`/auction?action=unsold&leagueId=${leagueId}`);
+  },
+
+  /**
+   * Get teams for auction (with purse info)
+   */
+  async getTeams(leagueId) {
+    return apiCall(`/auction?action=teams&leagueId=${leagueId}`);
+  },
+
+  /**
+   * Create a franchise/team
+   */
+  async createTeam(leagueId, name, ownerName, ownerId = null, purse = 129000000) {
+    return apiCall('/auction?action=create_team', {
+      method: 'POST',
+      body: { leagueId, name, ownerName, ownerId, purse }
+    });
+  },
+
+  /**
+   * Update a team
+   */
+  async updateTeam(teamId, updates) {
+    return apiCall('/auction?action=update_team', {
+      method: 'POST',
+      body: { teamId, ...updates }
+    });
+  },
+
+  /**
+   * Delete a team
+   */
+  async deleteTeam(leagueId, teamId) {
+    return apiCall(`/auction?action=delete_team&leagueId=${leagueId}&teamId=${teamId}`, {
+      method: 'DELETE'
     });
   }
 };
