@@ -801,7 +801,43 @@ export default async function handler(req, res) {
       return res.status(200).json({ success: true, message: 'Auction reset' });
     }
 
-    return res.status(400).json({ error: 'Invalid action. Use ?action=state|players|logs|bid|control|setup|reset' });
+    // ============================================
+    // REORDER PLAYER - Change player's position in queue
+    // ============================================
+    if (action === 'reorder' && req.method === 'POST') {
+      const { leagueId, playerId, newIndex } = req.body;
+      
+      if (!leagueId || !playerId || newIndex === undefined) {
+        return res.status(400).json({ error: 'leagueId, playerId, and newIndex required' });
+      }
+
+      await db.execute({
+        sql: 'UPDATE auction_players SET order_index = ? WHERE id = ? AND league_id = ?',
+        args: [newIndex, playerId, leagueId]
+      });
+
+      return res.status(200).json({ success: true, message: 'Player order updated' });
+    }
+
+    // ============================================
+    // UPDATE BASE PRICE - Change player's base price
+    // ============================================
+    if (action === 'update_price' && req.method === 'POST') {
+      const { leagueId, playerId, basePrice } = req.body;
+      
+      if (!leagueId || !playerId || basePrice === undefined) {
+        return res.status(400).json({ error: 'leagueId, playerId, and basePrice required' });
+      }
+
+      await db.execute({
+        sql: 'UPDATE auction_players SET base_price = ? WHERE id = ? AND league_id = ?',
+        args: [basePrice, playerId, leagueId]
+      });
+
+      return res.status(200).json({ success: true, message: 'Base price updated', newPrice: basePrice });
+    }
+
+    return res.status(400).json({ error: 'Invalid action. Use ?action=state|players|logs|bid|control|setup|reset|reorder|update_price' });
 
   } catch (error) {
     console.error('Auction API error:', error);

@@ -609,7 +609,137 @@ export default async function handler(req, res) {
       });
     }
 
-    return res.status(400).json({ error: 'Invalid action. Use ?action=health, seed, users, tournaments, dedupe, reset-points, roster-history, or recalc-points' });
+    // ============================================
+    // BACKDATE-ROSTER - Change acquired_date for a team's roster
+    // ============================================
+    if (action === 'backdate-roster') {
+      const { teamId, date } = req.query;
+      
+      if (!teamId || !date) {
+        return res.status(400).json({ error: 'teamId and date required (format: YYYY-MM-DD)' });
+      }
+      
+      // Update all roster entries for this team that don't have a dropped_date
+      const result = await db.execute({
+        sql: `UPDATE roster SET acquired_date = ? WHERE fantasy_team_id = ? AND dropped_date IS NULL`,
+        args: [date + ' 00:00:00', teamId]
+      });
+      
+      return res.status(200).json({
+        success: true,
+        message: `Backdated roster for team ${teamId} to ${date}`,
+        rowsAffected: result.rowsAffected
+      });
+    }
+    
+    // ============================================
+    // DEDUPE-ROSTER - Remove duplicate roster entries
+    // ============================================
+    if (action === 'dedupe-roster') {
+      const { teamId } = req.query;
+      
+      // Get all roster entries, optionally for a specific team
+      let sql = `SELECT id, fantasy_team_id, player_id, acquired_date, dropped_date FROM roster`;
+      let args = [];
+      if (teamId) {
+        sql += ` WHERE fantasy_team_id = ?`;
+        args.push(teamId);
+      }
+      
+      const rosterResult = await db.execute({ sql, args });
+      
+      // Track unique entries and duplicates to delete
+      const seen = new Map(); // key: teamId-playerId-acquiredDate-droppedDate
+      const toDelete = [];
+      
+      for (const row of rosterResult.rows) {
+        const key = `${row.fantasy_team_id}-${row.player_id}-${row.acquired_date || 'null'}-${row.dropped_date || 'null'}`;
+        if (seen.has(key)) {
+          toDelete.push(row.id);
+        } else {
+          seen.set(key, row.id);
+        }
+      }
+      
+      // Delete duplicates
+      for (const id of toDelete) {
+        await db.execute({
+          sql: `DELETE FROM roster WHERE id = ?`,
+          args: [id]
+        });
+      }
+      
+      return res.status(200).json({
+        success: true,
+        message: `Removed ${toDelete.length} duplicate roster entries`,
+        duplicatesRemoved: toDelete.length,
+        uniqueEntries: seen.size
+      });
+    }
+    
+    // ============================================
+    // DEBUG-DB - View raw database state for debugging
+    // ============================================
+    if (action === 'debug-db') {
+      const { tournamentId, teamId } = req.query;
+      
+      let playerStats = [];
+      let roster = [];
+      let teams = [];
+      
+      if (tournamentId) {
+        // Get all player_stats
+        const statsResult = await db.execute({
+          sql: `SELECT ps.*, p.name as player_name 
+                FROM player_stats ps 
+                LEFT JOIN players p ON ps.player_id = p.id 
+                WHERE p.tournament_id = ?
+                ORDER BY ps.match_date DESC`,
+          args: [tournamentId]
+        });
+        playerStats = statsResult.rows;
+        
+        // Get all roster entries
+        const rosterResult = await db.execute({
+          sql: `SELECT r.*, p.name as player_name, ft.name as team_name
+                FROM roster r
+                LEFT JOIN players p ON r.player_id = p.id
+                LEFT JOIN fantasy_teams ft ON r.fantasy_team_id = ft.id
+                WHERE ft.tournament_id = ?
+                ORDER BY ft.name, r.acquired_date`,
+          args: [tournamentId]
+        });
+        roster = rosterResult.rows;
+        
+        // Get all teams
+        const teamsResult = await db.execute({
+          sql: `SELECT id, name, total_points FROM fantasy_teams WHERE tournament_id = ?`,
+          args: [tournamentId]
+        });
+        teams = teamsResult.rows;
+      }
+      
+      if (teamId) {
+        const rosterResult = await db.execute({
+          sql: `SELECT r.*, p.name as player_name
+                FROM roster r
+                LEFT JOIN players p ON r.player_id = p.id
+                WHERE r.fantasy_team_id = ?
+                ORDER BY r.acquired_date`,
+          args: [teamId]
+        });
+        roster = rosterResult.rows;
+      }
+      
+      return res.status(200).json({
+        success: true,
+        playerStats,
+        roster,
+        teams
+      });
+    }
+
+    return res.status(400).json({ error: 'Invalid action. Use ?action=health, seed, users, tournaments, dedupe, reset-points, roster-history, recalc-points, backdate-roster, dedupe-roster, or debug-db' });
 
   } catch (error) {
     console.error('Admin API error:', error);
