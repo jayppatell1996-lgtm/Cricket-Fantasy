@@ -1,18 +1,11 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import api, { authAPI, teamsAPI, playersAPI, leaguesAPI, draftAPI, rosterAPI, tournamentsAPI, usersAPI, adminAPI, liveSyncAPI, auctionAPI } from './api.js';
+import api, { authAPI, teamsAPI, playersAPI, leaguesAPI, draftAPI, rosterAPI, tournamentsAPI, usersAPI, adminAPI, liveSyncAPI } from './api.js';
 
 // ============================================
 // T20 FANTASY CRICKET - COMPLETE APPLICATION
-// With Tournaments & Auction Draft System
+// With Tournaments & Team Import
 // Database-integrated version
 // ============================================
-
-// Predefined Auction Rounds
-const AUCTION_ROUNDS = [
-  { roundNumber: 1, name: 'Batsmen', position: 'batter' },
-  { roundNumber: 2, name: 'Allrounders', position: 'allrounder' },
-  { roundNumber: 3, name: 'Bowlers', position: 'bowler' }
-];
 
 // Tournament Configurations (minimal fallback - primary data comes from database)
 const TOURNAMENTS = {
@@ -988,8 +981,8 @@ const TeamCreationPage = ({ user, tournament, onTeamCreated }) => {
           </div>
           
           <div className="draft-info">
-            <h3>🎯 Auction Draft</h3>
-            <p>Bid on players in rounds: Batsmen, Allrounders, Bowlers. Budget: $120M per team.</p>
+            <h3>🏏 Fantasy League</h3>
+            <p>Teams are imported after the external auction is completed.</p>
           </div>
           
           <button type="submit" className="btn-primary btn-large" disabled={loading}>
@@ -1002,751 +995,6 @@ const TeamCreationPage = ({ user, tournament, onTeamCreated }) => {
 };
 
 // ============================================
-// AUCTION PAGE COMPONENT
-// Real-time auction with bidding, timer, purse management,
-// sold/unsold views, and auction results
-// ============================================
-const AuctionPage = ({ team, tournament, players, allTeams, onDraftComplete, onUpdateTeam }) => {
-  const [auctionState, setAuctionState] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [logs, setLogs] = useState([]);
-  const [timeRemaining, setTimeRemaining] = useState(0);
-  const [isBidding, setIsBidding] = useState(false);
-  const [league, setLeague] = useState(null);
-  const [activeView, setActiveView] = useState('auction'); // 'auction', 'sold', 'unsold', 'results'
-  const [soldPlayers, setSoldPlayers] = useState([]);
-  const [unsoldPlayers, setUnsoldPlayers] = useState([]);
-  const [bidFeedback, setBidFeedback] = useState(null); // { type: 'success' | 'error', message: string }
-  const [showTeamRoster, setShowTeamRoster] = useState(null); // teamId to show roster modal
-
-  // Get tournament teams with purse info
-  const tournamentTeams = useMemo(() => {
-    // Use teams from auctionState if available (more accurate purse/roster data)
-    if (auctionState?.teams && auctionState.teams.length > 0) {
-      return auctionState.teams.map(t => ({
-        id: t.id,
-        name: t.name,
-        owner: t.owner,
-        purse: t.purse || 120000000,
-        rosterCount: t.rosterCount || 0,
-        isUser: t.id === team?.id
-      })).sort((a, b) => b.purse - a.purse);
-    }
-    return (allTeams || [])
-      .filter(t => t.tournamentId === tournament?.id)
-      .map(t => ({
-        id: t.id,
-        name: t.name,
-        owner: t.owner,
-        purse: t.purse || 120000000,
-        rosterCount: t.roster?.length || 0,
-        isUser: t.id === team?.id
-      }))
-      .sort((a, b) => b.purse - a.purse);
-  }, [allTeams, tournament?.id, team?.id, auctionState?.teams]);
-
-  // Format currency in Lakhs/Crores
-  const formatMoney = (amount) => {
-    if (!amount) return '$0';
-    if (amount >= 1000000) return `$${(amount / 1000000).toFixed(2)}M`;
-    if (amount >= 1000) return `$${(amount / 1000).toFixed(0)}K`;
-    return `$${amount.toLocaleString()}`;
-  };
-
-  // Load auction state
-  const loadAuctionState = useCallback(async () => {
-    if (!tournament?.id) return;
-    
-    try {
-      // Get league first
-      const leaguesResponse = await leaguesAPI.getAll(tournament.id);
-      if (!leaguesResponse.leagues || leaguesResponse.leagues.length === 0) {
-        setError('No league found for this tournament');
-        setLoading(false);
-        return;
-      }
-      
-      const leagueData = leaguesResponse.leagues[0];
-      setLeague(leagueData);
-
-      // Check if auction is set up
-      const stateResponse = await auctionAPI.getState(leagueData.id);
-      
-      if (stateResponse.success) {
-        setAuctionState(stateResponse.state);
-        
-        // Calculate time remaining
-        if (stateResponse.state?.timerEndTime && !stateResponse.state?.isPaused) {
-          const remaining = Math.max(0, stateResponse.state.timerEndTime - Date.now());
-          setTimeRemaining(remaining);
-        }
-      }
-
-      // Load recent logs
-      const logsResponse = await auctionAPI.getLogs(leagueData.id, 50);
-      if (logsResponse.success) {
-        setLogs(logsResponse.logs || []);
-      }
-
-      // Load sold players
-      const soldResponse = await auctionAPI.getPlayers(leagueData.id, 'sold');
-      if (soldResponse.success) {
-        // Map API response to expected format
-        setSoldPlayers((soldResponse.players || []).map(p => ({
-          playerId: p.playerId,
-          playerName: p.name,
-          position: p.position,
-          team: p.team,
-          basePrice: p.basePrice,
-          soldToTeamId: p.soldTo?.teamId,
-          soldToTeamName: p.soldTo?.teamName,
-          soldFor: p.soldFor,
-          soldAt: p.soldAt
-        })));
-      }
-
-      // Load unsold players
-      const unsoldResponse = await auctionAPI.getPlayers(leagueData.id, 'unsold');
-      if (unsoldResponse.success) {
-        // Map API response to expected format
-        setUnsoldPlayers((unsoldResponse.players || []).map(p => ({
-          playerId: p.playerId,
-          playerName: p.name,
-          position: p.position,
-          team: p.team,
-          basePrice: p.basePrice
-        })));
-      }
-
-      setLoading(false);
-    } catch (err) {
-      console.error('Failed to load auction state:', err);
-      setError('Failed to load auction');
-      setLoading(false);
-    }
-  }, [tournament?.id]);
-
-  // Initial load and polling
-  useEffect(() => {
-    loadAuctionState();
-    
-    // Poll every 2 seconds when auction is active
-    const pollInterval = setInterval(() => {
-      if (auctionState?.isActive && !auctionState?.isPaused) {
-        loadAuctionState();
-      }
-    }, 2000);
-
-    return () => clearInterval(pollInterval);
-  }, [loadAuctionState, auctionState?.isActive, auctionState?.isPaused]);
-
-  // Timer countdown
-  useEffect(() => {
-    if (!auctionState?.isActive || auctionState?.isPaused || timeRemaining <= 0) return;
-
-    const timer = setInterval(() => {
-      setTimeRemaining(prev => {
-        const newTime = Math.max(0, prev - 100);
-        
-        // Auto-trigger timer expired when it hits 0
-        if (newTime === 0 && prev > 0) {
-          handleTimerExpired();
-        }
-        
-        return newTime;
-      });
-    }, 100);
-
-    return () => clearInterval(timer);
-  }, [auctionState?.isActive, auctionState?.isPaused, timeRemaining]);
-
-  // Clear bid feedback after delay
-  useEffect(() => {
-    if (bidFeedback) {
-      const timer = setTimeout(() => setBidFeedback(null), 3000);
-      return () => clearTimeout(timer);
-    }
-  }, [bidFeedback]);
-
-  // Handle placing a bid
-  const handleBid = async () => {
-    if (!team?.id || !league?.id || isBidding) return;
-    
-    setIsBidding(true);
-    try {
-      const response = await auctionAPI.placeBid(league.id, team.id);
-      
-      if (response.success) {
-        // Update state immediately for responsiveness
-        setAuctionState(prev => ({
-          ...prev,
-          currentBid: response.newBid,
-          highestBidder: { teamId: team.id, teamName: team.name }
-        }));
-        setTimeRemaining(response.remainingTime);
-        setBidFeedback({ type: 'success', message: `Bid placed: ${formatMoney(response.newBid)}` });
-        
-        // Refresh full state
-        loadAuctionState();
-      } else {
-        setBidFeedback({ type: 'error', message: response.error || 'Failed to place bid' });
-      }
-    } catch (err) {
-      console.error('Bid failed:', err);
-      setBidFeedback({ type: 'error', message: 'Failed to place bid. Please try again.' });
-    } finally {
-      setIsBidding(false);
-    }
-  };
-
-  // Handle timer expiration
-  const handleTimerExpired = async () => {
-    if (!league?.id) return;
-    
-    try {
-      await auctionAPI.timerExpired(league.id);
-      loadAuctionState();
-    } catch (err) {
-      console.error('Timer expired handler failed:', err);
-    }
-  };
-
-  // Calculate bid increment and next bid
-  const getNextBid = () => {
-    const currentBid = auctionState?.currentBid || 0;
-    const basePrice = auctionState?.currentPlayer?.basePrice || 100000;
-    
-    if (currentBid === 0) return basePrice;
-    
-    let increment = 50000;
-    if (currentBid >= 2000000) increment = 1000000;
-    else if (currentBid >= 1000000) increment = 500000;
-    else if (currentBid >= 500000) increment = 250000;
-    else if (currentBid >= 200000) increment = 100000;
-    
-    return currentBid + increment;
-  };
-
-  // Check if user can bid
-  const canBid = () => {
-    if (!team || !auctionState?.isActive || auctionState?.isPaused) return false;
-    if (!auctionState?.currentPlayer) return false;
-    if (timeRemaining <= 0) return false;
-    
-    const userTeam = tournamentTeams.find(t => t.id === team.id);
-    if (!userTeam) return false;
-    
-    // Check purse
-    const nextBid = getNextBid();
-    if (userTeam.purse < nextBid) return false;
-    
-    // Check roster size (12 players max)
-    if (userTeam.rosterCount >= 12) return false;
-    
-    return true;
-  };
-
-  // Timer display color
-  const getTimerColor = () => {
-    if (timeRemaining > 8000) return '#10b981'; // Green
-    if (timeRemaining > 4000) return '#f59e0b'; // Yellow
-    return '#ef4444'; // Red
-  };
-
-  // Get team spending summary
-  const getTeamSpending = (teamId) => {
-    const teamSold = soldPlayers.filter(p => p.soldToTeamId === teamId);
-    const totalSpent = teamSold.reduce((sum, p) => sum + (p.soldFor || 0), 0);
-    return { players: teamSold, totalSpent };
-  };
-
-  // Check if auction is completed (no pending players and not active)
-  const isAuctionCompleted = auctionState && !auctionState.isActive && 
-    (soldPlayers.length > 0 || unsoldPlayers.length > 0) && 
-    (!auctionState.nextPlayers || auctionState.nextPlayers.length === 0);
-
-  // Render loading state
-  if (loading) {
-    return (
-      <div className="auction-page" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' }}>
-        <div style={{ textAlign: 'center' }}>
-          <div className="spinner" style={{ fontSize: '40px', marginBottom: '20px' }}>🎯</div>
-          <p>Loading auction...</p>
-        </div>
-      </div>
-    );
-  }
-
-  // Render error state
-  if (error) {
-    return (
-      <div className="auction-page" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' }}>
-        <div style={{ textAlign: 'center', color: '#ef4444' }}>
-          <div style={{ fontSize: '40px', marginBottom: '20px' }}>❌</div>
-          <p>{error}</p>
-        </div>
-      </div>
-    );
-  }
-
-  // Render auction completed / results view
-  if (isAuctionCompleted || activeView === 'results') {
-    return (
-      <div className="auction-page auction-completed">
-        <div className="auction-header">
-          <h1>🏆 Auction Complete</h1>
-          <h2>{tournament?.name}</h2>
-        </div>
-
-        {/* Results Summary */}
-        <div className="auction-results-summary">
-          <div className="results-stat">
-            <span className="stat-value">{soldPlayers.length}</span>
-            <span className="stat-label">Players Sold</span>
-          </div>
-          <div className="results-stat">
-            <span className="stat-value">{unsoldPlayers.length}</span>
-            <span className="stat-label">Unsold</span>
-          </div>
-          <div className="results-stat">
-            <span className="stat-value">{formatMoney(soldPlayers.reduce((sum, p) => sum + (p.soldFor || 0), 0))}</span>
-            <span className="stat-label">Total Spent</span>
-          </div>
-        </div>
-
-        {/* Team Results */}
-        <div className="auction-team-results">
-          <h3>Team Results</h3>
-          {tournamentTeams.map(t => {
-            const spending = getTeamSpending(t.id);
-            return (
-              <div key={t.id} className={`team-result-card ${t.isUser ? 'is-user' : ''}`}>
-                <div className="team-result-header">
-                  <span className="team-name">{t.name} {t.isUser && '(You)'}</span>
-                  <span className="team-purse-remaining">Remaining: {formatMoney(t.purse)}</span>
-                </div>
-                <div className="team-result-stats">
-                  <span>Players: {spending.players.length}/12</span>
-                  <span>Spent: {formatMoney(spending.totalSpent)}</span>
-                </div>
-                <div className="team-result-players">
-                  {spending.players.map(p => (
-                    <div key={p.playerId} className="sold-player-mini">
-                      <span className={`position-dot ${p.position}`}></span>
-                      <span className="player-name">{p.playerName}</span>
-                      <span className="sold-price">{formatMoney(p.soldFor)}</span>
-                    </div>
-                  ))}
-                  {spending.players.length === 0 && (
-                    <div className="no-players">No players acquired</div>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Unsold Players */}
-        {unsoldPlayers.length > 0 && (
-          <div className="auction-unsold-list">
-            <h3>Unsold Players ({unsoldPlayers.length})</h3>
-            <div className="unsold-players-grid">
-              {unsoldPlayers.map(p => (
-                <div key={p.playerId} className="unsold-player-card">
-                  <span className={`position-badge ${p.position}`}>{p.position?.slice(0, 3).toUpperCase()}</span>
-                  <span className="player-name">{p.playerName}</span>
-                  <span className="base-price">{formatMoney(p.basePrice)}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Back to Dashboard */}
-        <div style={{ textAlign: 'center', marginTop: '30px' }}>
-          <button 
-            className="btn-primary"
-            onClick={() => onDraftComplete && onDraftComplete()}
-          >
-            Go to Dashboard
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  // Render waiting state (auction not started)
-  if (!auctionState || !auctionState.isActive) {
-    return (
-      <div className="auction-page auction-waiting">
-        <div className="auction-header">
-          <h1>🎯 Player Auction</h1>
-          <h2>{tournament?.name}</h2>
-        </div>
-        
-        <div className="auction-waiting-card">
-          <div className="waiting-icon">⏳</div>
-          <h3>Waiting for Auction to Start</h3>
-          <p>The league admin will start the auction when all teams are ready.</p>
-          
-          <div className="team-info-card">
-            <h4>Your Team: {team?.name}</h4>
-            <p>Starting Purse: {formatMoney(120000000)}</p>
-            <p>Roster Slots: 12 players</p>
-          </div>
-        </div>
-
-        <div className="teams-preview">
-          <h3>Registered Teams ({tournamentTeams.length})</h3>
-          <div className="teams-list">
-            {tournamentTeams.map(t => (
-              <div key={t.id} className={`team-preview-item ${t.isUser ? 'is-user' : ''}`}>
-                <span className="team-name">{t.name}</span>
-                <span className="team-purse">{formatMoney(t.purse)}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Show sold players if any exist from previous sessions */}
-        {soldPlayers.length > 0 && (
-          <div className="auction-sold-preview">
-            <h3>Previously Sold ({soldPlayers.length})</h3>
-            <button className="btn-secondary btn-small" onClick={() => setActiveView('results')}>
-              View Results
-            </button>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  // Render paused state
-  if (auctionState.isPaused) {
-    return (
-      <div className="auction-page auction-paused">
-        <div className="auction-header">
-          <h1>🎯 Player Auction</h1>
-          <div className="paused-banner">⏸️ AUCTION PAUSED</div>
-        </div>
-        
-        {/* View Tabs */}
-        <div className="auction-tabs">
-          <button 
-            className={`tab-btn ${activeView === 'auction' ? 'active' : ''}`}
-            onClick={() => setActiveView('auction')}
-          >
-            Current
-          </button>
-          <button 
-            className={`tab-btn ${activeView === 'sold' ? 'active' : ''}`}
-            onClick={() => setActiveView('sold')}
-          >
-            Sold ({soldPlayers.length})
-          </button>
-          <button 
-            className={`tab-btn ${activeView === 'unsold' ? 'active' : ''}`}
-            onClick={() => setActiveView('unsold')}
-          >
-            Unsold ({unsoldPlayers.length})
-          </button>
-        </div>
-
-        {activeView === 'auction' && (
-          <div className="current-player-card">
-            {auctionState.currentPlayer && (
-              <>
-                <div className="player-name-large">{auctionState.currentPlayer.name}</div>
-                <div className="player-details">
-                  <span className={`position-badge ${auctionState.currentPlayer.position}`}>
-                    {auctionState.currentPlayer.position?.toUpperCase()}
-                  </span>
-                  <span className="player-team">{auctionState.currentPlayer.team}</span>
-                </div>
-                <div className="bid-info">
-                  <div className="current-bid">
-                    <span className="label">Current Bid</span>
-                    <span className="amount">{formatMoney(auctionState.currentBid || auctionState.currentPlayer.basePrice)}</span>
-                  </div>
-                  {auctionState.highestBidder && (
-                    <div className="highest-bidder">
-                      <span className="label">Leading</span>
-                      <span className="team-name">{auctionState.highestBidder.teamName}</span>
-                    </div>
-                  )}
-                </div>
-              </>
-            )}
-          </div>
-        )}
-
-        {activeView === 'sold' && (
-          <div className="sold-players-list">
-            {soldPlayers.length === 0 ? (
-              <div className="empty-state">No players sold yet</div>
-            ) : (
-              soldPlayers.map(p => (
-                <div key={p.playerId} className="sold-player-row">
-                  <span className={`position-badge ${p.position}`}>{p.position?.slice(0, 3).toUpperCase()}</span>
-                  <span className="player-name">{p.playerName}</span>
-                  <span className="sold-to">{tournamentTeams.find(t => t.id === p.soldToTeamId)?.name || 'Unknown'}</span>
-                  <span className="sold-price">{formatMoney(p.soldFor)}</span>
-                </div>
-              ))
-            )}
-          </div>
-        )}
-
-        {activeView === 'unsold' && (
-          <div className="unsold-players-list">
-            {unsoldPlayers.length === 0 ? (
-              <div className="empty-state">No unsold players</div>
-            ) : (
-              unsoldPlayers.map(p => (
-                <div key={p.playerId} className="unsold-player-row">
-                  <span className={`position-badge ${p.position}`}>{p.position?.slice(0, 3).toUpperCase()}</span>
-                  <span className="player-name">{p.playerName}</span>
-                  <span className="base-price">{formatMoney(p.basePrice)}</span>
-                </div>
-              ))
-            )}
-          </div>
-        )}
-        
-        <p style={{ textAlign: 'center', color: 'var(--text-muted)', marginTop: '20px' }}>
-          Waiting for admin to resume...
-        </p>
-      </div>
-    );
-  }
-
-  // Render active auction
-  return (
-    <div className="auction-page auction-active">
-      {/* Header */}
-      <div className="auction-header">
-        <h1>🎯 Live Auction</h1>
-        <div className="your-purse">
-          Your Purse: <strong>{formatMoney(tournamentTeams.find(t => t.id === team?.id)?.purse || 0)}</strong>
-          <span className="roster-status"> | Roster: {tournamentTeams.find(t => t.id === team?.id)?.rosterCount || 0}/12</span>
-        </div>
-      </div>
-
-      {/* View Tabs */}
-      <div className="auction-tabs">
-        <button 
-          className={`tab-btn ${activeView === 'auction' ? 'active' : ''}`}
-          onClick={() => setActiveView('auction')}
-        >
-          🔴 Live
-        </button>
-        <button 
-          className={`tab-btn ${activeView === 'sold' ? 'active' : ''}`}
-          onClick={() => setActiveView('sold')}
-        >
-          Sold ({soldPlayers.length})
-        </button>
-        <button 
-          className={`tab-btn ${activeView === 'unsold' ? 'active' : ''}`}
-          onClick={() => setActiveView('unsold')}
-        >
-          Unsold ({unsoldPlayers.length})
-        </button>
-      </div>
-
-      {/* Bid Feedback Toast */}
-      {bidFeedback && (
-        <div className={`bid-feedback ${bidFeedback.type}`}>
-          {bidFeedback.type === 'success' ? '✓' : '✗'} {bidFeedback.message}
-        </div>
-      )}
-
-      {activeView === 'auction' && (
-        <>
-          {/* Timer */}
-          <div className="auction-timer" style={{ '--timer-color': getTimerColor() }}>
-            <div className={`timer-circle ${timeRemaining <= 3000 ? 'urgent' : ''}`}>
-              <span className="timer-value">{Math.ceil(timeRemaining / 1000)}</span>
-              <span className="timer-label">sec</span>
-            </div>
-          </div>
-
-          {/* Current Player Card */}
-          <div className="current-player-card">
-            {auctionState.currentPlayer ? (
-              <>
-                <div className="player-name-large">{auctionState.currentPlayer.name}</div>
-                <div className="player-details">
-                  <span className={`position-badge ${auctionState.currentPlayer.position}`}>
-                    {auctionState.currentPlayer.position?.toUpperCase()}
-                  </span>
-                  <span className="player-team">{auctionState.currentPlayer.team}</span>
-                </div>
-                <div className="base-price">
-                  Base: {formatMoney(auctionState.currentPlayer.basePrice)}
-                </div>
-              </>
-            ) : (
-              <div className="no-player">Waiting for next player...</div>
-            )}
-          </div>
-
-          {/* Current Bid Display */}
-          <div className="bid-display">
-            <div className="current-bid-large">
-              {formatMoney(auctionState.currentBid || auctionState.currentPlayer?.basePrice || 0)}
-            </div>
-            {auctionState.highestBidder && (
-              <div className={`leading-team ${auctionState.highestBidder.teamId === team?.id ? 'is-you' : ''}`}>
-                {auctionState.highestBidder.teamId === team?.id ? '🏆 YOU ARE LEADING!' : `Leading: ${auctionState.highestBidder.teamName}`}
-              </div>
-            )}
-          </div>
-
-          {/* Bid Button */}
-          <div className="bid-section">
-            <button 
-              className={`bid-button ${canBid() ? 'active' : 'disabled'} ${isBidding ? 'bidding' : ''}`}
-              onClick={handleBid}
-              disabled={!canBid() || isBidding}
-            >
-              {isBidding ? 'Bidding...' : `BID ${formatMoney(getNextBid())}`}
-            </button>
-            {!canBid() && auctionState.currentPlayer && (
-              <div className="bid-error">
-                {tournamentTeams.find(t => t.id === team?.id)?.purse < getNextBid() 
-                  ? 'Insufficient funds' 
-                  : tournamentTeams.find(t => t.id === team?.id)?.rosterCount >= 12
-                    ? 'Roster full (12/12)'
-                    : timeRemaining <= 0
-                      ? 'Time expired'
-                      : 'Cannot bid'}
-              </div>
-            )}
-          </div>
-
-          {/* Team Purses - Horizontal scroll on mobile */}
-          <div className="teams-purses">
-            <h4>Team Purses</h4>
-            <div className="purses-scroll">
-              {tournamentTeams.map(t => (
-                <div 
-                  key={t.id} 
-                  className={`purse-item ${t.isUser ? 'is-user' : ''} ${t.id === auctionState.highestBidder?.teamId ? 'is-leading' : ''}`}
-                  onClick={() => setShowTeamRoster(t.id)}
-                >
-                  <span className="team-name">{t.name}</span>
-                  <span className="purse-amount">{formatMoney(t.purse)}</span>
-                  <span className="roster-count">{t.rosterCount}/12</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Up Next */}
-          {auctionState.nextPlayers && auctionState.nextPlayers.length > 0 && (
-            <div className="up-next">
-              <h4>Up Next</h4>
-              <div className="next-players">
-                {auctionState.nextPlayers.slice(0, 5).map((p, idx) => (
-                  <div key={p.id} className="next-player">
-                    <span className="order">{idx + 1}</span>
-                    <span className="name">{p.name}</span>
-                    <span className={`position-badge ${p.position}`}>{p.position?.slice(0, 3).toUpperCase()}</span>
-                    <span className="base">{formatMoney(p.basePrice)}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Activity Log */}
-          <div className="auction-log">
-            <h4>Recent Activity</h4>
-            <div className="log-entries">
-              {logs.slice(0, 10).map(log => (
-                <div key={log.id} className={`log-entry ${log.logType}`}>
-                  <span className="log-time">
-                    {new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </span>
-                  <span className="log-message">{log.message}</span>
-                </div>
-              ))}
-              {logs.length === 0 && (
-                <div className="log-entry empty">No activity yet</div>
-              )}
-            </div>
-          </div>
-        </>
-      )}
-
-      {activeView === 'sold' && (
-        <div className="sold-players-list">
-          <h3 style={{ marginBottom: '15px', color: 'var(--text-primary)' }}>Sold Players</h3>
-          {soldPlayers.length === 0 ? (
-            <div className="empty-state">No players sold yet</div>
-          ) : (
-            soldPlayers.map(p => (
-              <div key={p.playerId} className="sold-player-row">
-                <span className={`position-badge ${p.position}`}>{p.position?.slice(0, 3).toUpperCase()}</span>
-                <span className="player-name">{p.playerName}</span>
-                <span className="sold-to">{tournamentTeams.find(t => t.id === p.soldToTeamId)?.name || 'Unknown'}</span>
-                <span className="sold-price">{formatMoney(p.soldFor)}</span>
-              </div>
-            ))
-          )}
-        </div>
-      )}
-
-      {activeView === 'unsold' && (
-        <div className="unsold-players-list">
-          <h3 style={{ marginBottom: '15px', color: 'var(--text-primary)' }}>Unsold Players</h3>
-          {unsoldPlayers.length === 0 ? (
-            <div className="empty-state">No unsold players yet</div>
-          ) : (
-            unsoldPlayers.map(p => (
-              <div key={p.playerId} className="unsold-player-row">
-                <span className={`position-badge ${p.position}`}>{p.position?.slice(0, 3).toUpperCase()}</span>
-                <span className="player-name">{p.playerName}</span>
-                <span className="player-team">{p.team}</span>
-                <span className="base-price">{formatMoney(p.basePrice)}</span>
-              </div>
-            ))
-          )}
-        </div>
-      )}
-
-      {/* Team Roster Modal */}
-      {showTeamRoster && (
-        <div className="modal-overlay" onClick={() => setShowTeamRoster(null)}>
-          <div className="modal-content team-roster-modal" onClick={e => e.stopPropagation()}>
-            <button className="modal-close" onClick={() => setShowTeamRoster(null)}>×</button>
-            <h3>{tournamentTeams.find(t => t.id === showTeamRoster)?.name}'s Squad</h3>
-            <div className="team-roster-list">
-              {getTeamSpending(showTeamRoster).players.length === 0 ? (
-                <div className="empty-state">No players yet</div>
-              ) : (
-                getTeamSpending(showTeamRoster).players.map(p => (
-                  <div key={p.playerId} className="roster-player-row">
-                    <span className={`position-badge ${p.position}`}>{p.position?.slice(0, 3).toUpperCase()}</span>
-                    <span className="player-name">{p.playerName}</span>
-                    <span className="sold-price">{formatMoney(p.soldFor)}</span>
-                  </div>
-                ))
-              )}
-            </div>
-            <div className="team-roster-summary">
-              <span>Players: {getTeamSpending(showTeamRoster).players.length}/12</span>
-              <span>Spent: {formatMoney(getTeamSpending(showTeamRoster).totalSpent)}</span>
-              <span>Remaining: {formatMoney(tournamentTeams.find(t => t.id === showTeamRoster)?.purse || 0)}</span>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
 const AdminPanel = ({ user, tournament, players: playersProp, draftType: parentDraftType, onSetDraftType, onUpdateTournament, onRefreshPlayers, onRefreshTeams, onLogout, onBackToTournaments, onSwitchTournament, allTeams, allUsers, onStartDraft, onDeleteTeam, onUpdateTeam, onDeleteUser }) => {
   const [activeTab, setActiveTab] = useState('overview');
   
@@ -1909,20 +1157,6 @@ const AdminPanel = ({ user, tournament, players: playersProp, draftType: parentD
   
   // Draft status state
   const [draftStatus, setDraftStatusState] = useState('pending');
-  const [selectedDraftType, setSelectedDraftTypeState] = useState(parentDraftType || 'auction'); // Always auction now
-  const [auctionState, setAuctionState] = useState(null);
-  const [auctionLoading, setAuctionLoading] = useState(false);
-  
-  // Sync draft type with parent
-  const setSelectedDraftType = (type) => {
-    setSelectedDraftTypeState(type);
-    if (onSetDraftType) {
-      onSetDraftType(type);
-    }
-  };
-  
-  // Check if tournament supports auction (WC and IPL only)
-  const supportsAuction = tournament?.id === 't20_wc_2026' || tournament?.id === 'ipl_2026';
   
   // Load draft status from database when tournament changes
   useEffect(() => {
@@ -1979,502 +1213,159 @@ const AdminPanel = ({ user, tournament, players: playersProp, draftType: parentD
   const [userFilter, setUserFilter] = useState('all'); // all, with_team, without_team
   const [draftLogs, setDraftLogs] = useState([]); // Draft pick history
   const [loadingDraftLogs, setLoadingDraftLogs] = useState(false);
-  const [auctionPlayers, setAuctionPlayers] = useState([]); // Auction player queue for management
-  const [showAuctionPlayerMgmt, setShowAuctionPlayerMgmt] = useState(false);
-  const [editingPlayerPrice, setEditingPlayerPrice] = useState(null); // {id, basePrice}
-  
-  // Load auction players when auction state changes or player management is opened
-  useEffect(() => {
-    const loadAuctionPlayers = async () => {
-      if (!showAuctionPlayerMgmt || selectedDraftType !== 'auction') return;
-      try {
-        const leaguesResponse = await leaguesAPI.getAll(tournament.id);
-        if (leaguesResponse.leagues && leaguesResponse.leagues.length > 0) {
-          const league = leaguesResponse.leagues[0];
-          const playersResponse = await auctionAPI.getPlayers(league.id, 'pending');
-          if (playersResponse.success) {
-            setAuctionPlayers(playersResponse.players || []);
-          }
-        }
-      } catch (err) {
-        console.error('Failed to load auction players:', err);
-      }
-    };
-    loadAuctionPlayers();
-  }, [showAuctionPlayerMgmt, tournament.id, selectedDraftType, auctionState]);
-
-  // Handle updating player base price
-  const handleUpdateBasePrice = async (playerId, newPrice) => {
-    try {
-      const leaguesResponse = await leaguesAPI.getAll(tournament.id);
-      if (leaguesResponse.leagues && leaguesResponse.leagues.length > 0) {
-        const league = leaguesResponse.leagues[0];
-        const response = await auctionAPI.updateBasePrice(league.id, playerId, newPrice);
-        if (response.success) {
-          setAuctionPlayers(prev => prev.map(p => p.id === playerId ? {...p, basePrice: newPrice} : p));
-          setEditingPlayerPrice(null);
-        } else {
-          alert(response.error || 'Failed to update price');
-        }
-      }
-    } catch (err) {
-      console.error('Failed to update base price:', err);
-      alert('Failed to update price');
-    }
-  };
-
-  // Handle reordering player in queue
-  const handleMovePlayer = async (playerId, direction) => {
-    const currentIndex = auctionPlayers.findIndex(p => p.id === playerId);
-    if (currentIndex === -1) return;
-    
-    const newIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
-    if (newIndex < 0 || newIndex >= auctionPlayers.length) return;
-    
-    try {
-      const leaguesResponse = await leaguesAPI.getAll(tournament.id);
-      if (leaguesResponse.leagues && leaguesResponse.leagues.length > 0) {
-        const league = leaguesResponse.leagues[0];
-        // Swap order indices
-        const currentPlayer = auctionPlayers[currentIndex];
-        const targetPlayer = auctionPlayers[newIndex];
-        
-        await auctionAPI.reorderPlayer(league.id, currentPlayer.id, targetPlayer.orderIndex);
-        await auctionAPI.reorderPlayer(league.id, targetPlayer.id, currentPlayer.orderIndex);
-        
-        // Refresh the list
-        const playersResponse = await auctionAPI.getPlayers(league.id, 'pending');
-        if (playersResponse.success) {
-          setAuctionPlayers(playersResponse.players || []);
-        }
-      }
-    } catch (err) {
-      console.error('Failed to reorder player:', err);
-    }
-  };
   
   // ============================================
-  // AUCTION ROUNDS MANAGEMENT STATE
+  // TEAM IMPORT FUNCTIONALITY
   // ============================================
-  const [auctionRounds, setAuctionRounds] = useState([]);
-  const [selectedRound, setSelectedRound] = useState(null);
-  const [roundPlayers, setRoundPlayers] = useState([]);
-  const [showRoundsPanel, setShowRoundsPanel] = useState(false);
-  const [showFranchisePanel, setShowFranchisePanel] = useState(false);
-  const [showImportModal, setShowImportModal] = useState(false);
-  const [importJson, setImportJson] = useState('');
-  const [newRoundName, setNewRoundName] = useState('');
-  const [franchises, setFranchises] = useState([]);
-  const [newFranchiseName, setNewFranchiseName] = useState('');
-  const [newFranchiseOwner, setNewFranchiseOwner] = useState('');
-  const [editingFranchise, setEditingFranchise] = useState(null);
-  const [showAddPlayerToRound, setShowAddPlayerToRound] = useState(false);
-  const [addPlayerBasePrice, setAddPlayerBasePrice] = useState(2000000);
+  const [showTeamImport, setShowTeamImport] = useState(false);
+  const [teamImportJson, setTeamImportJson] = useState('');
+  const [importingTeams, setImportingTeams] = useState(false);
   
-  // Get players available to add to a round (not already in any round)
-  const getAvailablePlayersForRound = (round) => {
-    if (!round) return [];
-    const existingPlayerIds = new Set(roundPlayers.map(p => p.playerId || p.name));
+  // Import teams from JSON (after external auction)
+  const handleImportTeams = async () => {
+    if (!teamImportJson.trim()) {
+      alert('Please paste team data JSON');
+      return;
+    }
     
-    // Filter by position based on round name
-    return players.filter(p => {
-      const pos = (p.position || '').toLowerCase();
-      const roundName = round.name.toLowerCase();
+    setImportingTeams(true);
+    try {
+      const parsed = JSON.parse(teamImportJson);
+      const teamsData = Array.isArray(parsed) ? parsed : (parsed.teams || []);
       
-      // Check if player is already in this round
-      if (existingPlayerIds.has(p.id) || existingPlayerIds.has(p.name)) return false;
+      if (teamsData.length === 0) {
+        alert('No teams found in JSON');
+        return;
+      }
       
-      // Match position to round
-      if (roundName.includes('bats')) return pos === 'batter' || pos === 'keeper';
-      if (roundName.includes('allround')) return pos === 'allrounder';
-      if (roundName.includes('bowl')) return pos === 'bowler';
-      return true; // Default: show all
-    });
-  };
-  
-  // Add a single player to a round
-  const handleAddPlayerToRound = async (player) => {
-    if (!selectedRound) return;
-    try {
-      const leaguesResponse = await leaguesAPI.getAll(tournament.id);
-      if (leaguesResponse.leagues && leaguesResponse.leagues.length > 0) {
-        const league = leaguesResponse.leagues[0];
-        const playerData = [{
-          name: player.name,
-          team: player.team,
-          position: player.position,
-          category: selectedRound.name,
-          base_price: addPlayerBasePrice
-        }];
-        const response = await auctionAPI.importPlayers(league.id, selectedRound.id, playerData, true);
-        if (response.success) {
-          loadRoundPlayers(selectedRound.id);
-          loadAuctionRounds();
-        }
+      // Get or create league
+      let leaguesResponse = await leaguesAPI.getAll(tournament.id);
+      let league;
+      if (!leaguesResponse.leagues || leaguesResponse.leagues.length === 0) {
+        const createResponse = await leaguesAPI.create({
+          name: `${tournament.name} League`,
+          tournamentId: tournament.id,
+          draftType: 'import'
+        });
+        league = { id: createResponse.leagueId };
+      } else {
+        league = leaguesResponse.leagues[0];
       }
-    } catch (err) {
-      console.error('Failed to add player to round:', err);
-    }
-  };
-  
-  // Load auction rounds
-  const loadAuctionRounds = async () => {
-    try {
-      const leaguesResponse = await leaguesAPI.getAll(tournament.id);
-      if (leaguesResponse.leagues && leaguesResponse.leagues.length > 0) {
-        const league = leaguesResponse.leagues[0];
-        const roundsResponse = await auctionAPI.getRounds(league.id);
-        if (roundsResponse.success) {
-          setAuctionRounds(roundsResponse.rounds || []);
-        }
-        // Also load franchises
-        const teamsResponse = await auctionAPI.getTeams(league.id);
-        if (teamsResponse.success) {
-          setFranchises(teamsResponse.teams || []);
-        }
-      }
-    } catch (err) {
-      console.error('Failed to load auction rounds:', err);
-    }
-  };
-  
-  // Load rounds when panel is opened
-  useEffect(() => {
-    if ((showRoundsPanel || showFranchisePanel) && selectedDraftType === 'auction') {
-      loadAuctionRounds();
-    }
-  }, [showRoundsPanel, showFranchisePanel, tournament.id, selectedDraftType]);
-  
-  // Load players for selected round
-  const loadRoundPlayers = async (roundId) => {
-    try {
-      const leaguesResponse = await leaguesAPI.getAll(tournament.id);
-      if (leaguesResponse.leagues && leaguesResponse.leagues.length > 0) {
-        const league = leaguesResponse.leagues[0];
-        const playersResponse = await auctionAPI.getPlayers(league.id);
-        if (playersResponse.success) {
-          const filtered = (playersResponse.players || []).filter(p => p.roundId === roundId);
-          setRoundPlayers(filtered);
-        }
-      }
-    } catch (err) {
-      console.error('Failed to load round players:', err);
-    }
-  };
-  
-  // Create new round
-  const handleCreateRound = async () => {
-    if (!newRoundName.trim()) return;
-    try {
-      const leaguesResponse = await leaguesAPI.getAll(tournament.id);
-      if (leaguesResponse.leagues && leaguesResponse.leagues.length > 0) {
-        const league = leaguesResponse.leagues[0];
-        const nextRoundNum = (auctionRounds.length || 0) + 1;
-        const response = await auctionAPI.createRound(league.id, nextRoundNum, newRoundName.trim());
-        if (response.success) {
-          setNewRoundName('');
-          loadAuctionRounds();
-        } else {
-          alert(response.error || 'Failed to create round');
-        }
-      }
-    } catch (err) {
-      console.error('Failed to create round:', err);
-      alert('Failed to create round');
-    }
-  };
-  
-  // Import players from JSON
-  const handleImportPlayers = async () => {
-    if (!selectedRound || !importJson.trim()) return;
-    try {
-      const parsed = JSON.parse(importJson);
-      const players = Array.isArray(parsed) ? parsed : (parsed.players || []);
       
-      const leaguesResponse = await leaguesAPI.getAll(tournament.id);
-      if (leaguesResponse.leagues && leaguesResponse.leagues.length > 0) {
-        const league = leaguesResponse.leagues[0];
-        const response = await auctionAPI.importPlayers(league.id, selectedRound.id, players, false);
-        if (response.success) {
-          alert(`Imported ${response.count} players to ${selectedRound.name}`);
-          setImportJson('');
-          setShowImportModal(false);
-          loadRoundPlayers(selectedRound.id);
-          loadAuctionRounds();
-        } else {
-          alert(response.error || 'Failed to import players');
-        }
-      }
-    } catch (err) {
-      console.error('Failed to import players:', err);
-      alert('Invalid JSON format. Check the example and try again.');
-    }
-  };
-  
-  // Select and start a round
-  const handleSelectRound = async (round) => {
-    try {
-      const leaguesResponse = await leaguesAPI.getAll(tournament.id);
-      if (leaguesResponse.leagues && leaguesResponse.leagues.length > 0) {
-        const league = leaguesResponse.leagues[0];
-        const response = await auctionAPI.control(league.id, 'select_round', round.id);
-        if (response.success) {
-          setSelectedRound(round);
-          loadRoundPlayers(round.id);
-          loadAuctionState();
-        }
-      }
-    } catch (err) {
-      console.error('Failed to select round:', err);
-    }
-  };
-  
-  // Delete a round
-  const handleDeleteRound = async (roundId) => {
-    if (!confirm('Delete this round and all its players?')) return;
-    try {
-      const leaguesResponse = await leaguesAPI.getAll(tournament.id);
-      if (leaguesResponse.leagues && leaguesResponse.leagues.length > 0) {
-        const league = leaguesResponse.leagues[0];
-        const response = await auctionAPI.deleteRound(league.id, roundId);
-        if (response.success) {
-          loadAuctionRounds();
-          if (selectedRound?.id === roundId) {
-            setSelectedRound(null);
-            setRoundPlayers([]);
-          }
-        }
-      }
-    } catch (err) {
-      console.error('Failed to delete round:', err);
-    }
-  };
-  
-  // Create new franchise
-  const handleCreateFranchise = async () => {
-    if (!newFranchiseName.trim() || !newFranchiseOwner.trim()) return;
-    try {
-      const leaguesResponse = await leaguesAPI.getAll(tournament.id);
-      if (leaguesResponse.leagues && leaguesResponse.leagues.length > 0) {
-        const league = leaguesResponse.leagues[0];
-        const response = await auctionAPI.createTeam(league.id, newFranchiseName.trim(), newFranchiseOwner.trim());
-        if (response.success) {
-          setNewFranchiseName('');
-          setNewFranchiseOwner('');
-          loadAuctionRounds();
-        } else {
-          alert(response.error || 'Failed to create franchise');
-        }
-      }
-    } catch (err) {
-      console.error('Failed to create franchise:', err);
-      alert('Failed to create franchise');
-    }
-  };
-  
-  // Update franchise
-  const handleUpdateFranchise = async (teamId) => {
-    if (!editingFranchise) return;
-    try {
-      const response = await auctionAPI.updateTeam(teamId, {
-        name: editingFranchise.name,
-        ownerName: editingFranchise.ownerName,
-        purse: editingFranchise.purse
-      });
-      if (response.success) {
-        setEditingFranchise(null);
-        loadAuctionRounds();
-      }
-    } catch (err) {
-      console.error('Failed to update franchise:', err);
-    }
-  };
-  
-  // Delete franchise
-  const handleDeleteFranchise = async (teamId) => {
-    if (!confirm('Delete this franchise? All players will be removed from roster.')) return;
-    try {
-      const leaguesResponse = await leaguesAPI.getAll(tournament.id);
-      if (leaguesResponse.leagues && leaguesResponse.leagues.length > 0) {
-        const league = leaguesResponse.leagues[0];
-        const response = await auctionAPI.deleteTeam(league.id, teamId);
-        if (response.success) {
-          loadAuctionRounds();
-        }
-      }
-    } catch (err) {
-      console.error('Failed to delete franchise:', err);
-    }
-  };
-  
-  // Format currency in Crores/Lakhs
-  const formatCurrency = (amount) => {
-    if (!amount) return '$0';
-    if (amount >= 1000000) return `$${(amount / 1000000).toFixed(2)}M`;
-    if (amount >= 1000) return `$${(amount / 1000).toFixed(0)}K`;
-    return `$${amount.toLocaleString()}`;
-  };
-  
-  // Load draft logs when draft tab is opened or draft is completed
-  useEffect(() => {
-    const loadDraftLogs = async () => {
-      if (draftStatus !== 'completed' && draftStatus !== 'in_progress') return;
+      // Map role strings to our internal slot names
+      const roleToSlot = (role) => {
+        if (!role) return null;
+        const r = role.toLowerCase().trim();
+        if (r === 'batsman' || r === 'batter' || r === 'bat') return 'batters';
+        if (r === 'bowler' || r === 'bowl') return 'bowlers';
+        if (r === 'all-rounder' || r === 'allrounder' || r === 'all rounder' || r === 'ar') return null; // auto-assign
+        if (r === 'wicketkeeper' || r === 'keeper' || r === 'wk') return 'keepers';
+        return null;
+      };
       
-      setLoadingDraftLogs(true);
-      try {
-        // Get league for this tournament
-        const leaguesResponse = await leaguesAPI.getAll(tournament.id);
-        if (leaguesResponse.leagues && leaguesResponse.leagues.length > 0) {
-          const league = leaguesResponse.leagues[0];
-          const picksResponse = await draftAPI.getPicks(league.id);
-          if (picksResponse.picks) {
-            console.log(`📋 Loaded ${picksResponse.picks.length} draft picks`);
-            setDraftLogs(picksResponse.picks);
-          }
-        }
-      } catch (err) {
-        console.error('Failed to load draft logs:', err);
-      } finally {
-        setLoadingDraftLogs(false);
-      }
-    };
-    
-    loadDraftLogs();
-  }, [tournament.id, draftStatus]);
-  
-  // Auction handlers
-  const loadAuctionState = async () => {
-    if (!supportsAuction) return;
-    
-    setAuctionLoading(true);
-    try {
-      const leaguesResponse = await leaguesAPI.getAll(tournament.id);
-      if (leaguesResponse.leagues && leaguesResponse.leagues.length > 0) {
-        const league = leaguesResponse.leagues[0];
-        const stateResponse = await auctionAPI.getState(league.id);
-        if (stateResponse.success) {
-          setAuctionState(stateResponse.state);
-          // Update draft type based on league settings
-          if (league.draftType === 'auction') {
-            setSelectedDraftType('auction');
-          }
-        }
-      }
-    } catch (err) {
-      console.error('Failed to load auction state:', err);
-    } finally {
-      setAuctionLoading(false);
-    }
-  };
-  
-  // Load auction state when tournament changes
-  useEffect(() => {
-    if (supportsAuction) {
-      loadAuctionState();
-    }
-  }, [tournament.id, supportsAuction]);
-  
-  const handleSetupAuction = async () => {
-    if (!window.confirm('Setup auction for this league? This will:\n- Set team budgets to $120M\n- Create rounds: Batsmen, Allrounders, Bowlers\n- Auto-populate rounds from player pool')) return;
-    
-    setAuctionLoading(true);
-    try {
-      const leaguesResponse = await leaguesAPI.getAll(tournament.id);
-      if (leaguesResponse.leagues && leaguesResponse.leagues.length > 0) {
-        const league = leaguesResponse.leagues[0];
-        
-        // Setup auction state and budgets
-        const response = await auctionAPI.setup(league.id, tournament.id, 120000000);
-        if (!response.success) {
-          alert(response.error || 'Failed to setup auction');
-          return;
-        }
-        
-        // Create predefined rounds and auto-populate with players by position
-        for (const roundDef of AUCTION_ROUNDS) {
-          // Create the round
-          const roundResponse = await auctionAPI.createRound(league.id, roundDef.roundNumber, roundDef.name);
-          if (roundResponse.success && roundResponse.roundId) {
-            // Get players matching this position from the player pool
-            const matchingPlayers = players.filter(p => {
-              const pos = (p.position || '').toLowerCase();
-              if (roundDef.position === 'batter') return pos === 'batter' || pos === 'keeper';
-              if (roundDef.position === 'allrounder') return pos === 'allrounder';
-              if (roundDef.position === 'bowler') return pos === 'bowler';
-              return false;
-            }).map(p => ({
-              name: p.name,
-              team: p.team,
-              position: p.position,
-              category: roundDef.name,
-              base_price: 2000000 // Default $2M base price
-            }));
+      // Map role to internal position name for DB
+      const roleToPosition = (role) => {
+        if (!role) return null;
+        const r = role.toLowerCase().trim();
+        if (r === 'batsman' || r === 'batter' || r === 'bat') return 'batter';
+        if (r === 'bowler' || r === 'bowl') return 'bowler';
+        if (r === 'all-rounder' || r === 'allrounder' || r === 'all rounder' || r === 'ar') return 'allrounder';
+        if (r === 'wicketkeeper' || r === 'keeper' || r === 'wk') return 'keeper';
+        return null;
+      };
+      
+      let importedCount = 0;
+      let playerCount = 0;
+      let unmatchedPlayers = [];
+      let errors = [];
+      
+      for (const teamData of teamsData) {
+        try {
+          // Create team
+          const teamResponse = await teamsAPI.create({
+            name: teamData.name || teamData.teamName,
+            ownerName: teamData.owner || teamData.ownerName || 'Unknown',
+            leagueId: league.id,
+            tournamentId: tournament.id
+          });
+          
+          if (teamResponse.success && teamResponse.teamId) {
+            // Track slot counts for this team
+            const slotCounts = { batters: 0, keepers: 0, bowlers: 0, flex: 0 };
             
-            // Import players to this round
-            if (matchingPlayers.length > 0) {
-              await auctionAPI.importPlayers(league.id, roundResponse.roundId, matchingPlayers, false);
+            // Add players to roster if provided
+            const roster = teamData.roster || teamData.players || [];
+            for (const playerData of roster) {
+              // Find player by name in database
+              const playerName = playerData.name || playerData;
+              const matchingPlayer = players.find(p => 
+                p.name.toLowerCase() === playerName.toLowerCase() ||
+                p.name.toLowerCase().includes(playerName.toLowerCase())
+              );
+              
+              if (matchingPlayer) {
+                // Determine slot from role in JSON, or fall back to player's DB position
+                const importRole = playerData.role || playerData.position;
+                const position = roleToPosition(importRole) || matchingPlayer.position;
+                let slot = roleToSlot(importRole);
+                
+                // Auto-assign slot based on position if not determined by role
+                if (!slot) {
+                  if (position === 'keeper' && slotCounts.keepers < SQUAD_CONFIG.keepers.max) {
+                    slot = 'keepers';
+                  } else if ((position === 'batter' || position === 'keeper') && slotCounts.batters < SQUAD_CONFIG.batters.max) {
+                    slot = 'batters';
+                  } else if (position === 'bowler' && slotCounts.bowlers < SQUAD_CONFIG.bowlers.max) {
+                    slot = 'bowlers';
+                  } else if (position === 'allrounder') {
+                    // Allrounders fill batters first, then bowlers
+                    if (slotCounts.batters < SQUAD_CONFIG.batters.max) slot = 'batters';
+                    else if (slotCounts.bowlers < SQUAD_CONFIG.bowlers.max) slot = 'bowlers';
+                    else if (slotCounts.flex < SQUAD_CONFIG.flex.max) slot = 'flex';
+                    else slot = 'bench';
+                  } else if (slotCounts.flex < SQUAD_CONFIG.flex.max) {
+                    slot = 'flex';
+                  } else {
+                    slot = 'bench';
+                  }
+                }
+                
+                // Track counts
+                if (slotCounts[slot] !== undefined) slotCounts[slot]++;
+                
+                await rosterAPI.addPlayer(teamResponse.teamId, matchingPlayer.id, slot, 'auction');
+                playerCount++;
+              } else {
+                unmatchedPlayers.push(`${playerName} (${teamData.name})`);
+              }
             }
+            importedCount++;
           }
-        }
-        
-        alert(`Auction setup complete!\n- Teams have $120M budget\n- Created 3 rounds with ${players.length} players auto-assigned`);
-        loadAuctionState();
-        loadAuctionRounds();
-      }
-    } catch (err) {
-      console.error('Failed to setup auction:', err);
-      alert('Failed to setup auction');
-    } finally {
-      setAuctionLoading(false);
-    }
-  };
-  
-  const handleAuctionControl = async (action) => {
-    setAuctionLoading(true);
-    try {
-      const leaguesResponse = await leaguesAPI.getAll(tournament.id);
-      if (leaguesResponse.leagues && leaguesResponse.leagues.length > 0) {
-        const league = leaguesResponse.leagues[0];
-        const response = await auctionAPI.control(league.id, action);
-        if (response.success) {
-          loadAuctionState();
-          if (action === 'start') {
-            setDraftStatus('in_progress');
-          }
-        } else {
-          alert(response.error || `Failed to ${action} auction`);
+        } catch (teamErr) {
+          errors.push(`Failed to import ${teamData.name}: ${teamErr.message}`);
         }
       }
-    } catch (err) {
-      console.error(`Failed to ${action} auction:`, err);
-      alert(`Failed to ${action} auction`);
-    } finally {
-      setAuctionLoading(false);
-    }
-  };
-  
-  const handleResetAuction = async () => {
-    if (!window.confirm('Reset auction? This will clear all auction data, restore team budgets, and remove auction-acquired players from rosters.')) return;
-    
-    setAuctionLoading(true);
-    try {
-      const leaguesResponse = await leaguesAPI.getAll(tournament.id);
-      if (leaguesResponse.leagues && leaguesResponse.leagues.length > 0) {
-        const league = leaguesResponse.leagues[0];
-        const response = await auctionAPI.reset(league.id);
-        if (response.success) {
-          alert('Auction reset complete!');
-          setAuctionState(null);
-          setDraftStatus('pending');
-        } else {
-          alert(response.error || 'Failed to reset auction');
-        }
+      
+      let msg = `✅ Imported ${importedCount} teams with ${playerCount} players!`;
+      if (unmatchedPlayers.length > 0) {
+        msg += `\n\n⚠️ ${unmatchedPlayers.length} players not found in database:\n${unmatchedPlayers.join('\n')}`;
       }
+      if (errors.length > 0) {
+        msg += `\n\n❌ Errors:\n${errors.join('\n')}`;
+      }
+      
+      alert(msg);
+      setTeamImportJson('');
+      setShowTeamImport(false);
+      
+      // Refresh teams
+      if (onRefreshTeams) onRefreshTeams();
+      
     } catch (err) {
-      console.error('Failed to reset auction:', err);
-      alert('Failed to reset auction');
+      console.error('Team import error:', err);
+      alert('Failed to parse JSON: ' + err.message);
     } finally {
-      setAuctionLoading(false);
+      setImportingTeams(false);
     }
   };
   
@@ -2525,10 +1416,7 @@ const AdminPanel = ({ user, tournament, players: playersProp, draftType: parentD
     setSyncStatus(prev => ({ ...prev, clearing: 'Clearing...' }));
     
     try {
-      const response = await fetch(`${getApiBaseUrl()}/api/sync/players?tournament=${tournament.id}`, {
-        method: 'DELETE',
-      });
-      const data = await response.json();
+      const data = await playersAPI.deleteAll(tournament.id);
       
       if (data.success) {
         setSyncStatus(prev => ({ ...prev, clearing: `✅ ${data.message}` }));
@@ -2782,7 +1670,7 @@ const AdminPanel = ({ user, tournament, players: playersProp, draftType: parentD
       return;
     }
     
-    if (window.confirm(`Begin the auction with ${tournamentTeams.length} franchises? Make sure all teams are registered.`)) {
+    if (window.confirm(`Begin the draft with ${tournamentTeams.length} teams? Make sure all teams are registered.`)) {
       // Generate draft order
       const shuffledTeams = [...tournamentTeams].sort(() => Math.random() - 0.5);
       const draftOrder = [];
@@ -2923,7 +1811,7 @@ const AdminPanel = ({ user, tournament, players: playersProp, draftType: parentD
       </header>
       
       <nav className="admin-nav">
-        {['overview', 'sync', 'players', 'teams', 'users', 'auction', 'settings'].map(tab => (
+        {['overview', 'sync', 'players', 'teams', 'users', 'import', 'settings'].map(tab => (
           <button 
             key={tab}
             className={`nav-tab ${activeTab === tab ? 'active' : ''}`}
@@ -2934,7 +1822,7 @@ const AdminPanel = ({ user, tournament, players: playersProp, draftType: parentD
             {tab === 'players' && '👥 '}
             {tab === 'teams' && '🏏 '}
             {tab === 'users' && '👤 '}
-            {tab === 'auction' && '🎯 '}
+            {tab === 'import' && '📥 '}
             {tab === 'settings' && '⚙️ '}
             {tab.charAt(0).toUpperCase() + tab.slice(1)}
           </button>
@@ -4510,789 +3398,152 @@ const AdminPanel = ({ user, tournament, players: playersProp, draftType: parentD
           </div>
         )}
         
-        {activeTab === 'auction' && (
-          <div className="admin-draft">
-            <h3>🎯 Auction Management</h3>
+        
+        {activeTab === 'import' && (
+          <div className="admin-import">
+            <h3>📥 Team Import</h3>
+            <p style={{ color: 'var(--text-secondary)', marginBottom: '20px' }}>
+              Import teams and rosters after completing your auction on an external platform.
+            </p>
             
-            <div className="draft-status-card">
-              <div className={`status-indicator ${draftStatus}`}>
-                {draftStatus === 'pending' && '⏸️ Pending - Auction not yet open'}
-                {draftStatus === 'open' && '🟢 Open - Teams can register'}
-                {draftStatus === 'in_progress' && '🔴 In Progress - Auction running'}
-                {draftStatus === 'completed' && '✅ Completed - Season active'}
+            <div className="import-section" style={{ background: 'var(--bg-card)', padding: '20px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
+              <h4 style={{ marginBottom: '15px' }}>Import Teams from JSON</h4>
+              
+              <textarea
+                value={teamImportJson}
+                onChange={(e) => setTeamImportJson(e.target.value)}
+                placeholder='Paste your team data JSON here...'
+                style={{ 
+                  width: '100%', 
+                  height: '250px', 
+                  padding: '12px', 
+                  borderRadius: '8px', 
+                  border: '1px solid var(--border-color)', 
+                  background: 'var(--bg-input)', 
+                  color: 'var(--text-primary)',
+                  fontFamily: 'monospace',
+                  fontSize: '0.9rem',
+                  resize: 'vertical',
+                  marginBottom: '15px'
+                }}
+              />
+              
+              <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
+                <button 
+                  className="btn-primary btn-large" 
+                  onClick={handleImportTeams}
+                  disabled={importingTeams || !teamImportJson.trim()}
+                >
+                  {importingTeams ? '⏳ Importing...' : '📥 Import Teams'}
+                </button>
+                <button 
+                  className="btn-secondary" 
+                  onClick={() => setTeamImportJson('')}
+                >
+                  Clear
+                </button>
+                <button 
+                  className="btn-secondary" 
+                  onClick={() => setTeamImportJson(JSON.stringify([
+                    {
+                      name: "Team Alpha",
+                      owner: "Owner 1",
+                      roster: [
+                        { name: "Virat Kohli", role: "batsman" },
+                        { name: "Rohit Sharma", role: "batsman" },
+                        { name: "Suryakumar Yadav", role: "batsman" },
+                        { name: "Rishabh Pant", role: "wicketkeeper" },
+                        { name: "Hardik Pandya", role: "all-rounder" },
+                        { name: "Ravindra Jadeja", role: "all-rounder" },
+                        { name: "Jasprit Bumrah", role: "bowler" },
+                        { name: "Mohammed Siraj", role: "bowler" },
+                        { name: "Kuldeep Yadav", role: "bowler" },
+                        { name: "Yuzvendra Chahal", role: "bowler" },
+                        { name: "Arshdeep Singh", role: "bowler" },
+                        { name: "Shreyas Iyer", role: "batsman" }
+                      ]
+                    }
+                  ], null, 2))}
+                >
+                  📝 Load Sample
+                </button>
               </div>
               
-              <div className="draft-info">
-                <p><strong>Registered Franchises:</strong> {allTeams?.length || 0}</p>
-                <p><strong>Players Available:</strong> {players.length}</p>
-                <p><strong>Budget per Team:</strong> $120M</p>
-              </div>
-              
-              <div className="draft-controls">
-                <h4>Auction Actions</h4>
-                
-                <div className="draft-buttons">
-                  {draftStatus === 'pending' && (
-                    <button className="btn-primary btn-large" onClick={handleStartDraft}>
-                      🚀 Open Auction Registration
-                    </button>
-                  )}
-                  
-                  {draftStatus === 'open' && (
-                    <>
-                      {!auctionState ? (
-                        <button 
-                          className="btn-primary btn-large" 
-                          onClick={handleSetupAuction}
-                          disabled={auctionLoading}
-                        >
-                          {auctionLoading ? '⏳ Setting up...' : '🎯 Setup Auction'}
-                        </button>
-                      ) : (
-                        <button 
-                          className="btn-primary btn-large" 
-                          onClick={() => handleAuctionControl('start')}
-                          disabled={auctionLoading || auctionState?.isActive}
-                        >
-                          {auctionLoading ? '⏳ Starting...' : '▶️ Start Auction'}
-                        </button>
-                      )}
-                      <button className="btn-secondary" onClick={() => setDraftStatus('pending')}>
-                        ⏪ Close Registration
-                      </button>
-                    </>
-                  )}
-                  
-                  {draftStatus === 'in_progress' && (
-                    <div className="auction-admin-controls">
-                      <h4>🎯 Auction Controls</h4>
-                      <div className="auction-control-buttons">
-                        {auctionState?.isPaused ? (
-                          <button 
-                            className="btn-primary" 
-                            onClick={() => handleAuctionControl('resume')}
-                            disabled={auctionLoading}
-                          >
-                            ▶️ Resume
-                          </button>
-                        ) : (
-                          <button 
-                            className="btn-warning" 
-                            onClick={() => handleAuctionControl('pause')}
-                            disabled={auctionLoading}
-                          >
-                            ⏸️ Pause
-                          </button>
-                        )}
-                        <button 
-                          className="btn-secondary" 
-                          onClick={() => handleAuctionControl('skip')}
-                          disabled={auctionLoading}
-                        >
-                          ⏭️ Skip Player
-                        </button>
-                        <button 
-                          className="btn-success" 
-                          onClick={() => handleAuctionControl('sell')}
-                          disabled={auctionLoading}
-                        >
-                          💰 Sell Now
-                        </button>
-                        <button 
-                          className="btn-danger" 
-                          onClick={() => handleAuctionControl('stop')}
-                          disabled={auctionLoading}
-                        >
-                          ⏹️ Stop
-                        </button>
-                      </div>
-                      
-                      {auctionState?.currentPlayer && (
-                        <div style={{ marginTop: '15px', padding: '15px', background: 'var(--bg-input)', borderRadius: '8px' }}>
-                          <p><strong>Current Player:</strong> {auctionState.currentPlayer.name}</p>
-                          <p><strong>Current Bid:</strong> ${formatCurrency(auctionState.currentBid || 0)}</p>
-                          {auctionState.highestBidder && (
-                            <p><strong>Leading:</strong> {auctionState.highestBidder.teamName}</p>
-                          )}
-                        </div>
-                      )}
-                      
-                      <button 
-                        className="btn-secondary" 
-                        onClick={handleResetAuction}
-                        disabled={auctionLoading}
-                        style={{ marginTop: '15px' }}
-                      >
-                        🔄 Reset Auction
-                      </button>
-                      
-                      {/* Player Queue Management */}
-                      <div style={{ marginTop: '20px' }}>
-                        <button 
-                          className="btn-secondary"
-                          onClick={() => setShowAuctionPlayerMgmt(!showAuctionPlayerMgmt)}
-                        >
-                          {showAuctionPlayerMgmt ? '📋 Hide Player Queue' : '📋 Manage Player Queue'}
-                        </button>
-                        
-                        {showAuctionPlayerMgmt && (
-                          <div style={{ marginTop: '15px', background: 'var(--bg-dark)', padding: '15px', borderRadius: '8px', maxHeight: '400px', overflow: 'auto' }}>
-                            <h5 style={{ marginBottom: '10px', color: 'var(--text-secondary)' }}>
-                              Pending Players ({auctionPlayers.length})
-                            </h5>
-                            {auctionPlayers.length === 0 ? (
-                              <p style={{ color: 'var(--text-muted)' }}>No pending players in queue</p>
-                            ) : (
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                {auctionPlayers.map((player, idx) => (
-                                  <div 
-                                    key={player.id} 
-                                    style={{ 
-                                      display: 'grid', 
-                                      gridTemplateColumns: '40px 1fr 50px 90px 70px', 
-                                      gap: '8px', 
-                                      alignItems: 'center',
-                                      padding: '8px 10px',
-                                      background: 'var(--bg-card)',
-                                      borderRadius: '6px',
-                                      border: '1px solid var(--border-color)'
-                                    }}
-                                  >
-                                    <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>#{idx + 1}</span>
-                                    <span style={{ fontWeight: '500', color: 'var(--text-primary)' }}>{player.name}</span>
-                                    <span className={`position-badge ${player.position}`} style={{ fontSize: '0.7rem', padding: '2px 6px' }}>
-                                      {player.position?.slice(0, 3).toUpperCase()}
-                                    </span>
-                                    {editingPlayerPrice?.id === player.id ? (
-                                      <div style={{ display: 'flex', gap: '4px' }}>
-                                        <input
-                                          type="number"
-                                          value={editingPlayerPrice.basePrice}
-                                          onChange={(e) => setEditingPlayerPrice({...editingPlayerPrice, basePrice: parseInt(e.target.value) || 0})}
-                                          style={{ width: '60px', padding: '2px 4px', fontSize: '0.8rem' }}
-                                        />
-                                        <button 
-                                          onClick={() => handleUpdateBasePrice(player.id, editingPlayerPrice.basePrice)}
-                                          style={{ padding: '2px 6px', fontSize: '0.7rem' }}
-                                        >✓</button>
-                                      </div>
-                                    ) : (
-                                      <span 
-                                        style={{ color: 'var(--accent)', cursor: 'pointer', fontSize: '0.85rem' }}
-                                        onClick={() => setEditingPlayerPrice({ id: player.id, basePrice: player.basePrice })}
-                                        title="Click to edit base price"
-                                      >
-                                        ${formatCurrency(player.basePrice || 100000)}
-                                      </span>
-                                    )}
-                                    <div style={{ display: 'flex', gap: '4px' }}>
-                                      <button 
-                                        onClick={() => handleMovePlayer(player.id, 'up')}
-                                        disabled={idx === 0}
-                                        style={{ padding: '2px 6px', fontSize: '0.7rem', opacity: idx === 0 ? 0.3 : 1 }}
-                                        title="Move up"
-                                      >↑</button>
-                                      <button 
-                                        onClick={() => handleMovePlayer(player.id, 'down')}
-                                        disabled={idx === auctionPlayers.length - 1}
-                                        style={{ padding: '2px 6px', fontSize: '0.7rem', opacity: idx === auctionPlayers.length - 1 ? 0.3 : 1 }}
-                                        title="Move down"
-                                      >↓</button>
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                  
-                  {/* ============================================
-                      AUCTION ROUNDS & FRANCHISE MANAGEMENT
-                      ============================================ */}
-                  {selectedDraftType === 'auction' && (draftStatus === 'open' || draftStatus === 'in_progress' || draftStatus === 'pending') && (
-                    <div className="auction-management-section" style={{ marginTop: '30px' }}>
-                      <h4 style={{ marginBottom: '15px', color: 'var(--accent)' }}>🎯 Auction Management</h4>
-                      
-                      {/* Management Tabs */}
-                      <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
-                        <button 
-                          className={`btn-small ${showRoundsPanel ? 'btn-primary' : 'btn-secondary'}`}
-                          onClick={() => { setShowRoundsPanel(!showRoundsPanel); setShowFranchisePanel(false); }}
-                        >
-                          📊 Rounds ({auctionRounds.length})
-                        </button>
-                        <button 
-                          className={`btn-small ${showFranchisePanel ? 'btn-primary' : 'btn-secondary'}`}
-                          onClick={() => { setShowFranchisePanel(!showFranchisePanel); setShowRoundsPanel(false); }}
-                        >
-                          🏢 Franchises ({franchises.length})
-                        </button>
-                      </div>
-                      
-                      {/* ============ ROUNDS PANEL ============ */}
-                      {showRoundsPanel && (
-                        <div className="rounds-panel" style={{ background: 'var(--bg-card)', padding: '20px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-                            <h5 style={{ margin: 0, color: 'var(--text-primary)' }}>Auction Rounds (Batsmen → Allrounders → Bowlers)</h5>
-                            {auctionRounds.length === 0 && (
-                              <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                                Click "Setup Auction" to create rounds
-                              </span>
-                            )}
-                          </div>
-                          
-                          {/* Rounds List */}
-                          {auctionRounds.length === 0 ? (
-                            <div style={{ padding: '30px', textAlign: 'center', background: 'var(--bg-dark)', borderRadius: '8px' }}>
-                              <p style={{ color: 'var(--text-muted)', marginBottom: '15px' }}>
-                                No rounds created yet. Click "Setup Auction" to auto-create:
-                              </p>
-                              <div style={{ display: 'flex', justifyContent: 'center', gap: '15px', flexWrap: 'wrap' }}>
-                                <span style={{ padding: '8px 16px', background: 'var(--bg-input)', borderRadius: '20px', color: 'var(--accent)' }}>1. Batsmen</span>
-                                <span style={{ padding: '8px 16px', background: 'var(--bg-input)', borderRadius: '20px', color: 'var(--accent)' }}>2. Allrounders</span>
-                                <span style={{ padding: '8px 16px', background: 'var(--bg-input)', borderRadius: '20px', color: 'var(--accent)' }}>3. Bowlers</span>
-                              </div>
-                            </div>
-                          ) : (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                              {auctionRounds.map(round => (
-                                <div 
-                                  key={round.id} 
-                                  style={{ 
-                                    padding: '15px', 
-                                    background: selectedRound?.id === round.id ? 'var(--primary-dark)' : 'var(--bg-input)',
-                                    borderRadius: '8px',
-                                    border: `2px solid ${selectedRound?.id === round.id ? 'var(--accent)' : 'var(--border-color)'}`,
-                                    cursor: 'pointer'
-                                  }}
-                                  onClick={() => { setSelectedRound(round); loadRoundPlayers(round.id); }}
-                                >
-                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                    <div>
-                                      <strong style={{ color: 'var(--text-primary)' }}>Round {round.roundNumber}: {round.name}</strong>
-                                      <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-                                        {round.playerCount || 0} players • 
-                                        {round.isCompleted ? ' ✅ Completed' : round.isActive ? ' 🔴 Active' : ' ⏳ Pending'}
-                                      </div>
-                                    </div>
-                                    <div style={{ display: 'flex', gap: '8px' }}>
-                                      <button 
-                                        className="btn-small btn-secondary"
-                                        onClick={(e) => { e.stopPropagation(); setSelectedRound(round); setShowImportModal(true); }}
-                                      >
-                                        📥 Import
-                                      </button>
-                                      {!round.isActive && !round.isCompleted && (
-                                        <button 
-                                          className="btn-small btn-primary"
-                                          onClick={(e) => { e.stopPropagation(); handleSelectRound(round); }}
-                                        >
-                                          ▶️ Select
-                                        </button>
-                                      )}
-                                      <button 
-                                        className="btn-small btn-danger"
-                                        onClick={(e) => { e.stopPropagation(); handleDeleteRound(round.id); }}
-                                      >
-                                        🗑️
-                                      </button>
-                                    </div>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                          
-                          {/* Selected Round Players */}
-                          {selectedRound && (
-                            <div style={{ marginTop: '20px', padding: '15px', background: 'var(--bg-dark)', borderRadius: '8px' }}>
-                              <h6 style={{ marginBottom: '10px', color: 'var(--accent)' }}>
-                                {selectedRound.name} Players ({roundPlayers.length})
-                              </h6>
-                              {roundPlayers.length === 0 ? (
-                                <p style={{ color: 'var(--text-muted)' }}>No players in this round. Import players using JSON.</p>
-                              ) : (
-                                <div style={{ maxHeight: '300px', overflow: 'auto' }}>
-                                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
-                                    <thead>
-                                      <tr style={{ borderBottom: '1px solid var(--border-color)' }}>
-                                        <th style={{ padding: '8px', textAlign: 'left', color: 'var(--text-secondary)' }}>#</th>
-                                        <th style={{ padding: '8px', textAlign: 'left', color: 'var(--text-secondary)' }}>Name</th>
-                                        <th style={{ padding: '8px', textAlign: 'left', color: 'var(--text-secondary)' }}>Team</th>
-                                        <th style={{ padding: '8px', textAlign: 'left', color: 'var(--text-secondary)' }}>Type</th>
-                                        <th style={{ padding: '8px', textAlign: 'right', color: 'var(--text-secondary)' }}>Base Price</th>
-                                        <th style={{ padding: '8px', textAlign: 'center', color: 'var(--text-secondary)' }}>Status</th>
-                                      </tr>
-                                    </thead>
-                                    <tbody>
-                                      {roundPlayers.map((p, idx) => (
-                                        <tr key={p.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                                          <td style={{ padding: '8px', color: 'var(--text-muted)' }}>{idx + 1}</td>
-                                          <td style={{ padding: '8px', color: 'var(--text-primary)', fontWeight: '500' }}>{p.name}</td>
-                                          <td style={{ padding: '8px', color: 'var(--text-secondary)' }}>{p.team}</td>
-                                          <td style={{ padding: '8px' }}>
-                                            <span className={`position-badge ${p.position}`} style={{ fontSize: '0.75rem', padding: '2px 6px' }}>
-                                              {(p.category || p.position || 'UNK').toUpperCase()}
-                                            </span>
-                                          </td>
-                                          <td style={{ padding: '8px', textAlign: 'right', color: 'var(--accent)' }}>{formatCurrency(p.basePrice)}</td>
-                                          <td style={{ padding: '8px', textAlign: 'center' }}>
-                                            {p.status === 'sold' ? '✅' : p.status === 'unsold' ? '❌' : p.status === 'current' ? '🔴' : '⏳'}
-                                          </td>
-                                        </tr>
-                                      ))}
-                                    </tbody>
-                                  </table>
-                                </div>
-                              )}
-                              
-                              {/* Add Player to Round */}
-                              <div style={{ marginTop: '15px' }}>
-                                <button 
-                                  className="btn-small btn-secondary"
-                                  onClick={() => setShowAddPlayerToRound(!showAddPlayerToRound)}
-                                >
-                                  {showAddPlayerToRound ? '✖ Hide' : '➕ Add Player to Round'}
-                                </button>
-                                
-                                {showAddPlayerToRound && (
-                                  <div style={{ marginTop: '10px', padding: '12px', background: 'var(--bg-card)', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
-                                    <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap' }}>
-                                      <label style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Base Price:</label>
-                                      <select 
-                                        value={addPlayerBasePrice} 
-                                        onChange={(e) => setAddPlayerBasePrice(parseInt(e.target.value))}
-                                        style={{ padding: '6px 10px', borderRadius: '4px', background: 'var(--bg-input)', color: 'var(--text-primary)', border: '1px solid var(--border-color)' }}
-                                      >
-                                        <option value={500000}>$500K</option>
-                                        <option value={1000000}>$1M</option>
-                                        <option value={2000000}>$2M</option>
-                                        <option value={5000000}>$5M</option>
-                                        <option value={10000000}>$10M</option>
-                                        <option value={15000000}>$15M</option>
-                                        <option value={20000000}>$20M</option>
-                                      </select>
-                                    </div>
-                                    
-                                    <div style={{ maxHeight: '200px', overflow: 'auto' }}>
-                                      {getAvailablePlayersForRound(selectedRound).length === 0 ? (
-                                        <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '10px' }}>
-                                          No matching players available. Add players in the Players tab first.
-                                        </p>
-                                      ) : (
-                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                                          {getAvailablePlayersForRound(selectedRound).slice(0, 20).map(player => (
-                                            <div 
-                                              key={player.id}
-                                              style={{ 
-                                                display: 'flex', 
-                                                justifyContent: 'space-between', 
-                                                alignItems: 'center',
-                                                padding: '8px 10px',
-                                                background: 'var(--bg-input)',
-                                                borderRadius: '6px'
-                                              }}
-                                            >
-                                              <div>
-                                                <span style={{ fontWeight: '500', color: 'var(--text-primary)' }}>{player.name}</span>
-                                                <span style={{ marginLeft: '8px', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                                                  {player.team} • {player.position}
-                                                </span>
-                                              </div>
-                                              <button 
-                                                className="btn-small btn-primary"
-                                                onClick={() => handleAddPlayerToRound(player)}
-                                              >
-                                                + Add
-                                              </button>
-                                            </div>
-                                          ))}
-                                          {getAvailablePlayersForRound(selectedRound).length > 20 && (
-                                            <p style={{ color: 'var(--text-muted)', textAlign: 'center', fontSize: '0.85rem' }}>
-                                              Showing first 20 of {getAvailablePlayersForRound(selectedRound).length} players
-                                            </p>
-                                          )}
-                                        </div>
-                                      )}
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                      
-                      {/* ============ FRANCHISE PANEL ============ */}
-                      {showFranchisePanel && (
-                        <div className="franchise-panel" style={{ background: 'var(--bg-card)', padding: '20px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
-                          <h5 style={{ marginBottom: '15px', color: 'var(--text-primary)' }}>Franchise Management</h5>
-                          
-                          {/* Create New Franchise */}
-                          <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', flexWrap: 'wrap' }}>
-                            <input 
-                              type="text"
-                              value={newFranchiseName}
-                              onChange={(e) => setNewFranchiseName(e.target.value)}
-                              placeholder="Franchise name"
-                              style={{ flex: '1', minWidth: '150px', padding: '10px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-primary)' }}
-                            />
-                            <input 
-                              type="text"
-                              value={newFranchiseOwner}
-                              onChange={(e) => setNewFranchiseOwner(e.target.value)}
-                              placeholder="Owner name"
-                              style={{ flex: '1', minWidth: '150px', padding: '10px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-primary)' }}
-                            />
-                            <button className="btn-primary btn-small" onClick={handleCreateFranchise}>
-                              + Add Franchise
-                            </button>
-                          </div>
-                          
-                          {/* Franchise List */}
-                          {franchises.length === 0 ? (
-                            <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '20px' }}>
-                              No franchises registered. Add franchises or let users register teams.
-                            </p>
-                          ) : (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                              {franchises.map(team => (
-                                <div 
-                                  key={team.id}
-                                  style={{ 
-                                    padding: '15px', 
-                                    background: 'var(--bg-input)',
-                                    borderRadius: '8px',
-                                    border: '1px solid var(--border-color)'
-                                  }}
-                                >
-                                  {editingFranchise?.id === team.id ? (
-                                    <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
-                                      <input 
-                                        type="text"
-                                        value={editingFranchise.name}
-                                        onChange={(e) => setEditingFranchise({...editingFranchise, name: e.target.value})}
-                                        style={{ flex: '1', minWidth: '120px', padding: '8px', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'var(--bg-card)', color: 'var(--text-primary)' }}
-                                      />
-                                      <input 
-                                        type="text"
-                                        value={editingFranchise.ownerName}
-                                        onChange={(e) => setEditingFranchise({...editingFranchise, ownerName: e.target.value})}
-                                        style={{ flex: '1', minWidth: '120px', padding: '8px', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'var(--bg-card)', color: 'var(--text-primary)' }}
-                                      />
-                                      <input 
-                                        type="number"
-                                        value={editingFranchise.purse}
-                                        onChange={(e) => setEditingFranchise({...editingFranchise, purse: parseInt(e.target.value) || 0})}
-                                        style={{ width: '120px', padding: '8px', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'var(--bg-card)', color: 'var(--text-primary)' }}
-                                        placeholder="Purse"
-                                      />
-                                      <button className="btn-small btn-primary" onClick={() => handleUpdateFranchise(team.id)}>✓ Save</button>
-                                      <button className="btn-small btn-secondary" onClick={() => setEditingFranchise(null)}>✗ Cancel</button>
-                                    </div>
-                                  ) : (
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                      <div>
-                                        <strong style={{ color: 'var(--text-primary)', fontSize: '1.1rem' }}>{team.name}</strong>
-                                        <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-                                          Owner: {team.ownerName || 'TBD'} • Players: {team.rosterCount || 0}/12
-                                        </div>
-                                      </div>
-                                      <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-                                        <div style={{ textAlign: 'right' }}>
-                                          <div style={{ color: 'var(--success)', fontWeight: '700', fontSize: '1.1rem' }}>{formatCurrency(team.purse)}</div>
-                                          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Remaining</div>
-                                        </div>
-                                        <div style={{ display: 'flex', gap: '6px' }}>
-                                          <button 
-                                            className="btn-small btn-secondary"
-                                            onClick={() => setEditingFranchise({ id: team.id, name: team.name, ownerName: team.ownerName, purse: team.purse })}
-                                          >
-                                            ✏️
-                                          </button>
-                                          <button 
-                                            className="btn-small btn-danger"
-                                            onClick={() => handleDeleteFranchise(team.id)}
-                                          >
-                                            🗑️
-                                          </button>
-                                        </div>
-                                      </div>
-                                    </div>
-                                  )}
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                          
-                          {/* Total Purse Summary */}
-                          {franchises.length > 0 && (
-                            <div style={{ marginTop: '15px', padding: '10px', background: 'var(--bg-dark)', borderRadius: '6px', display: 'flex', justifyContent: 'space-between' }}>
-                              <span style={{ color: 'var(--text-secondary)' }}>Total Remaining Purse:</span>
-                              <strong style={{ color: 'var(--accent)' }}>{formatCurrency(franchises.reduce((sum, t) => sum + (t.purse || 0), 0))}</strong>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                      
-                      {/* JSON Import Modal */}
-                      {showImportModal && selectedRound && (
-                        <div className="modal-overlay" onClick={() => setShowImportModal(false)}>
-                          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '700px', maxHeight: '90vh', overflow: 'auto' }}>
-                            <button className="modal-close" onClick={() => setShowImportModal(false)}>×</button>
-                            <h3 style={{ marginBottom: '15px' }}>📥 Import Players to {selectedRound.name}</h3>
-                            
-                            <p style={{ color: 'var(--text-secondary)', marginBottom: '15px' }}>
-                              Paste JSON array of players. Each player should have: name, team, position/category, base_price
-                            </p>
-                            
-                            <textarea
-                              value={importJson}
-                              onChange={(e) => setImportJson(e.target.value)}
-                              placeholder='[{"name": "Player Name", "team": "MI", "position": "batter", "base_price": 20000000}]'
-                              style={{ 
-                                width: '100%', 
-                                height: '200px', 
-                                padding: '12px', 
-                                borderRadius: '8px', 
-                                border: '1px solid var(--border-color)', 
-                                background: 'var(--bg-input)', 
-                                color: 'var(--text-primary)',
-                                fontFamily: 'monospace',
-                                fontSize: '0.9rem',
-                                resize: 'vertical'
-                              }}
-                            />
-                            
-                            <div style={{ display: 'flex', gap: '10px', marginTop: '15px' }}>
-                              <button className="btn-primary" onClick={handleImportPlayers}>
-                                Import Players
-                              </button>
-                              <button className="btn-secondary" onClick={() => setShowImportModal(false)}>
-                                Cancel
-                              </button>
-                            </div>
-                            
-                            {/* JSON Example */}
-                            <div style={{ marginTop: '20px', padding: '15px', background: 'var(--bg-dark)', borderRadius: '8px' }}>
-                              <h5 style={{ marginBottom: '10px', color: 'var(--accent)' }}>📋 JSON Format Example</h5>
-                              <pre style={{ 
-                                background: '#1a1a2e', 
-                                padding: '12px', 
-                                borderRadius: '6px', 
-                                overflow: 'auto',
-                                fontSize: '0.8rem',
-                                color: '#a5d6a7'
-                              }}>{`[
+              <div style={{ padding: '15px', background: 'var(--bg-dark)', borderRadius: '8px' }}>
+                <strong style={{ color: 'var(--accent)' }}>Expected JSON Format:</strong>
+                <pre style={{ marginTop: '10px', fontSize: '0.85rem', color: '#a5d6a7', overflow: 'auto', whiteSpace: 'pre-wrap' }}>{`[
   {
-    "name": "Virat Kohli",
-    "team": "RCB",
-    "position": "batter",
-    "category": "Marquee",
-    "base_price": 20000000
-  },
-  {
-    "name": "Jasprit Bumrah",
-    "team": "MI",
-    "position": "bowler",
-    "category": "Marquee",
-    "base_price": 20000000
-  },
-  {
-    "name": "Hardik Pandya",
-    "team": "MI",
-    "position": "allrounder",
-    "category": "Capped",
-    "base_price": 15000000
-  },
-  {
-    "name": "Ishan Kishan",
-    "team": "MI",
-    "position": "keeper",
-    "category": "Capped",
-    "base_price": 10000000
-  },
-  {
-    "name": "New Player",
-    "team": "CSK",
-    "position": "bowler",
-    "category": "Uncapped",
-    "base_price": 2000000
+    "name": "Team Alpha",
+    "owner": "John Doe",
+    "roster": [
+      { "name": "Virat Kohli", "role": "batsman" },
+      { "name": "Rohit Sharma", "role": "batsman" },
+      { "name": "Rishabh Pant", "role": "wicketkeeper" },
+      { "name": "Hardik Pandya", "role": "all-rounder" },
+      { "name": "Jasprit Bumrah", "role": "bowler" },
+      { "name": "Kuldeep Yadav", "role": "bowler" }
+    ]
   }
-]
-
-// Notes:
-// - position: "batter", "bowler", "allrounder", "keeper"
-// - category: Custom label (e.g., "Marquee", "Capped", "Uncapped")
-// - base_price: Amount in dollars (2000000 = $2M)
-// - team: Optional - real IPL/national team code`}</pre>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  
-                  {draftStatus === 'completed' && (
-                    <button className="btn-secondary" onClick={selectedDraftType === 'auction' ? handleResetAuction : handleResetDraft}>
-                      🔄 Reset {selectedDraftType === 'auction' ? 'Auction' : 'Draft'} (Keep Teams)
-                    </button>
-                  )}
+]`}</pre>
+                <div style={{ marginTop: '15px', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                  <strong>Roles:</strong>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '8px', marginTop: '8px' }}>
+                    <span>🏏 <code>batsman</code> → Batter slot (5 max)</span>
+                    <span>🧤 <code>wicketkeeper</code> → WK slot (1 max)</span>
+                    <span>🎯 <code>bowler</code> → Bowler slot (5 max)</span>
+                    <span>🔄 <code>all-rounder</code> → Auto-assigned</span>
+                  </div>
                 </div>
-                
-                <div className="draft-danger-zone">
-                  <h4>⚠️ Danger Zone</h4>
-                  <button className="btn-danger" onClick={handleDeleteDraft}>
-                    🗑️ Delete Draft & All Teams
-                  </button>
-                  <p className="danger-warning">This permanently removes all teams and resets the draft.</p>
-                </div>
+                <p style={{ marginTop: '10px', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                  <strong>Note:</strong> Player names must match players in your database. All-rounders auto-fill batter slots first, then bowler slots.
+                </p>
               </div>
             </div>
             
-            {/* Draft Logs Section */}
-            {(draftStatus === 'completed' || draftStatus === 'in_progress') && (
-              <div className="draft-logs-section" style={{ marginTop: '30px' }}>
-                <h3>📋 Draft Pick History</h3>
-                {loadingDraftLogs ? (
-                  <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)' }}>
-                    Loading draft logs...
-                  </div>
-                ) : draftLogs.length === 0 ? (
-                  <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)' }}>
-                    No draft picks recorded yet.
-                  </div>
-                ) : (
-                  <div style={{ 
-                    background: 'var(--bg-card)', 
-                    borderRadius: '8px', 
-                    border: '1px solid var(--border-color)',
-                    maxHeight: '500px',
-                    overflow: 'auto'
-                  }}>
-                    {/* Header */}
-                    <div style={{ 
-                      display: 'grid', 
-                      gridTemplateColumns: '60px 60px 1fr 1fr 100px 150px', 
-                      padding: '12px 15px', 
-                      background: 'var(--bg-secondary)', 
-                      fontWeight: '600',
-                      fontSize: '0.85rem',
-                      borderBottom: '1px solid var(--border-color)',
-                      position: 'sticky',
-                      top: 0
-                    }}>
-                      <span>Pick #</span>
-                      <span>Round</span>
-                      <span>Team</span>
-                      <span>Player</span>
-                      <span>Position</span>
-                      <span>Time</span>
-                    </div>
-                    
-                    {/* Picks */}
-                    {draftLogs.map((pick, idx) => (
-                      <div 
-                        key={pick.id || idx} 
-                        style={{ 
-                          display: 'grid', 
-                          gridTemplateColumns: '60px 60px 1fr 1fr 100px 150px', 
-                          padding: '10px 15px', 
-                          borderBottom: '1px solid var(--border-color)',
-                          fontSize: '0.9rem',
-                          background: idx % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.02)'
-                        }}
-                      >
-                        <span style={{ fontWeight: '600', color: 'var(--accent-color)' }}>
-                          #{pick.pickNumber || idx + 1}
-                        </span>
-                        <span>R{pick.round || Math.ceil((idx + 1) / (allTeams?.length || 1))}</span>
-                        <span style={{ fontWeight: '500' }}>{pick.teamName || 'Unknown'}</span>
-                        <span>
-                          <span style={{ fontWeight: '500' }}>{pick.playerName || 'Unknown'}</span>
-                          {pick.playerTeam && (
-                            <span style={{ marginLeft: '6px', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                              ({pick.playerTeam})
-                            </span>
-                          )}
-                        </span>
-                        <span>
-                          <span className={`position-badge ${pick.playerPosition}`} style={{ 
-                            fontSize: '0.75rem', 
-                            padding: '2px 8px',
-                            borderRadius: '12px',
-                            background: pick.playerPosition === 'batter' ? '#3b82f6' : 
-                                       pick.playerPosition === 'bowler' ? '#22c55e' : 
-                                       pick.playerPosition === 'keeper' ? '#f59e0b' : '#8b5cf6',
-                            color: 'white'
-                          }}>
-                            {pick.playerPosition?.toUpperCase() || 'N/A'}
-                          </span>
-                        </span>
-                        <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                          {pick.createdAt ? new Date(pick.createdAt).toLocaleString('en-US', {
-                            month: 'short',
-                            day: 'numeric',
-                            hour: '2-digit',
-                            minute: '2-digit'
-                          }) : '-'}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                
-                {/* Summary */}
-                {draftLogs.length > 0 && (
-                  <div style={{ 
-                    marginTop: '15px', 
-                    padding: '15px', 
-                    background: 'var(--bg-card)', 
-                    borderRadius: '8px',
-                    border: '1px solid var(--border-color)'
-                  }}>
-                    <h4 style={{ margin: '0 0 10px 0' }}>📊 Draft Summary</h4>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '15px' }}>
-                      <div>
-                        <div style={{ fontSize: '1.5rem', fontWeight: '700', color: 'var(--accent-color)' }}>
-                          {draftLogs.length}
+            <div className="current-teams" style={{ marginTop: '30px' }}>
+              <h4>Current Teams ({allTeams?.length || 0})</h4>
+              {allTeams && allTeams.length > 0 ? (
+                <div style={{ display: 'grid', gap: '10px', marginTop: '15px' }}>
+                  {allTeams.filter(t => t.tournamentId === tournament.id).map(team => (
+                    <div 
+                      key={team.id}
+                      style={{ 
+                        padding: '15px', 
+                        background: 'var(--bg-card)', 
+                        borderRadius: '8px',
+                        border: '1px solid var(--border-color)'
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div>
+                          <strong style={{ color: 'var(--text-primary)' }}>{team.name}</strong>
+                          <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                            Owner: {team.ownerName || team.owner || 'Unknown'} • {team.roster?.length || 0} players
+                          </div>
                         </div>
-                        <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Total Picks</div>
-                      </div>
-                      <div>
-                        <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#3b82f6' }}>
-                          {draftLogs.filter(p => p.playerPosition === 'batter').length}
-                        </div>
-                        <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Batters</div>
-                      </div>
-                      <div>
-                        <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#22c55e' }}>
-                          {draftLogs.filter(p => p.playerPosition === 'bowler').length}
-                        </div>
-                        <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Bowlers</div>
-                      </div>
-                      <div>
-                        <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#8b5cf6' }}>
-                          {draftLogs.filter(p => p.playerPosition === 'allrounder').length}
-                        </div>
-                        <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>All-rounders</div>
-                      </div>
-                      <div>
-                        <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#f59e0b' }}>
-                          {draftLogs.filter(p => p.playerPosition === 'keeper').length}
-                        </div>
-                        <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Keepers</div>
+                        <button 
+                          className="btn-small btn-danger"
+                          onClick={() => {
+                            if (confirm(`Delete team "${team.name}"?`)) {
+                              onDeleteTeam && onDeleteTeam(team.id);
+                            }
+                          }}
+                        >
+                          🗑️
+                        </button>
                       </div>
                     </div>
-                  </div>
-                )}
-              </div>
-            )}
+                  ))}
+                </div>
+              ) : (
+                <p style={{ color: 'var(--text-muted)', marginTop: '15px' }}>
+                  No teams imported yet. Use the form above to import teams after your auction.
+                </p>
+              )}
+            </div>
           </div>
         )}
+        
         
         {activeTab === 'users' && (
           <div className="admin-users">
@@ -7470,7 +5721,7 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
               <ul>
                 <li className={team.roster.length > 0 ? 'checked' : ''}>
                   <span className="check-icon">{team.roster.length > 0 ? '✓' : '○'}</span>
-                  Complete auction ({team.roster.length}/{TOTAL_ROSTER_SIZE} players)
+                  Complete roster ({team.roster.length}/{TOTAL_ROSTER_SIZE} players)
                 </li>
                 <li className={apiTestStatus?.status === 'success' ? 'checked' : ''}>
                   <span className="check-icon">{apiTestStatus?.status === 'success' ? '✓' : '○'}</span>
@@ -7553,17 +5804,12 @@ export default function App() {
   const [team, setTeam] = useState(null);
   const [isDraftComplete, setIsDraftComplete] = useState(false);
   const [isDraftOpen, setIsDraftOpen] = useState(false);
-  const [draftType, setDraftType] = useState('auction'); // Always auction now
+  const [draftType, setDraftType] = useState('import'); // Teams imported after external auction
   const [allTeams, setAllTeams] = useState([]);
   const [allUsers, setAllUsers] = useState([]);
   const [players, setPlayers] = useState([]); // Players loaded from API
   const [isLoading, setIsLoading] = useState(false);
   const [apiConnected, setApiConnected] = useState(null); // null = unknown, true = connected, false = offline
-
-  // Check if tournament supports auction
-  const supportsAuction = (tournamentId) => {
-    return tournamentId === 't20_wc_2026' || tournamentId === 'ipl_2026';
-  };
 
   // Load players for a tournament from API
   const loadPlayers = async (tournamentId) => {
@@ -7964,14 +6210,38 @@ export default function App() {
         />
       )}
       {currentPage === 'draft' && (
-          <AuctionPage
-            team={team}
-            tournament={selectedTournament}
-            players={playerPool}
-            allTeams={allTeams}
-            onDraftComplete={handleDraftComplete}
-            onUpdateTeam={handleUpdateTeam}
-          />
+        <div className="draft-waiting-page">
+          <div className="draft-waiting-container">
+            <h2>🏏 Teams & Rosters</h2>
+            <p style={{ color: 'var(--text-secondary)', marginBottom: '20px' }}>
+              Teams are managed through the Admin Panel after the external auction.
+            </p>
+            
+            {team ? (
+              <div className="your-team-card" style={{ background: 'var(--bg-card)', padding: '20px', borderRadius: '12px', marginBottom: '20px' }}>
+                <h3>Your Team: {team.name}</h3>
+                <p>Roster: {team.roster?.length || 0} players</p>
+                {team.roster && team.roster.length > 0 ? (
+                  <div style={{ marginTop: '15px' }}>
+                    {team.roster.map(p => (
+                      <div key={p.id} style={{ padding: '8px', borderBottom: '1px solid var(--border-color)' }}>
+                        {p.name} - {p.position}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p style={{ color: 'var(--text-muted)' }}>No players yet - awaiting roster import</p>
+                )}
+              </div>
+            ) : (
+              <p style={{ color: 'var(--text-muted)' }}>You haven't created a team yet.</p>
+            )}
+            
+            <button className="btn-secondary" onClick={() => setCurrentPage('home')}>
+              ← Back to Home
+            </button>
+          </div>
+        </div>
       )}
       {currentPage === 'admin' && user?.isAdmin && (
         <AdminPanel

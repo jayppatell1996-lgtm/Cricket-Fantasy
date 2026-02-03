@@ -18,7 +18,7 @@ function generateId() {
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
   if (req.method === 'OPTIONS') {
@@ -312,6 +312,36 @@ export default async function handler(req, res) {
       });
 
       return res.status(200).json({ success: true, message: 'Player updated' });
+    }
+
+    // ============================================
+    // DELETE - Delete player(s)
+    // ============================================
+    if (req.method === 'DELETE') {
+      const { tournament, playerId } = req.query;
+      
+      // Delete single player
+      if (playerId) {
+        await db.execute({
+          sql: 'DELETE FROM players WHERE id = ?',
+          args: [playerId]
+        });
+        return res.status(200).json({ success: true, message: 'Player deleted' });
+      }
+      
+      // Delete all players for a tournament
+      if (tournament) {
+        const result = await db.execute({
+          sql: 'DELETE FROM players WHERE tournament_id = ?',
+          args: [tournament]
+        });
+        return res.status(200).json({ 
+          success: true, 
+          message: `Deleted ${result.rowsAffected || 'all'} players from tournament` 
+        });
+      }
+      
+      return res.status(400).json({ error: 'tournament or playerId required for DELETE' });
     }
 
     return res.status(405).json({ error: 'Method not allowed' });

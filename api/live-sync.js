@@ -718,7 +718,45 @@ export default async function handler(req, res) {
   try {
     // ========== GET: Fetch matches for tournament from Cricket API ==========
     if (req.method === 'GET') {
-      const { tournamentId, seriesName: customSeriesName } = req.query;
+      const { tournamentId, seriesName: customSeriesName, action } = req.query;
+      
+      // ACTION: LIVE - Get current live matches
+      if (action === 'live') {
+        const liveResult = await cricketApiCall('currentMatches?offset=0', apiKey);
+        
+        if (!liveResult.success) {
+          return res.status(500).json({ 
+            success: false, 
+            error: liveResult.error,
+            count: 0,
+            matches: []
+          });
+        }
+        
+        // Filter to T20 matches only
+        const t20Matches = (liveResult.data || []).filter(m => {
+          const matchType = (m.matchType || '').toLowerCase();
+          const name = (m.name || '').toLowerCase();
+          return matchType === 't20' || name.includes('t20') || name.includes('twenty20');
+        });
+        
+        return res.json({
+          success: true,
+          count: t20Matches.length,
+          totalMatches: (liveResult.data || []).length,
+          matches: t20Matches.map(m => ({
+            id: m.id,
+            name: m.name,
+            status: m.status,
+            matchType: m.matchType,
+            teams: m.teams?.join(' vs '),
+            venue: m.venue,
+            date: m.date,
+            dateTimeGMT: m.dateTimeGMT,
+            fantasyEnabled: m.fantasyEnabled
+          }))
+        });
+      }
       
       // Determine series name to search
       const seriesName = customSeriesName || TOURNAMENT_SERIES_MAP[tournamentId];

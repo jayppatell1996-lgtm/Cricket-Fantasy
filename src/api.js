@@ -268,6 +268,18 @@ export const playersAPI = {
       method: 'PUT',
       body: player
     });
+  },
+
+  async delete(playerId) {
+    return apiCall(`/players?playerId=${playerId}`, {
+      method: 'DELETE'
+    });
+  },
+
+  async deleteAll(tournamentId) {
+    return apiCall(`/players?tournament=${tournamentId}`, {
+      method: 'DELETE'
+    });
   }
 };
 
@@ -334,6 +346,14 @@ export const usersAPI = {
 // ============================================
 export const liveSyncAPI = {
   /**
+   * Get live matches from Cricket API
+   * Returns list of currently live T20 matches
+   */
+  async getLiveMatches() {
+    return apiCall('/live-sync?action=live');
+  },
+
+  /**
    * Get all matches for a tournament from Cricket API
    * Uses series search → series info flow
    */
@@ -379,240 +399,6 @@ export const liveSyncAPI = {
 // ============================================
 // AUCTION API - Auction Draft System
 // ============================================
-export const auctionAPI = {
-  /**
-   * Get current auction state including current player, bids, timer, teams
-   */
-  async getState(leagueId) {
-    return apiCall(`/auction?action=state&leagueId=${leagueId}`);
-  },
-
-  /**
-   * Get all auction players (queue, sold, unsold)
-   */
-  async getPlayers(leagueId, status = null) {
-    const query = status ? `&status=${status}` : '';
-    return apiCall(`/auction?action=players&leagueId=${leagueId}${query}`);
-  },
-
-  /**
-   * Get auction activity logs
-   */
-  async getLogs(leagueId, limit = 50) {
-    return apiCall(`/auction?action=logs&leagueId=${leagueId}&limit=${limit}`);
-  },
-
-  /**
-   * Setup auction for a league - initializes state and loads players
-   */
-  async setup(leagueId, tournamentId, budget = 5000000) {
-    return apiCall('/auction?action=setup', {
-      method: 'POST',
-      body: { leagueId, tournamentId, budget }
-    });
-  },
-
-  /**
-   * Place a bid on the current player
-   */
-  async placeBid(leagueId, teamId, userId) {
-    return apiCall('/auction?action=bid', {
-      method: 'POST',
-      body: { leagueId, teamId, userId }
-    });
-  },
-
-  /**
-   * Admin control actions: start, pause, resume, skip, sell, timer_expired, stop, next_player, select_round
-   */
-  async control(leagueId, controlAction, roundId = null) {
-    return apiCall('/auction?action=control', {
-      method: 'POST',
-      body: { leagueId, controlAction, roundId }
-    });
-  },
-
-  /**
-   * Start the auction
-   */
-  async start(leagueId) {
-    return this.control(leagueId, 'start');
-  },
-
-  /**
-   * Pause the auction
-   */
-  async pause(leagueId) {
-    return this.control(leagueId, 'pause');
-  },
-
-  /**
-   * Resume the auction
-   */
-  async resume(leagueId) {
-    return this.control(leagueId, 'resume');
-  },
-
-  /**
-   * Skip current player (mark as unsold)
-   */
-  async skip(leagueId) {
-    return this.control(leagueId, 'skip');
-  },
-
-  /**
-   * Sell current player to highest bidder
-   */
-  async sell(leagueId) {
-    return this.control(leagueId, 'sell');
-  },
-
-  /**
-   * Handle timer expiration (client-triggered)
-   */
-  async timerExpired(leagueId) {
-    return this.control(leagueId, 'timer_expired');
-  },
-
-  /**
-   * Stop the auction (can be resumed later)
-   */
-  async stop(leagueId) {
-    return this.control(leagueId, 'stop');
-  },
-
-  /**
-   * Reset auction - clears all data
-   */
-  async reset(leagueId) {
-    return apiCall(`/auction?action=reset&leagueId=${leagueId}`, {
-      method: 'DELETE'
-    });
-  },
-
-  /**
-   * Update player order in queue
-   */
-  async reorderPlayer(leagueId, playerId, newIndex) {
-    return apiCall('/auction?action=reorder', {
-      method: 'POST',
-      body: { leagueId, playerId, newIndex }
-    });
-  },
-
-  /**
-   * Update player base price
-   */
-  async updateBasePrice(leagueId, playerId, basePrice) {
-    return apiCall('/auction?action=update_price', {
-      method: 'POST',
-      body: { leagueId, playerId, basePrice }
-    });
-  },
-
-  // ============================================
-  // ROUNDS MANAGEMENT
-  // ============================================
-
-  /**
-   * Get all auction rounds for a league
-   */
-  async getRounds(leagueId) {
-    return apiCall(`/auction?action=rounds&leagueId=${leagueId}`);
-  },
-
-  /**
-   * Create a new auction round
-   */
-  async createRound(leagueId, roundNumber, name, players = []) {
-    return apiCall('/auction?action=create_round', {
-      method: 'POST',
-      body: { leagueId, roundNumber, name, players }
-    });
-  },
-
-  /**
-   * Import players to a round (JSON format)
-   */
-  async importPlayers(leagueId, roundId, players, append = false) {
-    return apiCall('/auction?action=import_players', {
-      method: 'POST',
-      body: { leagueId, roundId, players, append }
-    });
-  },
-
-  /**
-   * Delete a round
-   */
-  async deleteRound(leagueId, roundId) {
-    return apiCall(`/auction?action=delete_round&leagueId=${leagueId}&roundId=${roundId}`, {
-      method: 'DELETE'
-    });
-  },
-
-  /**
-   * Reset a round (clear players and status)
-   */
-  async resetRound(leagueId, roundId) {
-    return apiCall('/auction?action=reset_round', {
-      method: 'POST',
-      body: { leagueId, roundId }
-    });
-  },
-
-  /**
-   * Start a specific round
-   */
-  async startRound(leagueId, roundId) {
-    return apiCall('/auction?action=control', {
-      method: 'POST',
-      body: { leagueId, controlAction: 'start_round', roundId }
-    });
-  },
-
-  /**
-   * Get unsold players
-   */
-  async getUnsold(leagueId) {
-    return apiCall(`/auction?action=unsold&leagueId=${leagueId}`);
-  },
-
-  /**
-   * Get teams for auction (with purse info)
-   */
-  async getTeams(leagueId) {
-    return apiCall(`/auction?action=teams&leagueId=${leagueId}`);
-  },
-
-  /**
-   * Create a franchise/team
-   */
-  async createTeam(leagueId, name, ownerName, ownerId = null, purse = 129000000) {
-    return apiCall('/auction?action=create_team', {
-      method: 'POST',
-      body: { leagueId, name, ownerName, ownerId, purse }
-    });
-  },
-
-  /**
-   * Update a team
-   */
-  async updateTeam(teamId, updates) {
-    return apiCall('/auction?action=update_team', {
-      method: 'POST',
-      body: { teamId, ...updates }
-    });
-  },
-
-  /**
-   * Delete a team
-   */
-  async deleteTeam(leagueId, teamId) {
-    return apiCall(`/auction?action=delete_team&leagueId=${leagueId}&teamId=${teamId}`, {
-      method: 'DELETE'
-    });
-  }
-};
 
 // ============================================
 // SEED API (Part of Admin)
@@ -703,7 +489,6 @@ export default {
   users: usersAPI,
   seed: seedAPI,
   liveSync: liveSyncAPI,
-  auction: auctionAPI,
   initializeAppData,
   getDraftData,
   getStandings
