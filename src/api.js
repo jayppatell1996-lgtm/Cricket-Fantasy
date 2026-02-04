@@ -8,7 +8,7 @@
  * - /api/leagues
  * - /api/teams
  * - /api/players
- * - /api/draft?type=picks|roster
+ * - /api/draft?type=roster
  */
 
 // Base URL for API calls
@@ -165,15 +165,6 @@ export const leaguesAPI = {
     });
   },
 
-  async updateDraftStatus(leagueId, draftStatus, draftOrder = null) {
-    const body = { id: leagueId, draftStatus };
-    if (draftOrder) body.draftOrder = draftOrder;
-    return apiCall('/leagues', {
-      method: 'PUT',
-      body
-    });
-  },
-
   async delete(leagueId) {
     return apiCall(`/leagues?id=${leagueId}`, {
       method: 'DELETE'
@@ -284,29 +275,7 @@ export const playersAPI = {
 };
 
 // ============================================
-// DRAFT API (Picks + Roster)
-// ============================================
-export const draftAPI = {
-  async getPicks(leagueId) {
-    return apiCall(`/draft?type=picks&leagueId=${leagueId}`);
-  },
-
-  async makePick(pick) {
-    return apiCall('/draft?type=picks', {
-      method: 'POST',
-      body: pick
-    });
-  },
-
-  async resetDraft(leagueId) {
-    return apiCall(`/draft?type=picks&leagueId=${leagueId}`, {
-      method: 'DELETE'
-    });
-  }
-};
-
-// ============================================
-// ROSTER API (Part of Draft)
+// ROSTER API
 // ============================================
 export const rosterAPI = {
   async get(teamId) {
@@ -397,10 +366,6 @@ export const liveSyncAPI = {
 };
 
 // ============================================
-// AUCTION API - Auction Draft System
-// ============================================
-
-// ============================================
 // SEED API (Part of Admin)
 // ============================================
 export const seedAPI = {
@@ -440,30 +405,6 @@ export async function initializeAppData(userId, tournamentId) {
 }
 
 /**
- * Get all data needed for draft page
- */
-export async function getDraftData(leagueId, tournamentId) {
-  try {
-    const [leagueRes, teamsRes, playersRes, picksRes] = await Promise.all([
-      leaguesAPI.getById(leagueId),
-      teamsAPI.getAll({ leagueId }),
-      playersAPI.getAvailable(tournamentId, leagueId),
-      draftAPI.getPicks(leagueId)
-    ]);
-
-    return {
-      league: leagueRes.league,
-      teams: teamsRes.teams || [],
-      availablePlayers: playersRes.players || [],
-      draftPicks: picksRes.picks || []
-    };
-  } catch (error) {
-    console.error('Failed to get draft data:', error);
-    throw error;
-  }
-}
-
-/**
  * Get standings for a league
  */
 export async function getStandings(leagueId) {
@@ -484,12 +425,10 @@ export default {
   leagues: leaguesAPI,
   teams: teamsAPI,
   players: playersAPI,
-  draft: draftAPI,
   roster: rosterAPI,
   users: usersAPI,
   seed: seedAPI,
   liveSync: liveSyncAPI,
   initializeAppData,
-  getDraftData,
   getStandings
 };

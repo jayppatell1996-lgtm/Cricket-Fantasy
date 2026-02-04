@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import api, { authAPI, teamsAPI, playersAPI, leaguesAPI, draftAPI, rosterAPI, tournamentsAPI, usersAPI, adminAPI, liveSyncAPI } from './api.js';
+import api, { authAPI, teamsAPI, playersAPI, leaguesAPI, rosterAPI, tournamentsAPI, usersAPI, adminAPI, liveSyncAPI } from './api.js';
 
 // ============================================
 // T20 FANTASY CRICKET - COMPLETE APPLICATION
@@ -19,7 +19,6 @@ const TOURNAMENTS = {
     status: 'upcoming',
     teams: [],
     isTest: false,
-    draftStatus: 'pending',
     matches: [], // Loaded from database/API
   },
 };
@@ -709,7 +708,7 @@ const LoginPage = ({ onLogin, onShowSignup }) => {
               className="btn-link" 
               style={{ fontSize: '12px', color: '#888' }}
               onClick={() => {
-                if (confirm('This will clear all local data (teams, draft status, etc). Are you sure?')) {
+                if (confirm('This will clear all local data (teams, settings, etc). Are you sure?')) {
                   localStorage.clear();
                   window.location.reload();
                 }
@@ -897,7 +896,6 @@ const TeamCreationPage = ({ user, tournament, onTeamCreated }) => {
       console.log('✅ API Team created:', response);
       teamData.id = response.teamId;
       teamData.leagueId = response.leagueId;
-      teamData.draftPosition = response.draftPosition;
     } catch (apiError) {
       console.log('⚠️ API Team creation failed:', apiError.message);
       // If it's a duplicate error, show message
@@ -967,13 +965,13 @@ const TeamCreationPage = ({ user, tournament, onTeamCreated }) => {
             </div>
           </div>
           
-          <div className="draft-info">
+          <div className="league-info">
             <h3>🏏 Fantasy League</h3>
             <p>Teams are imported after the external auction is completed.</p>
           </div>
           
           <button type="submit" className="btn-primary btn-large" disabled={loading}>
-            {loading ? <span className="spinner"></span> : 'Create Team & Enter Draft'}
+            {loading ? <span className="spinner"></span> : 'Create Team'}
           </button>
         </form>
       </div>
@@ -982,7 +980,7 @@ const TeamCreationPage = ({ user, tournament, onTeamCreated }) => {
 };
 
 // ============================================
-const AdminPanel = ({ user, tournament, players: playersProp, draftType: parentDraftType, onSetDraftType, onUpdateTournament, onRefreshPlayers, onRefreshTeams, onLogout, onBackToTournaments, onSwitchTournament, allTeams, allUsers, onStartDraft, onDeleteTeam, onUpdateTeam, onDeleteUser }) => {
+const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament, onRefreshPlayers, onRefreshTeams, onLogout, onBackToTournaments, onSwitchTournament, allTeams, allUsers, onDeleteTeam, onUpdateTeam, onDeleteUser }) => {
   const [activeTab, setActiveTab] = useState('overview');
   
   // Local fantasy points calculator (mirrors backend rules)
@@ -1142,50 +1140,6 @@ const AdminPanel = ({ user, tournament, players: playersProp, draftType: parentD
     }
   };
   
-  // Draft status state
-  const [draftStatus, setDraftStatusState] = useState('pending');
-  
-  // Load draft status from database when tournament changes
-  useEffect(() => {
-    const loadDraftStatus = async () => {
-      try {
-        const leaguesResponse = await leaguesAPI.getAll(tournament.id);
-        if (leaguesResponse.leagues && leaguesResponse.leagues.length > 0) {
-          const league = leaguesResponse.leagues[0];
-          console.log(`📋 Admin: Loaded draft status from DB: ${league.draftStatus}`);
-          setDraftStatusState(league.draftStatus || 'pending');
-        }
-      } catch (err) {
-        console.log('Failed to load draft status:', err);
-        setDraftStatusState('pending');
-      }
-    };
-    loadDraftStatus();
-  }, [tournament.id]);
-  
-  // Save draft status to database
-  const setDraftStatus = async (status) => {
-    console.log(`💾 Admin: Saving draft status: ${status}`);
-    setDraftStatusState(status);
-    
-    // Persist to database
-    try {
-      const leaguesResponse = await leaguesAPI.getAll(tournament.id);
-      if (leaguesResponse.leagues && leaguesResponse.leagues.length > 0) {
-        const league = leaguesResponse.leagues[0];
-        await leaguesAPI.updateDraftStatus(league.id, status);
-        console.log(`✅ Draft status saved to database: ${status}`);
-      }
-    } catch (err) {
-      console.error('Failed to save draft status to database:', err);
-    }
-    
-    // Update isDraftOpen in parent
-    if (status === 'open' || status === 'in_progress') {
-      onStartDraft && onStartDraft();
-    }
-  };
-  
   const [syncStatus, setSyncStatus] = useState({ players: null, scores: null, clearing: null, match: null });
   const [pendingSyncPreview, setPendingSyncPreview] = useState(null); // Holds preview data before admin approval
   const [isSyncing, setIsSyncing] = useState({ players: false, scores: false, clearing: false });
@@ -1198,8 +1152,6 @@ const AdminPanel = ({ user, tournament, players: playersProp, draftType: parentD
   const [editingTeam, setEditingTeam] = useState(null);
   const [editTeamForm, setEditTeamForm] = useState({ name: '', ownerName: '', totalPoints: 0 });
   const [userFilter, setUserFilter] = useState('all'); // all, with_team, without_team
-  const [draftLogs, setDraftLogs] = useState([]); // Draft pick history
-  const [loadingDraftLogs, setLoadingDraftLogs] = useState(false);
   
   // ============================================
   // TEAM IMPORT FUNCTIONALITY
@@ -1232,7 +1184,7 @@ const AdminPanel = ({ user, tournament, players: playersProp, draftType: parentD
         const createResponse = await leaguesAPI.create({
           name: `${tournament.name} League`,
           tournamentId: tournament.id,
-          draftType: 'import'
+          leagueType: 'import'
         });
         league = { id: createResponse.leagueId };
       } else {
@@ -1641,98 +1593,6 @@ const AdminPanel = ({ user, tournament, players: playersProp, draftType: parentD
     }
   };
   
-  // Draft Control Functions
-  const handleStartDraft = () => {
-    if (window.confirm('Open draft registration? Users will be able to create teams and join.')) {
-      setDraftStatus('open');
-      onStartDraft && onStartDraft();
-    }
-  };
-  
-  const handleBeginDraft = async () => {
-    // Check if there are at least 2 teams
-    const tournamentTeams = (allTeams || []).filter(t => t.tournamentId === tournament.id);
-    if (tournamentTeams.length < 2) {
-      alert('Need at least 2 teams to start the draft!');
-      return;
-    }
-    
-    if (window.confirm(`Begin the draft with ${tournamentTeams.length} teams? Make sure all teams are registered.`)) {
-      // Generate draft order
-      const shuffledTeams = [...tournamentTeams].sort(() => Math.random() - 0.5);
-      const draftOrder = [];
-      const totalRounds = 12; // TOTAL_ROSTER_SIZE
-      
-      for (let round = 1; round <= totalRounds; round++) {
-        const roundTeams = round % 2 === 1 ? [...shuffledTeams] : [...shuffledTeams].reverse();
-        roundTeams.forEach((t, idx) => {
-          draftOrder.push({
-            pick: draftOrder.length + 1,
-            round,
-            teamId: t.id,
-            teamName: t.name
-          });
-        });
-      }
-      
-      console.log('📋 Generated draft order:', draftOrder.length, 'total picks for', tournamentTeams.length, 'teams');
-      
-      // Save draft order to league
-      try {
-        const leaguesResponse = await leaguesAPI.getAll(tournament.id);
-        if (leaguesResponse.leagues && leaguesResponse.leagues.length > 0) {
-          const league = leaguesResponse.leagues[0];
-          await leaguesAPI.update({
-            id: league.id,
-            draftOrder: draftOrder,
-            draftStatus: 'in_progress',
-            currentPick: 0  // IMPORTANT: Start at pick 0
-          });
-          console.log('✅ Draft started with order:', draftOrder.length, 'picks, currentPick: 0');
-        }
-      } catch (err) {
-        console.error('Failed to save draft order:', err);
-        alert('Failed to start draft. Please try again.');
-        return;
-      }
-      
-      setDraftStatus('in_progress');
-    }
-  };
-  
-  const handleCompleteDraft = () => {
-    if (window.confirm('Mark draft as completed?')) {
-      setDraftStatus('completed');
-    }
-  };
-  
-  const handleResetDraft = async () => {
-    if (window.confirm('⚠️ RESET DRAFT?\n\nThis will:\n- Set draft status back to "pending"\n- Keep all registered teams\n- Clear all draft picks\n\nContinue?')) {
-      try {
-        const leaguesResponse = await leaguesAPI.getAll(tournament.id);
-        if (leaguesResponse.leagues && leaguesResponse.leagues.length > 0) {
-          const league = leaguesResponse.leagues[0];
-          // Reset draft in database
-          await draftAPI.resetDraft(league.id);
-          console.log('✅ Draft reset successfully');
-        }
-      } catch (err) {
-        console.error('Failed to reset draft:', err);
-      }
-      setDraftStatus('pending');
-    }
-  };
-  
-  const handleDeleteDraft = () => {
-    if (window.confirm('⚠️ DELETE DRAFT & ALL TEAMS?\n\nThis will:\n- Remove ALL registered teams\n- Reset draft to "pending"\n- Clear all draft picks\n\nThis cannot be undone! Continue?')) {
-      setDraftStatus('pending');
-      // Clear all teams
-      if (onDeleteTeam) {
-        allTeams?.forEach(team => onDeleteTeam(team.id));
-      }
-    }
-  };
-  
   // Team Management Functions
   const handleEditTeam = (team) => {
     setEditingTeam(team.id);
@@ -1829,11 +1689,6 @@ const AdminPanel = ({ user, tournament, players: playersProp, draftType: parentD
                 <span className="stat-icon">🏏</span>
                 <span className="stat-value">{allTeams?.length || 0}</span>
                 <span className="stat-label">Fantasy Teams</span>
-              </div>
-              <div className="stat-card">
-                <span className="stat-icon">📝</span>
-                <span className="stat-value">{draftStatus.toUpperCase()}</span>
-                <span className="stat-label">Draft Status</span>
               </div>
               <div className="stat-card">
                 <span className="stat-icon">📅</span>
@@ -2034,21 +1889,9 @@ const AdminPanel = ({ user, tournament, players: playersProp, draftType: parentD
             <div className="quick-actions">
               <h3>Quick Actions</h3>
               <div className="action-buttons">
-                {draftStatus === 'pending' && (
-                  <button className="btn-primary" onClick={handleStartDraft}>
-                    🚀 Open Draft Registration
-                  </button>
-                )}
-                {draftStatus === 'open' && (
-                  <button className="btn-primary" onClick={handleBeginDraft}>
-                    ▶️ Start Draft
-                  </button>
-                )}
-                {draftStatus === 'in_progress' && (
-                  <button className="btn-secondary" onClick={handleCompleteDraft}>
-                    ✅ Complete Draft
-                  </button>
-                )}
+                <button className="btn-secondary" onClick={() => setActiveTab('import')}>
+                  📥 Import Teams
+                </button>
                 <button className="btn-secondary" onClick={() => setActiveTab('sync')}>
                   🔄 Sync Data
                 </button>
@@ -2071,7 +1914,7 @@ const AdminPanel = ({ user, tournament, players: playersProp, draftType: parentD
                 This app is connected to <strong>Turso Database</strong> for persistent storage.
               </p>
               <ul style={{ margin: '8px 0', paddingLeft: '20px', color: '#aaa', fontSize: '13px' }}>
-                <li>Teams, draft status, and user data are <strong>saved to database</strong></li>
+                <li>Teams, rosters, and user data are <strong>saved to database</strong></li>
                 <li>Data persists across <strong>all devices and browsers</strong></li>
                 <li>Changes sync automatically</li>
               </ul>
@@ -3241,7 +3084,7 @@ const AdminPanel = ({ user, tournament, players: playersProp, draftType: parentD
                 ))}
               </div>
             ) : (
-              <p className="no-data">No teams registered yet. Open the draft to allow users to create teams.</p>
+              <p className="no-data">No teams yet. Import teams in the Import tab.</p>
             )}
           </div>
         )}
@@ -3649,7 +3492,7 @@ const AdminPanel = ({ user, tournament, players: playersProp, draftType: parentD
 };
 
 // Main Dashboard Component  
-const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = [], onLogout, onUpdateTeam, onBackToTournaments, onSwitchTournament, isDraftComplete, isDraftOpen, onGoToDraft, onRefreshPlayers }) => {
+const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = [], onLogout, onUpdateTeam, onBackToTournaments, onSwitchTournament, onRefreshPlayers }) => {
   const [activeTab, setActiveTab] = useState('roster');
   const [showPlayerModal, setShowPlayerModal] = useState(false);
   const [selectedPosition, setSelectedPosition] = useState(null);
@@ -3661,7 +3504,6 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
   const [tradingWindowStatus, setTradingWindowStatus] = useState({ open: true, message: '' });
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [selectedPlayerProfile, setSelectedPlayerProfile] = useState(null); // Player profile modal
-  const [localDraftOpen, setLocalDraftOpen] = useState(isDraftOpen); // Local state for auto-refresh
   const [selectedSlotToFill, setSelectedSlotToFill] = useState(null); // For moving players from bench to lineup
   const [viewingTeam, setViewingTeam] = useState(null); // For viewing other team's roster
   const [localPlayers, setLocalPlayers] = useState(playersProp || []); // Local copy of players
@@ -3797,33 +3639,6 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
   const isTestMode = tournament?.id?.includes('test') || 
                      tournament?.name?.toLowerCase().includes('test') ||
                      tournament?.isTest === true;
-  
-  // Auto-refresh draft status every 10 seconds (poll database)
-  useEffect(() => {
-    if (isDraftComplete) return;
-    
-    const checkDraftStatus = async () => {
-      try {
-        const leaguesResponse = await leaguesAPI.getAll(tournament.id);
-        if (leaguesResponse.leagues && leaguesResponse.leagues.length > 0) {
-          const league = leaguesResponse.leagues[0];
-          const draftIsOpen = league.draftStatus === 'open' || league.draftStatus === 'in_progress';
-          
-          if (draftIsOpen && !localDraftOpen) {
-            setLocalDraftOpen(true);
-          }
-        }
-      } catch (err) {
-        // Silently fail - not critical
-      }
-    };
-    
-    const interval = setInterval(checkDraftStatus, 10000); // Check every 10 seconds
-    return () => clearInterval(interval);
-  }, [isDraftComplete, localDraftOpen, tournament?.id]);
-  
-  // Use localDraftOpen if it's true (detected from polling), otherwise use prop
-  const effectiveDraftOpen = localDraftOpen || isDraftOpen;
   
   // Check and reset weekly pickups if new week
   useEffect(() => {
@@ -4094,15 +3909,6 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
   
   // Filter free agents based on search and position
   const filteredFreeAgents = freeAgents.filter(player => {
-    const matchesSearch = player.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          player.team.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesPosition = filterPosition === 'all' || player.position === filterPosition;
-    const matchesTeam = filterTeam === 'all' || player.team === filterTeam;
-    return matchesSearch && matchesPosition && matchesTeam;
-  });
-  
-  // For pre-draft browse mode - show all players
-  const allPlayersForBrowse = playerPool.filter(player => {
     const matchesSearch = player.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
                           player.team.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesPosition = filterPosition === 'all' || player.position === filterPosition;
@@ -4874,63 +4680,19 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
             </div>
             
             {/* Trading Window Status Banner */}
-            {isDraftComplete && (
-              <div className={`trading-window-banner ${tradingWindowStatus.open ? 'window-open' : 'window-closed'}`}>
-                {tradingWindowStatus.open ? (
-                  <>
-                    <span className="banner-icon">✅</span>
-                    <span className="banner-text">Trading window OPEN - You can add/drop players</span>
-                  </>
-                ) : (
-                  <>
-                    <span className="banner-icon">🔒</span>
-                    <span className="banner-text">{tradingWindowStatus.message}</span>
-                  </>
-                )}
-              </div>
-            )}
-            
-            {/* Draft Status Banner */}
-            {!isDraftComplete && (
-              <div className={`draft-status-banner ${effectiveDraftOpen ? 'draft-open' : 'draft-pending'}`}>
-                {effectiveDraftOpen ? (
-                  <>
-                    <span className="banner-icon">🚀</span>
-                    <span className="banner-text">Draft is OPEN! Complete your roster now.</span>
-                    <button className="btn-primary btn-small" onClick={onGoToDraft}>
-                      Go to Draft →
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <span className="banner-icon">⏳</span>
-                    <span className="banner-text">Waiting for admin to open the draft. Browse players in the meantime.</span>
-                    <button 
-                      className="btn-secondary btn-small" 
-                      onClick={async () => {
-                        // Re-check draft status from API
-                        try {
-                          const leaguesResponse = await leaguesAPI.getAll(tournament?.id);
-                          if (leaguesResponse.leagues && leaguesResponse.leagues.length > 0) {
-                            const league = leaguesResponse.leagues[0];
-                            if (league.draftStatus === 'open' || league.draftStatus === 'in_progress') {
-                              window.location.reload();
-                            } else {
-                              alert('Draft is still pending. Admin has not opened the draft yet.');
-                            }
-                          }
-                        } catch (err) {
-                          alert('Could not check draft status. Please try again.');
-                        }
-                      }}
-                      title="Check if admin has opened the draft"
-                    >
-                      🔄 Refresh
-                    </button>
-                  </>
-                )}
-              </div>
-            )}
+            <div className={`trading-window-banner ${tradingWindowStatus.open ? 'window-open' : 'window-closed'}`}>
+              {tradingWindowStatus.open ? (
+                <>
+                  <span className="banner-icon">✅</span>
+                  <span className="banner-text">Trading window OPEN - You can add/drop players</span>
+                </>
+              ) : (
+                <>
+                  <span className="banner-icon">🔒</span>
+                  <span className="banner-text">{tradingWindowStatus.message}</span>
+                </>
+              )}
+            </div>
             
             {/* Slot Selection Modal */}
             {playerToAdd && (
@@ -5184,12 +4946,6 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
 
         {activeTab === 'players' && (
           <div className="free-agents-view">
-            {!isDraftComplete && (
-              <div className="browse-mode-banner">
-                <span className="browse-icon">👁️</span>
-                <span>Browse Mode - Complete the draft to add/drop players</span>
-              </div>
-            )}
             
             <div className="search-filters">
               <input 
@@ -5224,10 +4980,7 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
             
             <div className="player-count">
               <span>
-                {isDraftComplete 
-                  ? `${filteredFreeAgents.length} free agents available`
-                  : `${allPlayersForBrowse.length} players in pool`
-                }
+                {`${filteredFreeAgents.length} free agents available`}
                 {(filterPosition !== 'all' || filterTeam !== 'all') && (
                   <span className="active-filters">
                     {filterPosition !== 'all' && ` • ${filterPosition}`}
@@ -5250,10 +5003,10 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
             </div>
             
             <div className="players-grid">
-              {(isDraftComplete ? filteredFreeAgents : allPlayersForBrowse).map(player => {
+              {filteredFreeAgents.map(player => {
                 // Use component-level isTestMode
                 const lockStatus = getPlayerLockStatus(player, tournament.matches, isTestMode);
-                const isLocked = isDraftComplete && !isTestMode && (lockStatus.locked || !tradingWindowStatus.open);
+                const isLocked = !isTestMode && (lockStatus.locked || !tradingWindowStatus.open);
                 return (
                   <div key={player.id} className={`player-card-full ${isLocked ? 'locked' : ''}`}>
                     <div 
@@ -5279,16 +5032,12 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
                     </div>
                     <div className="player-footer">
                       <span className="avg-points">{player.totalPoints || 0} pts ({player.matchesPlayed || 0} gms)</span>
-                      {isDraftComplete ? (
-                        <button 
-                          className="btn-primary btn-small"
-                          onClick={() => handleAddPlayer(player)}
-                          disabled={isPickupLimitReached || isLocked}
-                          title={isLocked ? lockStatus.message || 'Locked' : isPickupLimitReached ? 'Weekly pickup limit reached' : ''}
-                        >+ Add</button>
-                      ) : (
-                        <span className="browse-only-badge">Browse Only</span>
-                      )}
+                      <button 
+                        className="btn-primary btn-small"
+                        onClick={() => handleAddPlayer(player)}
+                        disabled={isPickupLimitReached || isLocked}
+                        title={isLocked ? lockStatus.message || 'Locked' : isPickupLimitReached ? 'Weekly pickup limit reached' : ''}
+                      >+ Add</button>
                     </div>
                     {isLocked && <div className="lock-overlay">{lockStatus.message || 'Locked'}</div>}
                   </div>
@@ -5580,7 +5329,7 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
                   </button>
                 )}
                 {team.roster.length === 0 && (
-                  <p className="test-warning">⚠️ Complete the draft first!</p>
+                  <p className="test-warning">⚠️ Import your roster first!</p>
                 )}
               </div>
             </div>
@@ -5750,9 +5499,6 @@ export default function App() {
   const [selectedTournament, setSelectedTournament] = useState(null);
   const [user, setUser] = useState(null);
   const [team, setTeam] = useState(null);
-  const [isDraftComplete, setIsDraftComplete] = useState(false);
-  const [isDraftOpen, setIsDraftOpen] = useState(false);
-  const [draftType, setDraftType] = useState('import'); // Teams imported after external auction
   const [allTeams, setAllTeams] = useState([]);
   const [allUsers, setAllUsers] = useState([]);
   const [players, setPlayers] = useState([]); // Players loaded from API
@@ -5880,27 +5626,6 @@ export default function App() {
     setIsLoading(true);
     await loadPlayers(tournament.id);
     
-    const tournamentKey = tournament.id;
-    let draftStatus = 'pending';
-    let draftComplete = false;
-    
-    // Get league info from API (for draft status)
-    try {
-      const leaguesResponse = await leaguesAPI.getAll(tournamentKey);
-      if (leaguesResponse.leagues && leaguesResponse.leagues.length > 0) {
-        const league = leaguesResponse.leagues[0];
-        draftStatus = league.draftStatus || 'pending';
-        draftComplete = draftStatus === 'completed';
-        console.log('✅ Got league from API:', draftStatus);
-      }
-    } catch (err) {
-      console.log('⚠️ Could not get league from API:', err.message);
-    }
-    
-    // Set draft state
-    setIsDraftOpen(draftStatus === 'open' || draftStatus === 'in_progress');
-    setIsDraftComplete(draftComplete);
-    
     // Admin goes to admin panel
     if (user?.isAdmin) {
       console.log(`   → Admin user, going to admin panel`);
@@ -5988,50 +5713,18 @@ export default function App() {
           userId: user?.id,
           tournamentId: tournamentKey,
           leagueId: response.leagueId,
-          draftPosition: response.draftPosition,
           roster: [],
           totalPoints: 0,
         };
         
         console.log('✅ Team saved to database:', response.teamId);
         setTeam(newTeam);
-        
-        // Navigate based on draft status
-        if (isDraftOpen) {
-          setCurrentPage('draft');
-        } else {
-          setCurrentPage('dashboard');
-        }
+        setCurrentPage('dashboard');
       }
     } catch (err) {
       console.error('Failed to create team:', err);
       alert('Failed to create team. Please try again.');
     }
-  };
-
-  const handleDraftComplete = async (roster) => {
-    console.log('📋 Draft complete, roster:', roster);
-    const updatedTeam = { ...team, roster };
-    setTeam(updatedTeam);
-    
-    // Update allTeams so free agents are correctly filtered
-    setAllTeams(prev => prev.map(t => 
-      t.id === team.id ? { ...t, roster } : t
-    ));
-    
-    // Save roster to database
-    try {
-      await teamsAPI.update({
-        id: team.id,
-        roster: roster,
-      });
-      console.log('✅ Roster saved to database');
-    } catch (err) {
-      console.error('Failed to save roster:', err);
-    }
-    
-    setIsDraftComplete(true);
-    setCurrentPage('dashboard');
   };
 
   const handleUpdateTeam = async (teamIdOrTeam, updates = null) => {
@@ -6089,16 +5782,6 @@ export default function App() {
       setTeam(null);
     }
   };
-  
-  const handleStartDraft = () => {
-    setIsDraftOpen(true);
-  };
-  
-  const handleGoToDraft = () => {
-    if (team) {
-      setCurrentPage('draft');
-    }
-  };
 
   const handleLogout = () => {
     console.log('🚪 Logging out');
@@ -6107,8 +5790,6 @@ export default function App() {
     setUser(null);
     setTeam(null);
     setSelectedTournament(null);
-    setIsDraftComplete(false);
-    setIsDraftOpen(false);
     
     // Remove user session from localStorage
     localStorage.removeItem('t20fantasy_user');
@@ -6120,8 +5801,6 @@ export default function App() {
     // Keep user logged in, reset tournament state
     setSelectedTournament(null);
     setTeam(null);
-    setIsDraftComplete(false);
-    setIsDraftOpen(false);
     
     setCurrentPage('tournamentSelect');
   };
@@ -6157,47 +5836,11 @@ export default function App() {
           onTeamCreated={handleTeamCreated} 
         />
       )}
-      {currentPage === 'draft' && (
-        <div className="draft-waiting-page">
-          <div className="draft-waiting-container">
-            <h2>🏏 Teams & Rosters</h2>
-            <p style={{ color: 'var(--text-secondary)', marginBottom: '20px' }}>
-              Teams are managed through the Admin Panel after the external auction.
-            </p>
-            
-            {team ? (
-              <div className="your-team-card" style={{ background: 'var(--bg-card)', padding: '20px', borderRadius: '12px', marginBottom: '20px' }}>
-                <h3>Your Team: {team.name}</h3>
-                <p>Roster: {team.roster?.length || 0} players</p>
-                {team.roster && team.roster.length > 0 ? (
-                  <div style={{ marginTop: '15px' }}>
-                    {team.roster.map(p => (
-                      <div key={p.id} style={{ padding: '8px', borderBottom: '1px solid var(--border-color)' }}>
-                        {p.name} - {p.position}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p style={{ color: 'var(--text-muted)' }}>No players yet - awaiting roster import</p>
-                )}
-              </div>
-            ) : (
-              <p style={{ color: 'var(--text-muted)' }}>You haven't created a team yet.</p>
-            )}
-            
-            <button className="btn-secondary" onClick={() => setCurrentPage('home')}>
-              ← Back to Home
-            </button>
-          </div>
-        </div>
-      )}
       {currentPage === 'admin' && user?.isAdmin && (
         <AdminPanel
           user={user}
           tournament={selectedTournament || TOURNAMENTS.t20_wc_2026}
           players={playerPool}
-          draftType={draftType}
-          onSetDraftType={setDraftType}
           onUpdateTournament={async (updatedTournament) => {
             console.log('📅 Tournament updated:', updatedTournament);
             
@@ -6235,7 +5878,6 @@ export default function App() {
           onSwitchTournament={handleSwitchTournament}
           allTeams={allTeams}
           allUsers={allUsers}
-          onStartDraft={handleStartDraft}
           onDeleteTeam={handleDeleteTeam}
           onUpdateTeam={handleUpdateTeam}
           onDeleteUser={handleDeleteUser}
@@ -6252,9 +5894,6 @@ export default function App() {
           onUpdateTeam={handleUpdateTeam}
           onBackToTournaments={handleBackToTournaments}
           onSwitchTournament={handleSwitchTournament}
-          isDraftComplete={isDraftComplete}
-          isDraftOpen={isDraftOpen}
-          onGoToDraft={handleGoToDraft}
           onRefreshPlayers={async () => {
             console.log('🔄 Refreshing players from Dashboard request...');
             if (selectedTournament?.id) {

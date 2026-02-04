@@ -1,7 +1,4 @@
-// API: Draft (Picks & Roster)
-// GET /api/draft?type=picks - Get draft picks for a league
-// POST /api/draft?type=picks - Make a draft pick
-// DELETE /api/draft?type=picks - Reset draft
+// API: Roster Management
 // GET /api/draft?type=roster - Get team roster
 // POST /api/draft?type=roster - Add player to roster
 // DELETE /api/draft?type=roster - Drop player from roster
@@ -36,156 +33,6 @@ export default async function handler(req, res) {
   const { type } = req.query;
 
   try {
-    // ============================================
-    // DRAFT PICKS
-    // ============================================
-    if (type === 'picks') {
-      // GET - Fetch draft picks
-      if (req.method === 'GET') {
-        const { leagueId } = req.query;
-
-        if (!leagueId) {
-          return res.status(400).json({ error: 'leagueId required' });
-        }
-
-        const result = await db.execute({
-          sql: `SELECT dp.*, p.name as player_name, p.team as player_team, p.position as player_position,
-                       ft.name as team_name
-                FROM draft_picks dp
-                LEFT JOIN players p ON dp.player_id = p.id
-                LEFT JOIN fantasy_teams ft ON dp.fantasy_team_id = ft.id
-                WHERE dp.league_id = ?
-                ORDER BY dp.overall_pick ASC`,
-          args: [leagueId]
-        });
-
-        const picks = result.rows.map(p => ({
-          id: p.id,
-          leagueId: p.league_id,
-          teamId: p.fantasy_team_id,
-          teamName: p.team_name,
-          playerId: p.player_id,
-          playerName: p.player_name,
-          playerTeam: p.player_team,
-          playerPosition: p.player_position,
-          round: p.round,
-          pickNumber: p.overall_pick,
-          createdAt: p.pick_time
-        }));
-
-        return res.status(200).json({ success: true, picks });
-      }
-
-      // POST - Make a draft pick
-      if (req.method === 'POST') {
-        const { leagueId, teamId, playerId, round, pickNumber, slot } = req.body;
-
-        console.log('Draft pick request:', { leagueId, teamId, playerId, round, pickNumber, slot });
-
-        if (!leagueId || !teamId || !playerId) {
-          return res.status(400).json({ error: 'leagueId, teamId, and playerId required' });
-        }
-
-        try {
-          // Check if player is already drafted
-          const existing = await db.execute({
-            sql: 'SELECT id FROM draft_picks WHERE league_id = ? AND player_id = ?',
-            args: [leagueId, playerId]
-          });
-
-          if (existing.rows.length > 0) {
-            return res.status(409).json({ error: 'Player already drafted' });
-          }
-
-          // Get current pick number from league
-          const leagueResult = await db.execute({
-            sql: 'SELECT current_pick FROM leagues WHERE id = ?',
-            args: [leagueId]
-          });
-          const currentPickNum = (leagueResult.rows[0]?.current_pick || 0) + 1;
-
-          // Check if player is already on this team's roster (prevent duplicates)
-          const existingRoster = await db.execute({
-            sql: 'SELECT id FROM roster WHERE fantasy_team_id = ? AND player_id = ?',
-            args: [teamId, playerId]
-          });
-          
-          if (existingRoster.rows.length > 0) {
-            return res.status(400).json({ error: 'Player already on roster' });
-          }
-
-          const pickId = generateId();
-          const rosterId = generateId();
-
-          // Record the draft pick - using simple insert without foreign key check
-          await db.execute({
-            sql: `INSERT INTO draft_picks (id, league_id, fantasy_team_id, player_id, round, pick_in_round, overall_pick)
-                  VALUES (?, ?, ?, ?, ?, ?, ?)`,
-            args: [pickId, leagueId, teamId, playerId, round || 1, pickNumber || currentPickNum, currentPickNum]
-          });
-
-          // Add to roster - position is the slot (flex, batters, etc)
-          await db.execute({
-            sql: `INSERT INTO roster (id, fantasy_team_id, player_id, position, acquired_via)
-                  VALUES (?, ?, ?, ?, 'draft')`,
-            args: [rosterId, teamId, playerId, slot || 'flex']
-          });
-
-          // Update league current pick
-          await db.execute({
-            sql: 'UPDATE leagues SET current_pick = ? WHERE id = ?',
-            args: [currentPickNum, leagueId]
-          });
-
-          console.log('Draft pick saved:', { pickId, currentPick: currentPickNum });
-          return res.status(201).json({ success: true, pickId, currentPick: currentPickNum });
-        } catch (dbError) {
-          console.error('Database error in draft pick:', dbError);
-          return res.status(500).json({ error: 'Database error', details: dbError.message });
-        }
-      }
-
-      // DELETE - Reset draft
-      if (req.method === 'DELETE') {
-        const { leagueId } = req.query;
-
-        if (!leagueId) {
-          return res.status(400).json({ error: 'leagueId required' });
-        }
-
-        // Get all teams in this league
-        const teams = await db.execute({
-          sql: 'SELECT id FROM fantasy_teams WHERE league_id = ?',
-          args: [leagueId]
-        });
-
-        // Clear rosters
-        for (const team of teams.rows) {
-          await db.execute({
-            sql: "DELETE FROM roster WHERE fantasy_team_id = ? AND acquired_via = 'draft'",
-            args: [team.id]
-          });
-        }
-
-        // Clear draft picks
-        await db.execute({
-          sql: 'DELETE FROM draft_picks WHERE league_id = ?',
-          args: [leagueId]
-        });
-
-        // Reset league draft status
-        await db.execute({
-          sql: "UPDATE leagues SET draft_status = 'pending', current_pick = 0 WHERE id = ?",
-          args: [leagueId]
-        });
-
-        return res.status(200).json({ success: true, message: 'Draft reset' });
-      }
-    }
-
-    // ============================================
-    // ROSTER
-    // ============================================
     if (type === 'roster') {
       // GET - Fetch roster
       if (req.method === 'GET') {
@@ -209,7 +56,7 @@ export default async function handler(req, res) {
           name: r.player_name || 'Unknown Player',
           team: r.player_team || 'Unknown',
           position: r.player_position || r.position,
-          slot: r.position, // slot is stored in position column
+          slot: r.position,
           totalPoints: r.total_points || 0,
           avgPoints: r.avg_points || 0,
           matchesPlayed: r.matches_played || 0,
@@ -254,7 +101,6 @@ export default async function handler(req, res) {
           args: [generateId(), teamId, playerId, slot || 'flex', acquiredVia]
         });
 
-        // Increment weekly pickups if free agency
         if (acquiredVia === 'free_agency') {
           await db.execute({
             sql: 'UPDATE fantasy_teams SET weekly_pickups = weekly_pickups + 1 WHERE id = ?',
@@ -282,10 +128,10 @@ export default async function handler(req, res) {
       }
     }
 
-    return res.status(400).json({ error: 'Invalid type. Use ?type=picks or ?type=roster' });
+    return res.status(400).json({ error: 'Invalid type. Use ?type=roster' });
 
   } catch (error) {
-    console.error('Draft API error:', error);
+    console.error('Roster API error:', error);
     return res.status(500).json({ error: 'Server error', details: error.message });
   }
 }
