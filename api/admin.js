@@ -12,7 +12,7 @@ import { fileURLToPath } from 'url';
 // Load seed data using fs (import assertions not supported in Vercel)
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-let seedData = { test_ind_nz: [], t20_wc_2026: [], ipl_2026: [] };
+let seedData = { t20_wc_2026: [] };
 try {
   const seedPath = join(__dirname, 'seed-data.json');
   seedData = JSON.parse(readFileSync(seedPath, 'utf-8'));
@@ -34,17 +34,6 @@ function generateId() {
 // Tournament definitions
 const TOURNAMENTS = [
   {
-    id: 'test_ind_nz',
-    name: 'India vs NZ T20 Series 2026',
-    shortName: 'IND vs NZ T20',
-    type: 'test',
-    startDate: '2026-01-15',
-    endDate: '2026-01-25',
-    teams: JSON.stringify(['IND', 'NZ']),
-    description: 'Test tournament for fantasy cricket development',
-    isTest: 1
-  },
-  {
     id: 't20_wc_2026',
     name: 'T20 World Cup 2026',
     shortName: 'T20 WC 2026',
@@ -53,17 +42,6 @@ const TOURNAMENTS = [
     endDate: '2026-03-07',
     teams: JSON.stringify(['IND', 'AUS', 'ENG', 'PAK', 'SA', 'NZ', 'WI', 'SL', 'BAN', 'AFG', 'IRE', 'ZIM', 'NED', 'NAM', 'NEP', 'OMA', 'CAN', 'ITA']),
     description: 'ICC T20 World Cup 2026',
-    isTest: 0
-  },
-  {
-    id: 'ipl_2026',
-    name: 'IPL 2026',
-    shortName: 'IPL 2026',
-    type: 'league',
-    startDate: '2026-03-22',
-    endDate: '2026-05-26',
-    teams: JSON.stringify(['CSK', 'MI', 'RCB', 'KKR', 'DC', 'PBKS', 'RR', 'SRH', 'GT', 'LSG']),
-    description: 'Indian Premier League 2026',
     isTest: 0
   }
 ];
@@ -142,10 +120,8 @@ export default async function handler(req, res) {
           available: {
             tournaments: TOURNAMENTS.length,
             players: {
-              test_ind_nz: seedData.test_ind_nz?.length || 0,
               t20_wc_2026: seedData.t20_wc_2026?.length || 0,
-              ipl_2026: seedData.ipl_2026?.length || 0,
-              total: (seedData.test_ind_nz?.length || 0) + (seedData.t20_wc_2026?.length || 0) + (seedData.ipl_2026?.length || 0)
+              total: seedData.t20_wc_2026?.length || 0
             }
           }
         });
@@ -204,9 +180,7 @@ export default async function handler(req, res) {
         // Seed players
         if (seedType === 'all' || seedType === 'players') {
           const tournamentPlayerMap = {
-            'test_ind_nz': seedData.test_ind_nz || [],
-            't20_wc_2026': seedData.t20_wc_2026 || [],
-            'ipl_2026': seedData.ipl_2026 || []
+            't20_wc_2026': seedData.t20_wc_2026 || []
           };
 
           for (const [tournamentId, players] of Object.entries(tournamentPlayerMap)) {

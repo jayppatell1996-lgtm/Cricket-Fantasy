@@ -31,9 +31,7 @@ const CRICKET_API_BASE = 'https://api.cricapi.com/v1';
 // TOURNAMENT TO SERIES MAPPING
 // ============================================
 const TOURNAMENT_SERIES_MAP = {
-  'test_ind_nz': 'New Zealand tour of India, 2026',
   't20_wc_2026': 'ICC Mens T20 World Cup 2026',
-  'ipl_2026': 'Indian Premier League 2026',
 };
 
 // ============================================
@@ -765,7 +763,7 @@ export default async function handler(req, res) {
         return res.status(400).json({ 
           error: 'Unknown tournament. Provide seriesName query param or use known tournamentId',
           knownTournaments: Object.keys(TOURNAMENT_SERIES_MAP),
-          example: '?tournamentId=test_ind_nz or ?seriesName=New%20Zealand%20tour%20of%20India%2C%202026'
+          example: '?tournamentId=t20_wc_2026 or ?seriesName=ICC%20Mens%20T20%20World%20Cup%202026'
         });
       }
       

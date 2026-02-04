@@ -1,6 +1,6 @@
 // Database Schema for T20 Fantasy Cricket
 // Using Drizzle ORM with Turso (libSQL)
-// Supports: Test Mode (IND vs NZ), T20 World Cup 2026, IPL 2026
+// Supports: T20 World Cup 2026
 
 import { sqliteTable, text, integer, real } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';

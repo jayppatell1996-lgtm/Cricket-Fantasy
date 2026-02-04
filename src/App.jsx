@@ -22,19 +22,6 @@ const TOURNAMENTS = {
     draftStatus: 'pending',
     matches: [], // Loaded from database/API
   },
-  ipl_2026: {
-    id: 'ipl_2026',
-    name: 'IPL 2026',
-    shortName: 'IPL 2026',
-    description: 'Indian Premier League - March 2026',
-    startDate: '2026-03-22',
-    endDate: '2026-05-26',
-    status: 'upcoming',
-    teams: [],
-    isTest: false,
-    draftStatus: 'pending',
-    matches: [], // Loaded from database/API
-  },
 };
 
 // Default Team Purse: $120 Million
@@ -2218,46 +2205,20 @@ const AdminPanel = ({ user, tournament, players: playersProp, draftType: parentD
             <div className="match-sync-section" style={{ marginTop: '30px' }}>
               <h3>🏏 Match Scoring Sync</h3>
               
-              {/* Tournament-specific guidance */}
-              {tournament.id === 'ipl_2026' ? (
-                <div style={{ 
-                  padding: '15px', 
-                  marginBottom: '15px', 
-                  background: 'rgba(34, 197, 94, 0.1)', 
-                  borderRadius: '8px',
-                  border: '1px solid rgba(34, 197, 94, 0.3)'
-                }}>
-                  <strong>✅ IPL 2026 - Full API Support</strong>
-                  <p style={{ margin: '8px 0 0 0', fontSize: '0.875rem' }}>
-                    IPL matches have <code>fantasyEnabled: true</code>. Use "Sync Scorecard" to automatically fetch player stats.
-                  </p>
-                  <div style={{ 
-                    marginTop: '10px', 
-                    padding: '10px', 
-                    background: 'rgba(251, 191, 36, 0.2)', 
-                    borderRadius: '4px',
-                    fontSize: '0.8rem',
-                    border: '1px solid rgba(251, 191, 36, 0.4)'
-                  }}>
-                    ⚠️ <strong>REMINDER:</strong> Test the sync flow once IPL 2026 matches are available in the Cricket API.
-                    Verify the scorecard parsing works correctly with real data.
-                  </div>
-                </div>
-              ) : (
-                <div style={{ 
-                  padding: '15px', 
-                  marginBottom: '15px', 
-                  background: 'rgba(251, 191, 36, 0.1)', 
-                  borderRadius: '8px',
-                  border: '1px solid rgba(251, 191, 36, 0.3)'
-                }}>
-                  <strong>📝 {tournament.name} - Manual Entry Required</strong>
-                  <p style={{ margin: '8px 0 0 0', fontSize: '0.875rem' }}>
-                    This tournament does not have <code>fantasyEnabled</code> in the Cricket API.
-                    Use <strong>Manual Entry</strong> below to add player stats.
-                  </p>
-                </div>
-              )}
+              {/* Tournament guidance */}
+              <div style={{ 
+                padding: '15px', 
+                marginBottom: '15px', 
+                background: 'rgba(34, 197, 94, 0.1)', 
+                borderRadius: '8px',
+                border: '1px solid rgba(34, 197, 94, 0.3)'
+              }}>
+                <strong>✅ {tournament.name} - Cricket API Sync</strong>
+                <p style={{ margin: '8px 0 0 0', fontSize: '0.875rem' }}>
+                  Use "Fetch Matches" to pull matches from Cricket API, then "Sync Scorecard" to fetch player stats.
+                  You can also use Manual Entry for matches not yet available in the API.
+                </p>
+              </div>
               
               <div style={{ marginBottom: '20px' }}>
                 <button 
@@ -2589,13 +2550,13 @@ const AdminPanel = ({ user, tournament, players: playersProp, draftType: parentD
                       </div>
                     </div>
                     <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                      {match.status !== 'completed' && tournament.id === 'ipl_2026' && (
+                      {match.status !== 'completed' && (
                         <>
                           <button 
                             className="btn-primary btn-small"
                             onClick={() => handleSyncMatch(match)}
                             disabled={isSyncing.match === match.id}
-                            title="Sync real scorecard from CricketData.org API"
+                            title="Sync real scorecard from Cricket API"
                           >
                             {isSyncing.match === match.id ? '⏳ Syncing...' : '📡 Sync Scorecard'}
                           </button>
@@ -2611,11 +2572,6 @@ const AdminPanel = ({ user, tournament, players: playersProp, draftType: parentD
                             </button>
                           )}
                         </>
-                      )}
-                      {match.status !== 'completed' && tournament.id !== 'ipl_2026' && (
-                        <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                          Use Manual Entry ↓
-                        </span>
                       )}
                       {match.status === 'completed' && (
                         <span style={{ color: '#22c55e', fontWeight: '600' }}>✓ Completed</span>
@@ -2633,30 +2589,24 @@ const AdminPanel = ({ user, tournament, players: playersProp, draftType: parentD
               
               {/* Manual Entry Section */}
               <div style={{ marginTop: '20px' }}>
-                {tournament.id === 'ipl_2026' ? (
-                  <button 
-                    className="btn-secondary btn-small"
-                    onClick={() => setShowManualEntry(!showManualEntry)}
-                    style={{ marginBottom: '10px' }}
-                  >
-                    {showManualEntry ? '➖ Hide Manual Entry' : '➕ Manual Entry (backup option)'}
-                  </button>
-                ) : (
-                  <h4 style={{ margin: '0 0 15px 0', color: 'var(--accent-color)' }}>📝 Manual Stats Entry</h4>
-                )}
+                <button 
+                  className="btn-secondary btn-small"
+                  onClick={() => setShowManualEntry(!showManualEntry)}
+                  style={{ marginBottom: '10px' }}
+                >
+                  {showManualEntry ? '➖ Hide Manual Entry' : '➕ Manual Stats Entry (backup)'}
+                </button>
                 
-                {(showManualEntry || tournament.id !== 'ipl_2026') && (
+                {showManualEntry && (
                   <div style={{ 
                     padding: '20px', 
                     background: 'var(--bg-card)', 
                     borderRadius: '8px',
-                    border: tournament.id !== 'ipl_2026' ? '2px solid var(--accent-color)' : '1px solid var(--border-color)'
+                    border: '1px solid var(--border-color)'
                   }}>
-                    {tournament.id === 'ipl_2026' && <h4 style={{ margin: '0 0 15px 0' }}>📝 Manual Stats Entry</h4>}
+                    <h4 style={{ margin: '0 0 15px 0' }}>📝 Manual Stats Entry</h4>
                     <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginBottom: '15px' }}>
-                      {tournament.id === 'ipl_2026' 
-                        ? 'Use this as a backup when API sync fails.'
-                        : 'Enter player stats manually for each match. This is the primary method for this tournament.'}
+                      Use this as a backup when API sync is unavailable or fails.
                     </p>
                     
                     <div style={{ marginBottom: '15px' }}>
@@ -3032,35 +2982,33 @@ const AdminPanel = ({ user, tournament, players: playersProp, draftType: parentD
               )}
             </div>
             
-            {tournament.id === 'ipl_2026' && (
-              <div className="sync-schedule" style={{ marginTop: '30px' }}>
-                <h4>⏰ Automatic Sync Setup (IPL only)</h4>
-                <p className="cron-info">
-                  For automatic syncing during IPL, use <a href="https://cron-job.org" target="_blank" rel="noopener noreferrer">cron-job.org</a> (free) to schedule API calls.
-                </p>
-                <table className="schedule-table">
-                  <thead>
-                    <tr>
-                      <th>Sync Type</th>
-                      <th>Recommended Schedule</th>
-                      <th>API Endpoint</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr>
-                      <td>Player Roster</td>
-                      <td>Daily at 7 PM MST</td>
-                      <td><code>/api/sync/players</code></td>
-                    </tr>
-                    <tr>
-                      <td>Live Scores</td>
-                      <td>Every 15 min during matches</td>
-                      <td><code>/api/live-sync</code></td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            )}
+            <div className="sync-schedule" style={{ marginTop: '30px' }}>
+              <h4>⏰ Automatic Sync Setup</h4>
+              <p className="cron-info">
+                For automatic syncing during matches, use <a href="https://cron-job.org" target="_blank" rel="noopener noreferrer">cron-job.org</a> (free) to schedule API calls.
+              </p>
+              <table className="schedule-table">
+                <thead>
+                  <tr>
+                    <th>Sync Type</th>
+                    <th>Recommended Schedule</th>
+                    <th>API Endpoint</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Player Roster</td>
+                    <td>Daily at 7 PM MST</td>
+                    <td><code>/api/sync/players</code></td>
+                  </tr>
+                  <tr>
+                    <td>Live Scores</td>
+                    <td>Every 15 min during matches</td>
+                    <td><code>/api/live-sync</code></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
         

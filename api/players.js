@@ -223,7 +223,7 @@ export default async function handler(req, res) {
                 FROM roster r
                 JOIN fantasy_teams ft ON r.fantasy_team_id = ft.id
                 WHERE r.player_id = ? AND ft.tournament_id = ?`,
-          args: [playerId, tournamentId || 'test_ind_nz']
+          args: [playerId, tournamentId || 't20_wc_2026']
         });
         
         // For each team, recalculate total points from all their players

@@ -6,7 +6,6 @@ Full-featured fantasy cricket application with live scoring integration and team
 
 ### Tournaments
 - T20 World Cup 2026 (India & Sri Lanka)
-- IPL 2026
 
 ### Live Scoring
 - Real-time match data from Cricket API (cricapi.com)
