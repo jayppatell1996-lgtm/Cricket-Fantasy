@@ -461,138 +461,6 @@ const generateTestStats = (player) => {
 // COMPONENTS
 // ============================================
 
-// Tournament Selection Page
-const TournamentSelectPage = ({ onSelectTournament, user, onLogout }) => {
-  const [userTeams, setUserTeams] = useState({});
-  const [tournaments, setTournaments] = useState(TOURNAMENTS);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-
-  // Fetch tournaments from database and merge with local
-  useEffect(() => {
-    const fetchTournaments = async () => {
-      try {
-        const response = await tournamentsAPI.getAll();
-        if (response && response.tournaments && response.tournaments.length > 0) {
-          console.log('📋 Loaded tournaments from DB:', response.tournaments.length);
-          // Merge DB tournaments with local TOURNAMENTS (DB takes priority)
-          const mergedTournaments = { ...TOURNAMENTS };
-          response.tournaments.forEach(dbTournament => {
-            if (dbTournament.id) {
-              const matchCount = dbTournament.matches?.length || 0;
-              console.log(`   - ${dbTournament.id}: ${matchCount} matches from DB`);
-              mergedTournaments[dbTournament.id] = {
-                ...TOURNAMENTS[dbTournament.id], // Start with local defaults
-                ...dbTournament, // Override with DB values
-              };
-            }
-          });
-          setTournaments(mergedTournaments);
-        }
-      } catch (err) {
-        console.error('Failed to fetch tournaments from DB:', err);
-        // Fall back to hardcoded tournaments
-      }
-    };
-    
-    fetchTournaments();
-  }, []);
-
-  // Fetch user's teams from database on load
-  useEffect(() => {
-    const fetchUserTeams = async () => {
-      if (!user?.id) {
-        setLoading(false);
-        return;
-      }
-      
-      console.log('📋 TournamentSelectPage: Fetching teams for user:', user.email);
-      
-      try {
-        const response = await teamsAPI.getAll({ userId: user.id });
-        if (response && response.teams) {
-          // Create a map of tournamentId -> team
-          const teamsMap = {};
-          response.teams.forEach(team => {
-            if (team && team.tournamentId) {
-              teamsMap[team.tournamentId] = team;
-            }
-          });
-          setUserTeams(teamsMap);
-          console.log('✅ Found teams:', Object.keys(teamsMap));
-        }
-      } catch (err) {
-        console.error('Failed to fetch user teams:', err);
-        setError(err.message);
-        // Don't block the page - just show tournaments without team status
-      } finally {
-        setLoading(false);
-      }
-    };
-    
-    fetchUserTeams();
-  }, [user?.id]);
-
-  // Check if user has a team for this tournament
-  const getUserTeamStatus = (tournamentId) => {
-    return !!userTeams[tournamentId];
-  };
-
-  return (
-    <div className="tournament-select-page">
-      <div className="tournament-container">
-        <div className="tournament-header">
-          <div className="logo-icon">🏏</div>
-          <h1>T20 Fantasy Cricket</h1>
-          <p>Select a Tournament</p>
-          {user && (
-            <div className="logged-in-as">
-              <span>👤 {user.name || user.email}</span>
-              <button className="btn-small btn-secondary" onClick={onLogout}>Logout</button>
-            </div>
-          )}
-        </div>
-        
-        {loading ? (
-          <div className="loading-spinner">Loading tournaments...</div>
-        ) : (
-          <div className="tournament-list">
-            {Object.values(tournaments || {}).map(tournament => {
-              if (!tournament || !tournament.id) return null;
-              const hasTeam = getUserTeamStatus(tournament.id);
-              const teams = tournament.teams || [];
-              return (
-                <div 
-                  key={tournament.id} 
-                  className={`tournament-card ${tournament.isTest ? 'test-tournament' : ''} ${hasTeam ? 'has-team' : ''}`}
-                  onClick={() => onSelectTournament(tournament)}
-                >
-                  <div className="tournament-badge">
-                    {tournament.isTest ? '🧪 TEST' : tournament.status === 'upcoming' ? '📅 UPCOMING' : '🔴 LIVE'}
-                  </div>
-                  {hasTeam && <div className="team-exists-badge">✓ Team Created</div>}
-                  <h3>{tournament.name}</h3>
-                  <p className="tournament-desc">{tournament.description}</p>
-                  <div className="tournament-dates">
-                    {tournament.startDate ? new Date(tournament.startDate).toLocaleDateString() : 'TBD'} - {tournament.endDate ? new Date(tournament.endDate).toLocaleDateString() : 'TBD'}
-                  </div>
-                  <div className="tournament-teams">
-                    {teams.slice(0, 6).join(' • ')}
-                    {teams.length > 6 && ` +${teams.length - 6} more`}
-                  </div>
-                  <button className="btn-primary btn-small">
-                    {hasTeam ? 'Continue' : tournament.isTest ? 'Start Test Mode' : 'Enter & Register'}
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
-
 // Login Page Component
 const LoginPage = ({ onLogin, onShowSignup }) => {
   const [email, setEmail] = useState('');
@@ -980,7 +848,7 @@ const TeamCreationPage = ({ user, tournament, onTeamCreated }) => {
 };
 
 // ============================================
-const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament, onRefreshPlayers, onRefreshTeams, onLogout, onBackToTournaments, onSwitchTournament, allTeams, allUsers, onDeleteTeam, onUpdateTeam, onDeleteUser }) => {
+const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament, onRefreshPlayers, onRefreshTeams, onLogout, allTeams, allUsers, onDeleteTeam, onUpdateTeam, onDeleteUser }) => {
   const [activeTab, setActiveTab] = useState('overview');
   
   // Local fantasy points calculator (mirrors backend rules)
@@ -1632,24 +1500,11 @@ const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament
         <div className="header-left">
           <div className="admin-badge">👑 ADMIN</div>
           <div>
-            <div className="tournament-dropdown-wrapper">
-              <select 
-                className="tournament-dropdown admin-dropdown"
-                value={tournament.id}
-                onChange={(e) => onSwitchTournament && onSwitchTournament(e.target.value)}
-              >
-                {Object.values(TOURNAMENTS).map(t => (
-                  <option key={t.id} value={t.id}>
-                    {t.name} {t.isTest ? '(Test)' : ''}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <h2 style={{ margin: 0, fontSize: '1.1rem' }}>{tournament.name}</h2>
             <p>League Administration</p>
           </div>
         </div>
         <div className="header-right">
-          <button className="btn-icon" onClick={onBackToTournaments} title="All Tournaments">🏆</button>
           <button className="btn-logout" onClick={onLogout} title="Logout">
             <span className="logout-icon">🚪</span>
             <span className="logout-text">Logout</span>
@@ -3492,7 +3347,7 @@ const AdminPanel = ({ user, tournament, players: playersProp, onUpdateTournament
 };
 
 // Main Dashboard Component  
-const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = [], onLogout, onUpdateTeam, onBackToTournaments, onSwitchTournament, onRefreshPlayers }) => {
+const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = [], onLogout, onUpdateTeam, onRefreshPlayers }) => {
   const [activeTab, setActiveTab] = useState('roster');
   const [showPlayerModal, setShowPlayerModal] = useState(false);
   const [selectedPosition, setSelectedPosition] = useState(null);
@@ -4541,19 +4396,7 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
           )}
           <div className="team-info">
             <h1>{team.name}</h1>
-            <div className="tournament-dropdown-wrapper">
-              <select 
-                className="tournament-dropdown"
-                value={tournament.id}
-                onChange={(e) => onSwitchTournament && onSwitchTournament(e.target.value)}
-              >
-                {Object.values(TOURNAMENTS).map(t => (
-                  <option key={t.id} value={t.id}>
-                    {t.shortName} {t.isTest ? '(Test)' : ''}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <span className="tournament-label" style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{tournament.name}</span>
           </div>
         </div>
         <div className="header-right">
@@ -4585,7 +4428,6 @@ const Dashboard = ({ user, team, tournament, players: playersProp, allTeams = []
             <span className="points-value" style={{ fontSize: '1.2rem', color: 'var(--text-muted)' }}>{Math.round(team.totalPoints)}</span>
             <span className="points-label">Total</span>
           </div>
-          <button className="btn-icon" onClick={onBackToTournaments} title="All Tournaments">🏆</button>
           <button className="btn-logout" onClick={onLogout} title="Logout">
             <span className="logout-icon">🚪</span>
             <span className="logout-text">Logout</span>
@@ -5608,26 +5450,40 @@ export default function App() {
       const parsedUser = JSON.parse(savedUser);
       setUser(parsedUser);
       
-      // Always go to tournament selection on app load
-      // The tournament page will handle loading teams from API
-      setCurrentPage('tournamentSelect');
+      // Go straight to the app with auto-selected tournament
+      enterTournament(parsedUser);
     }
     // If not logged in, stays on login page (default)
   }, []);
 
-  const handleSelectTournament = async (tournament) => {
-    console.log(`\n🏆 === SELECTING TOURNAMENT: ${tournament.id} ===`);
-    console.log(`   User: ${user?.email} (ID: ${user?.id})`);
+  // Auto-enter the single tournament (T20 World Cup 2026)
+  const enterTournament = async (userData = user) => {
+    let tournament = TOURNAMENTS.t20_wc_2026;
+    console.log(`\n🏆 === ENTERING TOURNAMENT: ${tournament.id} ===`);
+    console.log(`   User: ${userData?.email} (ID: ${userData?.id})`);
+    
+    // Merge tournament data from DB (dates, matches, etc.)
+    try {
+      const response = await tournamentsAPI.getAll();
+      if (response?.tournaments?.length > 0) {
+        const dbTournament = response.tournaments.find(t => t.id === tournament.id);
+        if (dbTournament) {
+          tournament = { ...tournament, ...dbTournament };
+          console.log(`   📅 Merged DB data: ${dbTournament.matches?.length || 0} matches`);
+        }
+      }
+    } catch (err) {
+      console.log('⚠️ Could not fetch tournament from DB:', err.message);
+    }
     
     setSelectedTournament(tournament);
-    // No localStorage - everything from DB
     
     // Load players for this tournament
     setIsLoading(true);
     await loadPlayers(tournament.id);
     
     // Admin goes to admin panel
-    if (user?.isAdmin) {
+    if (userData?.isAdmin) {
       console.log(`   → Admin user, going to admin panel`);
       setIsLoading(false);
       setCurrentPage('admin');
@@ -5637,7 +5493,7 @@ export default function App() {
     // Get user's team from API
     let userTeam = null;
     try {
-      const teamsResponse = await teamsAPI.getUserTeam(user?.id, tournamentKey);
+      const teamsResponse = await teamsAPI.getUserTeam(userData?.id, tournament.id);
       if (teamsResponse.teams && teamsResponse.teams.length > 0) {
         userTeam = teamsResponse.teams[0];
         console.log('✅ Found team from API:', userTeam.name);
@@ -5658,15 +5514,7 @@ export default function App() {
       setTeam(null);
       setCurrentPage('createTeam');
     }
-    console.log(`🏆 === END TOURNAMENT SELECTION ===\n`);
-  };
-  
-  // Switch tournament (dropdown handler)
-  const handleSwitchTournament = (tournamentId) => {
-    const tournament = Object.values(TOURNAMENTS).find(t => t.id === tournamentId);
-    if (tournament) {
-      handleSelectTournament(tournament);
-    }
+    console.log(`🏆 === END TOURNAMENT ENTRY ===\n`);
   };
 
   const handleLogin = (userData) => {
@@ -5675,9 +5523,8 @@ export default function App() {
     setUser(userData);
     localStorage.setItem('t20fantasy_user', JSON.stringify(userData));
     
-    // Go to tournament selection
-    setSelectedTournament(null);
-    setCurrentPage('tournamentSelect');
+    // Go straight to the app
+    enterTournament(userData);
   };
 
   const handleSignup = (userData) => {
@@ -5686,9 +5533,8 @@ export default function App() {
     setUser(userData);
     localStorage.setItem('t20fantasy_user', JSON.stringify(userData));
     
-    // Go to tournament selection
-    setSelectedTournament(null);
-    setCurrentPage('tournamentSelect');
+    // Go straight to the app
+    enterTournament(userData);
   };
 
   const handleTeamCreated = async (teamData) => {
@@ -5797,26 +5643,11 @@ export default function App() {
     setCurrentPage('login');
   };
 
-  const handleBackToTournaments = () => {
-    // Keep user logged in, reset tournament state
-    setSelectedTournament(null);
-    setTeam(null);
-    
-    setCurrentPage('tournamentSelect');
-  };
-
   // Use API-loaded players - no fallback, DB is required
   const playerPool = players.length > 0 ? players : [];
 
   return (
     <>
-      {currentPage === 'tournamentSelect' && (
-        <TournamentSelectPage 
-          onSelectTournament={handleSelectTournament}
-          user={user}
-          onLogout={handleLogout}
-        />
-      )}
       {currentPage === 'login' && (
         <LoginPage 
           onLogin={handleLogin} 
@@ -5874,8 +5705,6 @@ export default function App() {
             }
           }}
           onLogout={handleLogout}
-          onBackToTournaments={handleBackToTournaments}
-          onSwitchTournament={handleSwitchTournament}
           allTeams={allTeams}
           allUsers={allUsers}
           onDeleteTeam={handleDeleteTeam}
@@ -5892,8 +5721,6 @@ export default function App() {
           allTeams={allTeams}
           onLogout={handleLogout}
           onUpdateTeam={handleUpdateTeam}
-          onBackToTournaments={handleBackToTournaments}
-          onSwitchTournament={handleSwitchTournament}
           onRefreshPlayers={async () => {
             console.log('🔄 Refreshing players from Dashboard request...');
             if (selectedTournament?.id) {
